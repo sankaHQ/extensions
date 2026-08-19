@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PostgreSQL connector: source + destination roles for Ferry migrations.
+"""PostgreSQL connector: source + destination roles for Sanka Migrate migrations.
 
 The DSN arrives in ``settings["connection"]`` (``postgres://``,
 ``postgresql://``, or a libpq keyword string); ``settings["schema"]`` picks
@@ -11,9 +11,9 @@ detailed typing, pagination, and identity semantics.
 
 from __future__ import annotations
 
-from ferry.connector import ConnectorRegistration
-from ferry_connector_postgres._destination import PostgresDestination
-from ferry_connector_postgres._source import PostgresSource
+from sanka.connector import ConnectorRegistration
+from sanka_connector_postgres._destination import PostgresDestination
+from sanka_connector_postgres._source import PostgresSource
 
 __all__ = ["CONNECTOR", "PostgresDestination", "PostgresSource"]
 

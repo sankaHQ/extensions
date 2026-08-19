@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from ferry.connector import (
+from sanka.connector import (
     ConfigurationError,
     ConnectorRegistration,
     Credentials,

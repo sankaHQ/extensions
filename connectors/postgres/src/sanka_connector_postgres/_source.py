@@ -5,7 +5,7 @@ Reads BASE TABLEs from one schema. Identity is the single-column primary key;
 tables with a composite, missing, or bytea primary key are inventoried with a
 warning and no identity fields so the planner skips them. ``read_records``
 keyset-paginates on the primary key (``WHERE pk > cursor ORDER BY pk``), and
-:class:`ferry.connector.SupportsSnapshotBounds` freezes a run's scope at
+:class:`sanka.connector.SupportsSnapshotBounds` freezes a run's scope at
 ``MAX(pk)``. Cursors and bounds travel as JSON-safe strings; see
 ``_base.cursor_param`` for how they are cast back.
 """
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 import psycopg
 from psycopg import sql
 
-from ferry.connector import (
+from sanka.connector import (
     Credentials,
     DataError,
     FieldSchema,
@@ -29,7 +29,7 @@ from ferry.connector import (
     SourceObject,
     UnsupportedFeatureError,
 )
-from ferry_connector_postgres._base import (
+from sanka_connector_postgres._base import (
     SKIPPED_BINARY,
     PostgresConnectorBase,
     cursor_param,
@@ -356,7 +356,7 @@ def _reject_filter(source_filter: SourceFilter | None) -> None:
 
 
 if TYPE_CHECKING:
-    from ferry.connector import SourceConnector, SupportsRecordCounts, SupportsSnapshotBounds
+    from sanka.connector import SourceConnector, SupportsRecordCounts, SupportsSnapshotBounds
 
     _protocol_source: SourceConnector = PostgresSource()
     _protocol_counts: SupportsRecordCounts = PostgresSource()

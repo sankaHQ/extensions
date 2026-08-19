@@ -9,7 +9,7 @@ per page through the v4 batch association read and land on each record as a
 list of target ids under the same key.
 
 Source-side filters are not supported yet and raise
-:class:`ferry.connector.UnsupportedFeatureError` rather than being silently
+:class:`sanka.connector.UnsupportedFeatureError` rather than being silently
 ignored.
 """
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ferry.connector import (
+from sanka.connector import (
     Credentials,
     Inventory,
     RecordPage,
@@ -25,7 +25,7 @@ from ferry.connector import (
     SourceObject,
     UnsupportedFeatureError,
 )
-from ferry_connector_hubspot._base import (
+from sanka_connector_hubspot._base import (
     OBJECTS_BY_CANONICAL_TYPE,
     HubSpotGateway,
     bounded_map,
@@ -92,8 +92,8 @@ class HubSpotSource:
     ) -> RecordPage:
         if source_filter is not None:
             raise UnsupportedFeatureError(
-                "HubSpot source filters are not supported by Ferry yet.",
-                details={"code": "FERRY_SOURCE_FILTER_UNSUPPORTED"},
+                "HubSpot source filters are not supported by Sanka Migrate yet.",
+                details={"code": "SANKA_MIGRATE_SOURCE_FILTER_UNSUPPORTED"},
             )
         async with hubspot_errors():
             association_types = sorted(

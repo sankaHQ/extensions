@@ -2,9 +2,9 @@
 """Salesforce REST gateway — the HTTP surface the source connector needs.
 
 A trimmed port of the production Salesforce gateway: only the read-only calls
-the Ferry source adapter makes (SOQL queries, object describes, the sObject
+the Sanka Migrate source adapter makes (SOQL queries, object describes, the sObject
 catalog, and the active-user directory), rewritten onto
-:class:`ferry.connector.Credentials`.
+:class:`sanka.connector.Credentials`.
 
 Authentication is an OAuth access token (``credentials.access_token``) against
 the org's instance URL (``settings["instance_url"]``); both are required.
@@ -18,7 +18,7 @@ rotate refresh tokens on this grant by default; if your connected app does,
 persist :class:`TokenRefreshResult.refresh_token` yourself — the gateway has
 no credential store to write back to.
 
-HTTP failures map onto the Ferry error taxonomy: 401 →
+HTTP failures map onto the Sanka Migrate error taxonomy: 401 →
 :class:`AuthenticationError` (after any refresh attempt), 403 →
 :class:`PermissionDeniedError`, 404 → :class:`NotFoundError`, 429 →
 :class:`RateLimitError` (carrying ``Retry-After`` when the org sends it),
@@ -34,7 +34,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from ferry.connector import (
+from sanka.connector import (
     AuthenticationError,
     ConfigurationError,
     ConnectorError,

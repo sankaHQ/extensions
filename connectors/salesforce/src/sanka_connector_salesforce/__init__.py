@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Salesforce connector: a source role for Ferry migrations.
+"""Salesforce connector: a source role for Sanka Migrate migrations.
 
 Reads a Salesforce org through the REST API: sObject discovery and describes,
 exact record counts, an active-user owner directory, and keyset-paginated
@@ -15,13 +15,13 @@ detailed pagination, filtering, and error-mapping semantics.
 
 from __future__ import annotations
 
-from ferry.connector import ConnectorRegistration
-from ferry_connector_salesforce._gateway import (
+from sanka.connector import ConnectorRegistration
+from sanka_connector_salesforce._gateway import (
     HttpSalesforceGateway,
     SalesforceGateway,
     TokenRefreshResult,
 )
-from ferry_connector_salesforce._source import SalesforceSource
+from sanka_connector_salesforce._source import SalesforceSource
 
 __all__ = [
     "CONNECTOR",

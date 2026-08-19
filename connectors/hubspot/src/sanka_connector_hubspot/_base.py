@@ -2,16 +2,16 @@
 """Shared internals for the HubSpot connector.
 
 The HTTP gateway (a faithful port of the production Sanka adapter's gateway
-surface, reduced to the endpoints the connector uses), the HubSpot → Ferry
+surface, reduced to the endpoints the connector uses), the HubSpot → Sanka Migrate
 error mapping, and the helpers both roles share: canonical-type ↔ object-type
 tables, custom-object schema matching, property-type mapping, and inventory
 assembly.
 
-Authentication is a bearer token in :attr:`ferry.connector.Credentials.access_token`
+Authentication is a bearer token in :attr:`sanka.connector.Credentials.access_token`
 — a HubSpot private-app token, or an OAuth access token something else keeps
 fresh. The connector never performs OAuth refresh itself: it is stateless per
 call, and token refresh belongs to the runtime's credential provider
-(:class:`ferry.connector.SupportsCredentialRefresh`).
+(:class:`sanka.connector.SupportsCredentialRefresh`).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from urllib.parse import quote
 
 import httpx
 
-from ferry.connector import (
+from sanka.connector import (
     AuthenticationError,
     ConflictError,
     ConnectorError,
@@ -53,7 +53,7 @@ HUBSPOT_CRM_PIPELINES_URL: Final = f"{HUBSPOT_API_BASE_URL}/crm/v3/pipelines/{{o
 
 HUBSPOT_BATCH_READ_LIMIT: Final = 100
 
-#: Standard HubSpot object types by Ferry canonical type.
+#: Standard HubSpot object types by Sanka Migrate canonical type.
 OBJECTS_BY_CANONICAL_TYPE: Final[dict[str, str]] = {
     "company": "companies",
     "contact": "contacts",
@@ -102,7 +102,7 @@ class HubSpotRequestError(RuntimeError):
 
 
 def mapped_error(error: HubSpotRequestError) -> ConnectorError:
-    """Map an internal gateway failure onto the Ferry error taxonomy."""
+    """Map an internal gateway failure onto the Sanka Migrate error taxonomy."""
     message = str(error)
     status = error.status_code
     details: dict[str, Any] = {}
@@ -149,7 +149,7 @@ def mapped_error(error: HubSpotRequestError) -> ConnectorError:
 
 @asynccontextmanager
 async def hubspot_errors() -> AsyncIterator[None]:
-    """Re-raise internal gateway failures as Ferry connector errors.
+    """Re-raise internal gateway failures as Sanka Migrate connector errors.
 
     Wraps only the outermost public SPI methods: the connector's internals
     (retry control, the invalid-email fallback, 409 reconciliation) inspect
@@ -191,7 +191,7 @@ async def bounded_map[InputT, OutputT](
 
 
 class HubSpotGateway:
-    """Thin async HTTP client for the HubSpot CRM v3/v4 endpoints Ferry uses.
+    """Thin async HTTP client for the HubSpot CRM v3/v4 endpoints Sanka Migrate uses.
 
     One :class:`httpx.AsyncClient` per request (the production-proven shape —
     no cross-call connection state), with an injectable transport so tests
@@ -692,7 +692,7 @@ def hubspot_property_type(source_type: str | None) -> tuple[str, str]:
         return "string", "textarea"
     if normalized in {"phone", "phonenumber"}:
         return "string", "phonenumber"
-    # Picklist values are not included in the Ferry inventory yet. Preserve the
+    # Picklist values are not included in the Sanka Migrate inventory yet. Preserve the
     # source value as text instead of creating an empty HubSpot enumeration.
     return "string", "text"
 

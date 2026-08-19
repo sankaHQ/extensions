@@ -11,7 +11,7 @@ precision → text ladder with ``ALTER COLUMN … TYPE … USING`` instead of
 failing the run — SQLite's everything-fits semantics on a typed store, without
 losing rows already written. Identity columns get a
 ``CREATE UNIQUE INDEX IF NOT EXISTS``. Writes honor the identity fields and
-conflict policy from :class:`ferry.connector.WriteOptions` via an identity
+conflict policy from :class:`sanka.connector.WriteOptions` via an identity
 pre-SELECT, mirroring the sqlite connector.
 
 ``destination_record_id`` is the identity value as a string when exactly one
@@ -30,7 +30,7 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Json
 
-from ferry.connector import (
+from sanka.connector import (
     Credentials,
     FieldSchema,
     Inventory,
@@ -40,7 +40,7 @@ from ferry.connector import (
     WriteOptions,
     WriteResult,
 )
-from ferry_connector_postgres._base import (
+from sanka_connector_postgres._base import (
     PostgresConnectorBase,
     identifier,
     pg_errors,
@@ -109,7 +109,7 @@ def _write_param(column_type: str, value: Any) -> Any:
 
 
 def _index_name(table: str, identity_columns: list[str]) -> str:
-    base = f"{table}_{'_'.join(identity_columns)}_ferry_uq"
+    base = f"{table}_{'_'.join(identity_columns)}_sanka_uq"
     if len(base) <= _MAX_INDEX_NAME_LENGTH:
         return base
     digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:8]
@@ -432,6 +432,6 @@ class PostgresDestination(PostgresConnectorBase):
 
 
 if TYPE_CHECKING:
-    from ferry.connector import DestinationConnector
+    from sanka.connector import DestinationConnector
 
     _protocol_destination: DestinationConnector = PostgresDestination()

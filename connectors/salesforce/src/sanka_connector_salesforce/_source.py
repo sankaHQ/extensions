@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Salesforce source connector.
 
-A faithful port of the production Salesforce → Ferry source adapter. Objects
+A faithful port of the production Salesforce → Sanka Migrate source adapter. Objects
 are discovered from the org's sObject catalog (queryable, non-deprecated
 types), inventoried with a REST describe plus ``SELECT COUNT()``, and read
 with keyset SOQL pagination on ``Id`` (``WHERE Id > cursor [AND Id <= bound]
@@ -9,14 +9,14 @@ ORDER BY Id ASC LIMIT n``, page size clamped to 1-200). Identity is always
 ``Id``. All reads go through the ``queryAll`` endpoint, so archived and
 recycle-bin records are included — exactly like the production adapter.
 
-Capabilities: exact counts (:class:`ferry.connector.SupportsRecordCounts`),
+Capabilities: exact counts (:class:`sanka.connector.SupportsRecordCounts`),
 snapshot bounds on the maximum ``Id``
-(:class:`ferry.connector.SupportsSnapshotBounds`), and the active-user
-directory (:class:`ferry.connector.SupportsOwnerDirectory`). Source filters
+(:class:`sanka.connector.SupportsSnapshotBounds`), and the active-user
+directory (:class:`sanka.connector.SupportsOwnerDirectory`). Source filters
 support ``equals`` on a boolean field, never on ``Id``. Object, field, cursor,
 and bound values are validated against strict character classes before they
 are interpolated into SOQL — invalid input raises
-:class:`ferry.connector.ValidationFailedError` instead of reaching the org.
+:class:`sanka.connector.ValidationFailedError` instead of reaching the org.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import re
 from collections.abc import Awaitable, Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
-from ferry.connector import (
+from sanka.connector import (
     ConnectorError,
     Credentials,
     FieldSchema,
@@ -39,7 +39,7 @@ from ferry.connector import (
     UnsupportedFeatureError,
     ValidationFailedError,
 )
-from ferry_connector_salesforce._gateway import HttpSalesforceGateway, SalesforceGateway
+from sanka_connector_salesforce._gateway import HttpSalesforceGateway, SalesforceGateway
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _CURSOR_RE = re.compile(r"^[A-Za-z0-9]{1,64}$")
@@ -91,7 +91,7 @@ def _record_count(payload: dict[str, Any]) -> int:
 
 
 class SalesforceSource:
-    """Reads a Salesforce org as a Ferry migration source."""
+    """Reads a Salesforce org as a Sanka Migrate migration source."""
 
     provider = "salesforce"
     binding_kind = "channel"
@@ -377,7 +377,7 @@ class SalesforceSource:
         # Salesforce can split a query response before the SOQL LIMIT when a
         # wide projection reaches its response-size boundary. In that case the
         # first response contains fewer than ``safe_limit`` rows while
-        # ``done`` is false and ``nextRecordsUrl`` is present. Ferry uses an Id
+        # ``done`` is false and ``nextRecordsUrl`` is present. Sanka Migrate uses an Id
         # keyset cursor instead of Salesforce's opaque locator, so advancing
         # from the last returned Id remains deterministic across retries.
         provider_has_more = payload.get("done") is False or bool(payload.get("nextRecordsUrl"))
@@ -402,7 +402,7 @@ def _validated_filter_field(source_filter: SourceFilter) -> str:
 
 
 if TYPE_CHECKING:
-    from ferry.connector import (
+    from sanka.connector import (
         SourceConnector,
         SupportsOwnerDirectory,
         SupportsRecordCounts,

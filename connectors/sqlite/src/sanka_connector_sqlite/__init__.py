@@ -9,7 +9,7 @@ As a source, every user table is a migratable object: fields come from
 As a destination, tables are created lazily from the records written to them
 (TEXT-affinity columns; complex values JSON-encoded), and widened with
 ``ALTER TABLE`` when new fields appear. Writes honor the identity fields and
-conflict policy from :class:`ferry.connector.WriteOptions`.
+conflict policy from :class:`sanka.connector.WriteOptions`.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from ferry.connector import (
+from sanka.connector import (
     ConfigurationError,
     ConnectorRegistration,
     Credentials,

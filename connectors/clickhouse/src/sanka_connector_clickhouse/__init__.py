@@ -10,8 +10,8 @@ ClickHouse forbids ``Nullable`` ORDER BY columns. Fields that appear later are
 added with ``ALTER TABLE … ADD COLUMN IF NOT EXISTS`` as ``Nullable``.
 
 Engine choice is deliberate: when the run's
-:class:`ferry.connector.WriteOptions` declare identity fields, tables are
-created as ``ReplacingMergeTree ORDER BY (<identity columns>)``. Ferry's
+:class:`sanka.connector.WriteOptions` declare identity fields, tables are
+created as ``ReplacingMergeTree ORDER BY (<identity columns>)``. Sanka Migrate's
 engine guarantees at-least-once writes reconciled against an identity ledger,
 so a re-applied migration inserts a fresh *version* of each row rather than
 mutating in place — exactly the contract ReplacingMergeTree implements by
@@ -52,7 +52,7 @@ import clickhouse_connect
 from clickhouse_connect.driver.client import Client
 from clickhouse_connect.driver.exceptions import InterfaceError, OperationalError
 
-from ferry.connector import (
+from sanka.connector import (
     AuthenticationError,
     BatchWriteInput,
     BatchWriteResult,
@@ -268,7 +268,7 @@ def _error_codes(exc: Exception) -> set[int]:
 
 
 def _map_error(exc: Exception, *, action: str) -> ConnectorError:
-    """Map a clickhouse-connect exception onto the Ferry error taxonomy."""
+    """Map a clickhouse-connect exception onto the Sanka Migrate error taxonomy."""
     message = f"clickhouse {action} failed: {exc}"
     codes = _error_codes(exc)
     text = str(exc)

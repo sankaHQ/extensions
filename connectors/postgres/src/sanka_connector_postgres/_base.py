@@ -3,7 +3,7 @@
 
 Connection management (one cached ``psycopg.AsyncConnection`` per DSN per
 event loop, autocommit), identifier sanitization, source type-family mapping,
-JSON-safe value conversion, cursor handling, and the psycopg → Ferry error
+JSON-safe value conversion, cursor handling, and the psycopg → Sanka Migrate error
 mapping. Both roles subclass :class:`PostgresConnectorBase`.
 """
 
@@ -21,7 +21,7 @@ from typing import Any, Final
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 
-from ferry.connector import (
+from sanka.connector import (
     AuthenticationError,
     ConfigurationError,
     ConflictError,
@@ -71,7 +71,7 @@ def identifier(value: str, *, kind: str) -> str:
 
 
 def field_family(data_type: str) -> str:
-    """Map an information_schema ``data_type`` to a Ferry field type family."""
+    """Map an information_schema ``data_type`` to a Sanka Migrate field type family."""
     lowered = data_type.lower()
     if lowered in _NUMBER_TYPES:
         return "number"
@@ -148,7 +148,7 @@ def cursor_param(data_type: str, text: str) -> Any:
 
 
 def mapped_error(error: psycopg.Error, *, context: str) -> ConnectorError:
-    """Map a psycopg exception onto the Ferry error taxonomy."""
+    """Map a psycopg exception onto the Sanka Migrate error taxonomy."""
     message = f"{context}: {error}"
     sqlstate = error.sqlstate or ""
     if sqlstate.startswith("28") or "authentication failed" in str(error).lower():
@@ -171,7 +171,7 @@ def mapped_error(error: psycopg.Error, *, context: str) -> ConnectorError:
 
 @asynccontextmanager
 async def pg_errors(context: str) -> AsyncIterator[None]:
-    """Re-raise psycopg failures as Ferry connector errors."""
+    """Re-raise psycopg failures as Sanka Migrate connector errors."""
     try:
         yield
     except psycopg.Error as error:

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ferry.connector import (
+from sanka.connector import (
     ConfigurationError,
     ConnectorRegistration,
     Credentials,

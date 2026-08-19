@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """HubSpot destination connector.
 
-A faithful port of the production Sanka HubSpot Ferry adapter: conflict
+A faithful port of the production Sanka HubSpot Sanka Migrate adapter: conflict
 policies via identity search, 100-record batch create/update/upsert with
 ``objectWriteTraceId`` reconciliation, v4 association batches, inline
 property / pipeline / custom-object provisioning with a pure dry run, the
@@ -13,18 +13,18 @@ Signature adaptations versus the production adapter (semantics preserved):
 
 - The SPI bundles ``conflict_policy`` / ``identity_fields`` /
   ``invalid_email_policy`` / ``invalid_email_audit_field`` into
-  :class:`ferry.connector.WriteOptions` instead of separate keyword
+  :class:`sanka.connector.WriteOptions` instead of separate keyword
   arguments.
 
 Optional provisioning fields the SDK leaves to the connector when omitted:
 
-- :class:`ferry.connector.PipelineStage` ``probability`` is used verbatim on
+- :class:`sanka.connector.PipelineStage` ``probability`` is used verbatim on
   created deal-pipeline stages; a stage without one falls back to a
   deterministic linear ramp (first stage ``0.0`` … last stage ``1.0`` —
   HubSpot requires a probability). Pipeline compatibility compares the
   probability of every stage that carries one and ignores it for stages that
   do not.
-- :class:`ferry.connector.CustomObjectDefinition` ``properties`` are created
+- :class:`sanka.connector.CustomObjectDefinition` ``properties`` are created
   with the schema (type-mapped like ``reconcile_properties``, with
   ``required``/``unique``/``searchable`` flags); the primary display property
   HubSpot requires is synthesized as a text property only when the list does
@@ -48,7 +48,7 @@ from typing import Any, Literal
 
 import httpx
 
-from ferry.connector import (
+from sanka.connector import (
     BatchRelationshipWriteResult,
     BatchWriteInput,
     BatchWriteResult,
@@ -70,7 +70,7 @@ from ferry.connector import (
     WriteOptions,
     WriteResult,
 )
-from ferry_connector_hubspot._base import (
+from sanka_connector_hubspot._base import (
     DEFAULT_CANONICAL_TYPES,
     IDENTITY_FIELDS,
     OBJECTS_BY_CANONICAL_TYPE,
@@ -227,7 +227,7 @@ def _custom_object_schema_payload(
                 "fieldType": "text",
                 "hasUniqueValue": False,
                 "displayOrder": 0,
-                "description": f"Migrated from {definition.source_object} with Ferry.",
+                "description": f"Migrated from {definition.source_object} with Sanka Migrate.",
             }
         )
     offset = len(properties)
@@ -240,7 +240,7 @@ def _custom_object_schema_payload(
             "fieldType": field_type,
             "hasUniqueValue": prop.unique,
             "displayOrder": offset + index,
-            "description": f"Migrated from {prop.source_field} with Ferry.",
+            "description": f"Migrated from {prop.source_field} with Sanka Migrate.",
         }
         if target_type == "bool":
             property_payload["options"] = boolean_property_options()
@@ -341,14 +341,14 @@ def _contact_email_fallback_properties(
     normalized_audit_field = str(audit_field or "").strip()
     if not normalized_audit_field or normalized_audit_field == "email":
         raise ValidationFailedError(
-            "An audit property is required before Ferry can omit an invalid HubSpot email.",
-            details={"code": "FERRY_INVALID_EMAIL_AUDIT_FIELD_REQUIRED"},
+            "An audit property is required before Sanka Migrate can omit an invalid HubSpot email.",
+            details={"code": "SANKA_MIGRATE_INVALID_EMAIL_AUDIT_FIELD_REQUIRED"},
         ) from error
     if normalized_audit_field in identity_fields:
         raise ValidationFailedError(
             "The email audit property must not overwrite a reviewed identity field.",
             details={
-                "code": "FERRY_INVALID_EMAIL_AUDIT_FIELD_IDENTITY_CONFLICT",
+                "code": "SANKA_MIGRATE_INVALID_EMAIL_AUDIT_FIELD_IDENTITY_CONFLICT",
                 "objectType": object_type,
                 "auditField": normalized_audit_field,
             },
@@ -363,9 +363,10 @@ def _contact_email_fallback_properties(
     ]
     if not alternate_identity_fields:
         raise ValidationFailedError(
-            "An alternate identity is required before Ferry can omit an invalid HubSpot email.",
+            "An alternate identity is required before Sanka Migrate can omit "
+            "an invalid HubSpot email.",
             details={
-                "code": "FERRY_INVALID_EMAIL_ALTERNATE_IDENTITY_REQUIRED",
+                "code": "SANKA_MIGRATE_INVALID_EMAIL_ALTERNATE_IDENTITY_REQUIRED",
                 "objectType": object_type,
             },
         ) from error
@@ -382,7 +383,7 @@ def _contact_email_fallback_message(
 ) -> str:
     if kind == "duplicate":
         return (
-            "HubSpot email uniqueness conflict: Ferry matched an existing record with an "
+            "HubSpot email uniqueness conflict: Sanka Migrate matched an existing record with an "
             "alternate identity and left it unchanged."
             if status == "skipped"
             else (
@@ -391,11 +392,11 @@ def _contact_email_fallback_message(
             )
         )
     return (
-        "HubSpot rejected the standard email value; Ferry matched an existing record "
+        "HubSpot rejected the standard email value; Sanka Migrate matched an existing record "
         "with an alternate identity and left it unchanged."
         if status == "skipped"
         else (
-            "HubSpot rejected the standard email value; Ferry preserved it in the "
+            "HubSpot rejected the standard email value; Sanka Migrate preserved it in the "
             "configured audit property and continued with an alternate identity."
         )
     )
@@ -941,7 +942,7 @@ class HubSpotDestination:
                     "label": definition.label,
                     "type": target_type,
                     "fieldType": field_type,
-                    "description": f"Migrated from {definition.source_field} with Ferry.",
+                    "description": f"Migrated from {definition.source_field} with Sanka Migrate.",
                     "hidden": False,
                 }
                 if target_type == "bool":
@@ -1025,7 +1026,7 @@ class HubSpotDestination:
                 "A custom HubSpot object route requires an explicit identity field "
                 "before existing records can be handled safely.",
                 details={
-                    "code": "FERRY_DESTINATION_IDENTITY_REQUIRED",
+                    "code": "SANKA_MIGRATE_DESTINATION_IDENTITY_REQUIRED",
                     "objectType": object_type,
                 },
             )
@@ -1040,7 +1041,7 @@ class HubSpotDestination:
                 "A custom HubSpot object record requires a non-empty identity value "
                 "before existing records can be handled safely.",
                 details={
-                    "code": "FERRY_DESTINATION_IDENTITY_VALUE_REQUIRED",
+                    "code": "SANKA_MIGRATE_DESTINATION_IDENTITY_VALUE_REQUIRED",
                     "objectType": object_type,
                     "identityFields": effective_identity_fields,
                 },
@@ -1122,8 +1123,8 @@ class HubSpotDestination:
         trace_ids = [record.trace_id for record in records]
         if len(set(trace_ids)) != len(trace_ids):
             raise ValidationFailedError(
-                "Ferry destination batch trace ids must be unique.",
-                details={"code": "FERRY_DESTINATION_BATCH_TRACE_DUPLICATE"},
+                "Sanka Migrate destination batch trace ids must be unique.",
+                details={"code": "SANKA_MIGRATE_DESTINATION_BATCH_TRACE_DUPLICATE"},
             )
         effective_identity_fields = list(
             dict.fromkeys(identity_fields or IDENTITY_FIELDS.get(object_type, ()))
@@ -1266,7 +1267,7 @@ class HubSpotDestination:
         if not destination_record_id:
             raise DataError(
                 "HubSpot did not return an id for the created record.",
-                details={"code": "FERRY_DESTINATION_RECORD_ID_MISSING"},
+                details={"code": "SANKA_MIGRATE_DESTINATION_RECORD_ID_MISSING"},
             )
         return WriteResult(
             status="created",
@@ -1288,7 +1289,7 @@ class HubSpotDestination:
                 "A custom HubSpot object route requires an explicit identity field "
                 "before existing records can be handled safely.",
                 details={
-                    "code": "FERRY_DESTINATION_IDENTITY_REQUIRED",
+                    "code": "SANKA_MIGRATE_DESTINATION_IDENTITY_REQUIRED",
                     "objectType": object_type,
                 },
             )
@@ -1297,7 +1298,7 @@ class HubSpotDestination:
                 "A custom HubSpot object record requires a non-empty identity value "
                 "before existing records can be handled safely.",
                 details={
-                    "code": "FERRY_DESTINATION_IDENTITY_VALUE_REQUIRED",
+                    "code": "SANKA_MIGRATE_DESTINATION_IDENTITY_VALUE_REQUIRED",
                     "objectType": object_type,
                     "identityFields": identity_fields,
                 },
@@ -1684,7 +1685,7 @@ class HubSpotDestination:
         ):
             raise ValidationFailedError(
                 "HubSpot association category and type id must be provided together.",
-                details={"code": "FERRY_HUBSPOT_ASSOCIATION_TYPE_INVALID"},
+                details={"code": "SANKA_MIGRATE_HUBSPOT_ASSOCIATION_TYPE_INVALID"},
             )
         async with hubspot_errors():
             return await self._with_provider_control(
@@ -1781,7 +1782,7 @@ class HubSpotDestination:
                         raise TransientProviderError(
                             message,
                             retryable=False,
-                            details={"code": "FERRY_HUBSPOT_ASSOCIATION_BATCH_FAILED"},
+                            details={"code": "SANKA_MIGRATE_HUBSPOT_ASSOCIATION_BATCH_FAILED"},
                         )
                 except Exception as exc:
                     for relationship in chunk:
