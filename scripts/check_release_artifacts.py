@@ -12,6 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / "release" / "all"
 
 
+def _is_distribution(path: Path) -> bool:
+    return path.suffix == ".whl" or path.name.endswith(".tar.gz")
+
+
 def _wheel_metadata(wheel: Path) -> tuple[email.message.Message, str]:
     with zipfile.ZipFile(wheel) as archive:
         metadata_name = next(
@@ -25,6 +29,29 @@ def _wheel_metadata(wheel: Path) -> tuple[email.message.Message, str]:
 
 def main() -> int:
     errors: list[str] = []
+    unexpected = sorted(path.name for path in RELEASE.iterdir() if not _is_distribution(path))
+    if unexpected:
+        errors.append(f"combined release directory contains non-distributions: {unexpected}")
+
+    package_root = RELEASE.parent / "packages"
+    package_directories = sorted(path for path in package_root.iterdir() if path.is_dir())
+    if len(package_directories) != 9:
+        errors.append(f"expected 9 package release directories, found {len(package_directories)}")
+    for package_directory in package_directories:
+        package_files = sorted(path for path in package_directory.iterdir() if path.is_file())
+        package_unexpected = [path.name for path in package_files if not _is_distribution(path)]
+        if package_unexpected:
+            errors.append(
+                f"{package_directory.name} publish directory contains non-distributions: "
+                f"{package_unexpected}"
+            )
+        package_artifacts = [path for path in package_files if _is_distribution(path)]
+        if len(package_artifacts) != 2:
+            errors.append(
+                f"{package_directory.name} publish directory expected 2 distributions, "
+                f"found {len(package_artifacts)}"
+            )
+
     wheels = sorted(RELEASE.glob("*.whl"))
     sdists = sorted(RELEASE.glob("*.tar.gz"))
     if len(wheels) != 9:
