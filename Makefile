@@ -3,7 +3,7 @@
 check:
 	uv run ruff check .
 	uv run ruff format --check .
-	uv run mypy packages
+	uv run mypy packages scripts
 	uv run python scripts/check_boundaries.py
 	uv run pytest
 

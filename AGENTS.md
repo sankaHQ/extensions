@@ -22,7 +22,7 @@ distributions used by the Sanka migration runtime.
 uv sync --all-packages
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy packages
+uv run mypy packages scripts
 uv run pytest
 ```
 

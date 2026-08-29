@@ -29,4 +29,5 @@ make check
 ```
 
 See [Connector development](docs/connector-development.md) for the interface
-boundary and provider rules.
+boundary and provider rules. See [Releasing](docs/releasing.md) for the
+SDK-first, trusted-publishing release gate.

@@ -26,8 +26,11 @@ def _wheel_metadata(wheel: Path) -> tuple[email.message.Message, str]:
 def main() -> int:
     errors: list[str] = []
     wheels = sorted(RELEASE.glob("*.whl"))
+    sdists = sorted(RELEASE.glob("*.tar.gz"))
     if len(wheels) != 9:
         errors.append(f"expected 9 wheels, found {len(wheels)}")
+    if len(sdists) != 9:
+        errors.append(f"expected 9 sdists, found {len(sdists)}")
 
     for wheel in wheels:
         metadata, entries = _wheel_metadata(wheel)

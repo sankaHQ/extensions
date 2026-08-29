@@ -7,16 +7,17 @@ import ast
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ROOT / "packages"
 SDK_NAME = "sanka-connector-sdk"
 
 
-def _project(package: Path) -> dict[str, object]:
+def _project(package: Path) -> dict[str, Any]:
     with (package / "pyproject.toml").open("rb") as handle:
         document = tomllib.load(handle)
-    return document["project"]
+    return cast(dict[str, Any], document["project"])
 
 
 def _imports(path: Path) -> set[str]:
