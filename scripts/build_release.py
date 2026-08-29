@@ -12,6 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT / "release" / "all"
 
 
+def _distribution_artifacts(directory: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in directory.iterdir()
+        if path.suffix == ".whl" or path.name.endswith(".tar.gz")
+    )
+
+
 def main() -> None:
     release_root = RELEASE.parent
     if release_root.exists():
@@ -22,11 +30,23 @@ def main() -> None:
         package_release = release_root / "packages" / package
         package_release.mkdir(parents=True)
         subprocess.run(
-            ["uv", "build", "--package", package, "--out-dir", str(package_release)],
+            [
+                "uv",
+                "build",
+                "--package",
+                package,
+                "--out-dir",
+                str(package_release),
+                "--no-create-gitignore",
+            ],
             cwd=ROOT,
             check=True,
         )
-        for artifact in package_release.iterdir():
+        artifacts = _distribution_artifacts(package_release)
+        if len(artifacts) != 2:
+            names = ", ".join(path.name for path in artifacts) or "none"
+            raise RuntimeError(f"{package}: expected wheel and sdist, found {names}")
+        for artifact in artifacts:
             shutil.copy2(artifact, RELEASE / artifact.name)
     source_commit = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -37,7 +57,7 @@ def main() -> None:
     ).stdout.strip()
     (release_root / "SOURCE_COMMIT").write_text(source_commit + "\n", encoding="utf-8")
     hashes = []
-    for artifact in sorted(RELEASE.iterdir()):
+    for artifact in _distribution_artifacts(RELEASE):
         digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
         hashes.append(f"{digest}  {artifact.name}")
     (release_root / "SHA256SUMS").write_text("\n".join(hashes) + "\n", encoding="utf-8")
