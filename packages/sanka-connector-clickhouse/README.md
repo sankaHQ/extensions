@@ -4,13 +4,15 @@ Writes Sanka records into a ClickHouse database as a migration
 **destination**: one table per target object, created on first write with
 column types inferred from first-seen values and widened with `ALTER TABLE …
 ADD COLUMN IF NOT EXISTS` as new fields appear. Tables whose run declares
-identity fields use `ReplacingMergeTree ORDER BY (<identity columns>)`, so
-re-applied migrations insert fresh versions that deduplicate at merge time;
-inventory therefore counts with `SELECT count() … FINAL` — the merge-accurate
-number — for verification. Connections accept `http://`, `https://`, or
+identity fields use `MergeTree ORDER BY (<identity columns>)`; repeated
+identities remain separate rows. Only the `create` conflict policy is
+supported. `skip_existing` and `update_existing` fail before connecting because
+this connector cannot enforce them atomically. Connections accept `http://`, `https://`, or
 `clickhouse://` URLs (the last treated as HTTP). Apache-2.0; depends only on
 the `sanka-connector-sdk` interface and `clickhouse-connect`.
 
-Safe lowercase SQL identifiers are preserved. Any source name that requires a
-lossy normalization receives a deterministic digest suffix, preventing
-distinct fields or object routes from silently sharing one target name.
+Ordinary safe lowercase SQL identifiers are preserved. Lossy names and names
+inside Sanka's reserved encoded namespace receive distinct deterministic
+prefixes and digest suffixes, preventing separate source names from silently
+sharing one target name. Declared composite identities must be complete and
+non-NULL on every record.

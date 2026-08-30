@@ -13,7 +13,7 @@ from sanka_connector import (
     SourceFilter,
     UnsupportedFeatureError,
 )
-from sanka_connector_markdown import CONNECTOR, MarkdownSource
+from sanka_connector_markdown import CONNECTOR, MarkdownSource, _read_confined_text
 
 
 def _credentials(root: Path) -> Credentials:
@@ -165,3 +165,95 @@ async def test_symlinked_configured_root_preserves_relative_paths(tmp_path: Path
 async def test_missing_directory_is_configuration_error(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError):
         await MarkdownSource().inventory(_credentials(tmp_path / "nope"))
+
+
+@pytest.mark.parametrize(
+    "frontmatter",
+    [
+        "title: first\ntitle: second",
+        '1: first\n"1": second',
+        "path: forged.md",
+    ],
+)
+async def test_frontmatter_key_collisions_fail_closed(tmp_path: Path, frontmatter: str) -> None:
+    (tmp_path / "bad.md").write_text(f"---\n{frontmatter}\n---\nbody\n", encoding="utf-8")
+    with pytest.raises(DataError, match="frontmatter"):
+        await MarkdownSource().read_records(
+            _credentials(tmp_path), object_type="documents", field_keys=["path"], limit=10
+        )
+
+
+async def test_markdown_source_limits_are_enforced(tmp_path: Path) -> None:
+    (tmp_path / "a.md").write_text("a", encoding="utf-8")
+    (tmp_path / "b.md").write_text("b", encoding="utf-8")
+    file_limited = Credentials(
+        provider="markdown", settings={"connection": str(tmp_path), "max_files": 1}
+    )
+    with pytest.raises(DataError, match="max_files=1"):
+        await MarkdownSource().count_records(file_limited, object_type="documents")
+
+    (tmp_path / "b.md").unlink()
+    byte_limited = Credentials(
+        provider="markdown", settings={"connection": str(tmp_path), "max_file_bytes": 0}
+    )
+    with pytest.raises(ConfigurationError, match="positive integer"):
+        await MarkdownSource().inventory(byte_limited)
+
+
+async def test_markdown_file_limit_stops_enumeration_before_materializing_tree(
+    tmp_path: Path,
+) -> None:
+    files = [tmp_path / f"{index}.md" for index in range(3)]
+    for file_path in files:
+        file_path.write_text("body\n", encoding="utf-8")
+    credentials = Credentials(
+        provider="markdown", settings={"connection": str(tmp_path), "max_files": 2}
+    )
+    with pytest.raises(DataError, match="max_files=2"):
+        await MarkdownSource().count_records(credentials, object_type="documents")
+
+
+async def test_markdown_entry_limit_counts_nonmatching_tree_entries(tmp_path: Path) -> None:
+    for index in range(3):
+        (tmp_path / f"ignored-{index}.txt").write_text("body\n", encoding="utf-8")
+    credentials = Credentials(
+        provider="markdown", settings={"connection": str(tmp_path), "max_entries": 2}
+    )
+
+    with pytest.raises(DataError, match="max_entries=2"):
+        await MarkdownSource().count_records(credentials, object_type="documents")
+
+
+async def test_markdown_depth_limit_bounds_live_directory_descriptors(tmp_path: Path) -> None:
+    nested = tmp_path
+    for index in range(3):
+        nested = nested / str(index)
+        nested.mkdir()
+    (nested / "deep.md").write_text("body\n", encoding="utf-8")
+    credentials = Credentials(
+        provider="markdown", settings={"connection": str(tmp_path), "max_depth": 2}
+    )
+
+    with pytest.raises(DataError, match="max_depth=2"):
+        await MarkdownSource().count_records(credentials, object_type="documents")
+
+
+def test_markdown_growth_after_open_is_still_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "growing.md"
+    path.write_text("small", encoding="utf-8")
+    real_read = os.read
+    grown = False
+
+    def grow_then_read(descriptor: int, size: int) -> bytes:
+        nonlocal grown
+        if not grown:
+            grown = True
+            with path.open("ab") as stream:
+                stream.write(b"x" * 100)
+        return real_read(descriptor, size)
+
+    monkeypatch.setattr("sanka_connector_markdown.os.read", grow_then_read)
+    with pytest.raises(DataError, match="max_file_bytes=8"):
+        _read_confined_text(tmp_path, Path("growing.md"), max_file_bytes=8)

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 from sanka_connector import (
     ConfigurationError,
     Credentials,
+    DataError,
     SourceFilter,
     SupportsRecordCounts,
     UnsupportedFeatureError,
@@ -18,6 +20,15 @@ from sanka_connector_sqlite import CONNECTOR, SqliteSource
 
 def _credentials(path: Path) -> Credentials:
     return Credentials(provider="sqlite", settings={"connection": str(path)})
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO paths require POSIX")
+async def test_fifo_source_is_rejected_without_blocking(tmp_path: Path) -> None:
+    database = tmp_path / "source.db"
+    os.mkfifo(database)
+
+    with pytest.raises(DataError, match="not a private regular file"):
+        await SqliteSource().inventory(_credentials(database))
 
 
 def _seed(path: Path) -> None:
@@ -190,3 +201,94 @@ async def test_missing_database_is_configuration_error(tmp_path: Path) -> None:
         await SqliteSource().discover_objects(_credentials(missing))
     # Reading must never create an empty database file as a side effect.
     assert not missing.exists()
+
+
+async def test_declared_rowid_does_not_masquerade_as_hidden_identity(tmp_path: Path) -> None:
+    db = tmp_path / "shadow.db"
+    connection = sqlite3.connect(db)
+    connection.execute('CREATE TABLE logs ("rowid" TEXT, message TEXT)')
+    connection.executemany(
+        'INSERT INTO logs ("rowid", message) VALUES (?, ?)',
+        [("same", "first"), ("same", "second")],
+    )
+    connection.commit()
+    connection.close()
+
+    inventory = await SqliteSource().inventory(_credentials(db))
+    assert inventory.objects[0].identity_fields == []
+    with pytest.raises(UnsupportedFeatureError, match="keyset pagination"):
+        await SqliteSource().read_records(
+            _credentials(db), object_type="logs", field_keys=["rowid", "message"], limit=1
+        )
+
+
+async def test_symlinked_sqlite_source_is_rejected(tmp_path: Path) -> None:
+    actual = tmp_path / "actual.db"
+    _seed(actual)
+    linked = tmp_path / "linked.db"
+    linked.symlink_to(actual)
+    with pytest.raises(DataError, match="symbolic link"):
+        await SqliteSource().inventory(_credentials(linked))
+
+
+async def test_symlinked_sqlite_source_sidecar_is_rejected(tmp_path: Path) -> None:
+    database = tmp_path / "in.db"
+    _seed(database)
+    sentinel = tmp_path / "sentinel"
+    sentinel.write_text("sentinel", encoding="utf-8")
+    Path(f"{database}-wal").symlink_to(sentinel)
+
+    with pytest.raises(DataError, match=r"sidecar.*symbolic link"):
+        await SqliteSource().inventory(_credentials(database))
+
+    assert sentinel.read_text(encoding="utf-8") == "sentinel"
+
+
+async def test_source_parent_replacement_cannot_redirect_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent = tmp_path / "source"
+    parent.mkdir()
+    database = parent / "source.db"
+    _seed(database)
+    moved = tmp_path / "moved"
+    real_open = os.open
+    swapped = False
+
+    def swap_before_database_open(
+        target: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal swapped
+        if target == "source.db" and dir_fd is not None and not swapped:
+            swapped = True
+            parent.rename(moved)
+            parent.mkdir()
+            replacement = sqlite3.connect(parent / "source.db")
+            replacement.execute("CREATE TABLE replacement (id INTEGER PRIMARY KEY)")
+            replacement.commit()
+            replacement.close()
+        return real_open(target, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr("sanka_connector_sqlite.os.open", swap_before_database_open)
+    objects = await SqliteSource().discover_objects(_credentials(database))
+    assert [item.key for item in objects] == ["items", "logs", "pairs"]
+
+
+async def test_cached_source_uses_private_snapshot_after_original_changes(tmp_path: Path) -> None:
+    database = tmp_path / "source.db"
+    _seed(database)
+    source = SqliteSource()
+    credentials = _credentials(database)
+    first = await source.count_records(credentials, object_type="items")
+
+    replacement = sqlite3.connect(database)
+    replacement.execute("INSERT INTO items (name, price, in_stock) VALUES ('later', 1, 1)")
+    replacement.commit()
+    replacement.close()
+
+    assert first == 5
+    assert await source.count_records(credentials, object_type="items") == 5

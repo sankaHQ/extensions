@@ -27,6 +27,7 @@ from sanka_connector import (
     SupportsSnapshotBounds,
     TransientProviderError,
     UnsupportedFeatureError,
+    WriteOptions,
 )
 from sanka_connector_postgres import CONNECTOR, PostgresDestination, PostgresSource
 from sanka_connector_postgres._base import (
@@ -47,17 +48,29 @@ from sanka_connector_postgres._destination import (
 
 
 def test_identifier_sanitization() -> None:
-    assert identifier("My Docs!", kind="table").startswith("my_docs_")
-    assert identifier("  Ärger--Straße  ", kind="table").startswith("rger_stra_e_")
-    assert identifier("42nd_street", kind="column").startswith("t_42nd_street_")
+    assert identifier("My Docs!", kind="table").startswith("sanka_e_my_docs_")
+    assert identifier("  Ärger--Straße  ", kind="table").startswith("sanka_e_rger_stra_e_")
+    assert identifier("42nd_street", kind="column").startswith("sanka_e_t_42nd_street_")
     long = identifier("a" * 80, kind="table")
     assert len(long) == 63
     assert long.endswith("_" + hashlib.sha256(("a" * 80).encode()).hexdigest()[:20])
     assert identifier("safe_name", kind="table") == "safe_name"
     assert identifier("a-b", kind="column") != identifier("a b", kind="column")
     assert identifier("A", kind="column") != identifier("a", kind="column")
+    encoded = identifier("a-b", kind="column")
+    assert identifier(encoded, kind="column") != encoded
     with pytest.raises(DataError):
         identifier("!!!", kind="table")
+
+
+async def test_empty_record_with_declared_identity_fails_before_connection() -> None:
+    with pytest.raises(DataError, match="missing required identity"):
+        await PostgresDestination().write_record(
+            Credentials(provider="postgres", settings={}),
+            object_type="documents",
+            properties={},
+            options=WriteOptions(conflict_policy="create", identity_fields=["id"]),
+        )
 
 
 def test_field_family_mapping() -> None:
@@ -229,4 +242,4 @@ def test_registration_shape_and_capabilities() -> None:
     assert isinstance(source, SupportsSnapshotBounds)
     assert isinstance(destination, DestinationConnector)
     target = destination.automatic_target_object("Sales Orders (2026)")
-    assert target is not None and target.startswith("sales_orders_2026_")
+    assert target is not None and target.startswith("sanka_e_sales_orders_2026_")

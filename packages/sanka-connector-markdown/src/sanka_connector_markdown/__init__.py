@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from yaml.constructor import ConstructorError
+from yaml.nodes import MappingNode
 
 from sanka_connector import (
     ConfigurationError,
@@ -33,6 +35,46 @@ from sanka_connector import (
 _SECURE_OPEN_AVAILABLE = hasattr(os, "O_NOFOLLOW") and os.open in os.supports_dir_fd
 
 _RESERVED_FIELDS = ("path", "slug", "content")
+_DEFAULT_MAX_FILES = 100_000
+_DEFAULT_MAX_ENTRIES = 200_000
+_DEFAULT_MAX_DEPTH = 64
+_DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate mapping keys."""
+
+
+def _construct_unique_mapping(
+    loader: _UniqueKeyLoader, node: MappingNode, deep: bool = False
+) -> dict[Any, Any]:
+    loader.flatten_mapping(node)
+    mapping: dict[Any, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        try:
+            duplicate = key in mapping
+        except TypeError as error:
+            raise ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                "found an unhashable key",
+                key_node.start_mark,
+            ) from error
+        if duplicate:
+            raise ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,14 +107,23 @@ class MarkdownSource:
         *,
         object_types: list[str] | None = None,
     ) -> Inventory:
-        documents = self._scan(self._root(credentials))
+        root = self._root(credentials)
+        paths = self._paths(root, credentials)
         field_types: dict[str, set[str]] = {}
-        for document in documents:
+        parse_errors = 0
+        for path in paths:
+            document = self._read_document(
+                root,
+                path,
+                max_file_bytes=_positive_limit(
+                    credentials, "max_file_bytes", _DEFAULT_MAX_FILE_BYTES
+                ),
+            )
+            parse_errors += int(document.frontmatter_error)
             for key, value in document.frontmatter.items():
                 field_types.setdefault(key, set()).add(_type_name(value))
 
         warnings: list[str] = []
-        parse_errors = sum(1 for d in documents if d.frontmatter_error)
         if parse_errors:
             warnings.append(
                 f"{parse_errors} file(s) have unparseable frontmatter; treated as body-only"
@@ -83,11 +134,6 @@ class MarkdownSource:
             FieldSchema(key="content", label="Content", data_type="text"),
         ]
         for key in sorted(field_types):
-            if key in _RESERVED_FIELDS:
-                warnings.append(
-                    f"frontmatter field {key!r} collides with a reserved field; ignored"
-                )
-                continue
             types = field_types[key]
             if len(types) > 1:
                 warnings.append(
@@ -103,7 +149,7 @@ class MarkdownSource:
                     key="documents",
                     label="Documents",
                     canonical_type="documents",
-                    record_count=len(documents),
+                    record_count=len(paths),
                     fields=fields,
                     identity_fields=["path"],
                 )
@@ -124,12 +170,15 @@ class MarkdownSource:
         _reject_filter(source_filter)
         if object_type != "documents":
             raise DataError(f"markdown source has no object type {object_type!r}")
-        documents = self._scan(self._root(credentials))
+        root = self._root(credentials)
+        paths = self._paths(root, credentials)
         start = int(cursor) if cursor else 0
-        page = documents[start : start + max(1, limit)]
-        next_start = start + len(page)
+        page_paths = paths[start : start + max(1, limit)]
+        next_start = start + len(page_paths)
+        max_file_bytes = _positive_limit(credentials, "max_file_bytes", _DEFAULT_MAX_FILE_BYTES)
         records = []
-        for document in page:
+        for path in page_paths:
+            document = self._read_document(root, path, max_file_bytes=max_file_bytes)
             full: dict[str, Any] = {
                 "path": document.path,
                 "slug": document.slug,
@@ -140,8 +189,8 @@ class MarkdownSource:
         return RecordPage(
             object_key=object_type,
             records=records,
-            next_cursor=str(next_start) if next_start < len(documents) else None,
-            has_more=next_start < len(documents),
+            next_cursor=str(next_start) if next_start < len(paths) else None,
+            has_more=next_start < len(paths),
         )
 
     async def count_records(
@@ -154,7 +203,7 @@ class MarkdownSource:
         _reject_filter(source_filter)
         if object_type != "documents":
             raise DataError(f"markdown source has no object type {object_type!r}")
-        return len(self._scan(self._root(credentials)))
+        return len(self._paths(self._root(credentials), credentials))
 
     def _root(self, credentials: Credentials) -> Path:
         raw = credentials.settings.get("connection") or credentials.settings.get("path")
@@ -165,31 +214,75 @@ class MarkdownSource:
             raise ConfigurationError(f"markdown source directory not found: {root}")
         return root
 
-    def _scan(self, root: Path) -> list[_Document]:
+    def _paths(self, root: Path, credentials: Credentials) -> list[Path]:
         resolved_root = root.resolve(strict=True)
-        documents: list[_Document] = []
-        for file_path in sorted(resolved_root.rglob("*.md")):
-            relative_path = file_path.relative_to(resolved_root)
-            if file_path.is_symlink():
-                raise DataError(
-                    "markdown source contains a symbolic-link file outside its trusted "
-                    f"file boundary: {relative_path}"
-                )
-            text = _read_confined_text(resolved_root, relative_path)
-            frontmatter, content, failed = _split_frontmatter(text)
-            documents.append(
-                _Document(
-                    path=relative_path.as_posix(),
-                    slug=file_path.stem,
-                    content=content,
-                    frontmatter=frontmatter,
-                    frontmatter_error=failed,
-                )
-            )
-        return documents
+        max_files = _positive_limit(credentials, "max_files", _DEFAULT_MAX_FILES)
+        max_entries = _positive_limit(credentials, "max_entries", _DEFAULT_MAX_ENTRIES)
+        max_depth = _positive_limit(credentials, "max_depth", _DEFAULT_MAX_DEPTH)
+        paths: list[Path] = []
+        directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        if hasattr(os, "O_DIRECTORY"):
+            directory_flags |= os.O_DIRECTORY
+        entries = 0
+
+        def walk(directory_fd: int, relative_directory: Path, depth: int) -> None:
+            nonlocal entries
+            if depth > max_depth:
+                raise DataError(f"markdown source exceeds max_depth={max_depth}: {resolved_root}")
+            with os.scandir(directory_fd) as iterator:
+                for entry in iterator:
+                    entries += 1
+                    if entries > max_entries:
+                        raise DataError(
+                            f"markdown source exceeds max_entries={max_entries}: {resolved_root}"
+                        )
+                    relative_path = relative_directory / entry.name
+                    info = entry.stat(follow_symlinks=False)
+                    if stat.S_ISLNK(info.st_mode):
+                        if entry.name.lower().endswith(".md"):
+                            raise DataError(
+                                "markdown source contains a symbolic-link file outside "
+                                f"its trusted file boundary: {relative_path}"
+                            )
+                        continue
+                    if stat.S_ISDIR(info.st_mode):
+                        child_fd = os.open(entry.name, directory_flags, dir_fd=directory_fd)
+                        try:
+                            walk(child_fd, relative_path, depth + 1)
+                        finally:
+                            os.close(child_fd)
+                    elif stat.S_ISREG(info.st_mode) and entry.name.lower().endswith(".md"):
+                        paths.append(relative_path)
+                        if len(paths) > max_files:
+                            raise DataError(
+                                f"markdown source exceeds max_files={max_files}: {resolved_root}"
+                            )
+
+        root_fd = os.open(resolved_root, directory_flags)
+        try:
+            walk(root_fd, Path(), 0)
+        except OSError as error:
+            raise DataError(
+                f"markdown source tree cannot be enumerated safely: {resolved_root}"
+            ) from error
+        finally:
+            os.close(root_fd)
+        return sorted(paths)
+
+    def _read_document(self, root: Path, relative_path: Path, *, max_file_bytes: int) -> _Document:
+        resolved_root = root.resolve(strict=True)
+        text = _read_confined_text(resolved_root, relative_path, max_file_bytes=max_file_bytes)
+        frontmatter, content, failed = _split_frontmatter(text)
+        return _Document(
+            path=relative_path.as_posix(),
+            slug=relative_path.stem,
+            content=content,
+            frontmatter=frontmatter,
+            frontmatter_error=failed,
+        )
 
 
-def _read_confined_text(root: Path, relative_path: Path) -> str:
+def _read_confined_text(root: Path, relative_path: Path, *, max_file_bytes: int) -> str:
     """Read one regular file without following a replaced path component."""
 
     if (
@@ -200,7 +293,7 @@ def _read_confined_text(root: Path, relative_path: Path) -> str:
         raise DataError(f"markdown source path cannot be opened safely: {relative_path}")
     if not _SECURE_OPEN_AVAILABLE:
         if os.name == "nt":
-            return _read_confined_text_windows(root, relative_path)
+            return _read_confined_text_windows(root, relative_path, max_file_bytes=max_file_bytes)
         raise DataError(f"markdown source path cannot be opened safely: {relative_path}")
 
     nofollow = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
@@ -215,11 +308,18 @@ def _read_confined_text(root: Path, relative_path: Path) -> str:
             parent_fd = os.open(component, directory_flags, dir_fd=parent_fd)
             directory_fds.append(parent_fd)
         file_fd = os.open(relative_path.parts[-1], nofollow, dir_fd=parent_fd)
-        if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+        opened = os.fstat(file_fd)
+        if not stat.S_ISREG(opened.st_mode):
             raise DataError(f"markdown source path is not a regular file: {relative_path}")
-        with os.fdopen(file_fd, encoding="utf-8") as stream:
-            file_fd = None
-            return stream.read()
+        if opened.st_size > max_file_bytes:
+            raise DataError(
+                f"markdown source file exceeds max_file_bytes={max_file_bytes}: {relative_path}"
+            )
+        return _read_bounded_descriptor(
+            file_fd,
+            relative_path=relative_path,
+            max_file_bytes=max_file_bytes,
+        )
     except OSError as error:
         raise DataError(f"markdown source path cannot be opened safely: {relative_path}") from error
     finally:
@@ -229,7 +329,7 @@ def _read_confined_text(root: Path, relative_path: Path) -> str:
             os.close(descriptor)
 
 
-def _read_confined_text_windows(root: Path, relative_path: Path) -> str:
+def _read_confined_text_windows(root: Path, relative_path: Path, *, max_file_bytes: int) -> str:
     """Validate the final Windows handle before reading through it."""
 
     import ctypes
@@ -244,8 +344,13 @@ def _read_confined_text_windows(root: Path, relative_path: Path) -> str:
             root / relative_path,
             os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0),
         )
-        if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+        opened = os.fstat(file_fd)
+        if not stat.S_ISREG(opened.st_mode):
             raise DataError(f"markdown source path is not a regular file: {relative_path}")
+        if opened.st_size > max_file_bytes:
+            raise DataError(
+                f"markdown source file exceeds max_file_bytes={max_file_bytes}: {relative_path}"
+            )
 
         buffer = ctypes.create_unicode_buffer(32768)
         kernel32 = windows_api.WinDLL("kernel32", use_last_error=True)
@@ -269,14 +374,48 @@ def _read_confined_text_windows(root: Path, relative_path: Path) -> str:
                 f"markdown source file resolves outside the configured directory: {relative_path}"
             )
 
-        with os.fdopen(file_fd, encoding="utf-8") as stream:
-            file_fd = None
-            return stream.read()
+        return _read_bounded_descriptor(
+            file_fd,
+            relative_path=relative_path,
+            max_file_bytes=max_file_bytes,
+        )
     except OSError as error:
         raise DataError(f"markdown source path cannot be opened safely: {relative_path}") from error
     finally:
         if file_fd is not None:
             os.close(file_fd)
+
+
+def _read_bounded_descriptor(
+    descriptor: int,
+    *,
+    relative_path: Path,
+    max_file_bytes: int,
+) -> str:
+    opened = os.fstat(descriptor)
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = os.read(descriptor, min(1024 * 1024, max_file_bytes - total + 1))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > max_file_bytes:
+            raise DataError(
+                f"markdown source file exceeds max_file_bytes={max_file_bytes}: {relative_path}"
+            )
+    final = os.fstat(descriptor)
+    if (final.st_dev, final.st_ino, final.st_size) != (
+        opened.st_dev,
+        opened.st_ino,
+        opened.st_size,
+    ):
+        raise DataError(f"markdown source file changed while reading: {relative_path}")
+    try:
+        return b"".join(chunks).decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise DataError(f"markdown source file is not UTF-8: {relative_path}") from error
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, Any], str, bool]:
@@ -288,14 +427,37 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any], str, bool]:
     raw_frontmatter = text[4:end]
     body = text[end + 4 :].lstrip("\n")
     try:
-        loaded = yaml.safe_load(raw_frontmatter)
+        loaded = yaml.load(raw_frontmatter, Loader=_UniqueKeyLoader)
+    except ConstructorError as error:
+        raise DataError(
+            "markdown frontmatter contains duplicate or invalid mapping keys"
+        ) from error
     except yaml.YAMLError:
         return {}, body, True
     if loaded is None:
         return {}, body, False
     if not isinstance(loaded, dict):
         return {}, body, True
-    return {str(k): v for k, v in loaded.items()}, body, False
+    canonical: dict[str, Any] = {}
+    for raw_key, value in loaded.items():
+        key = str(raw_key)
+        if key in canonical:
+            raise DataError(f"markdown frontmatter keys collide after string conversion: {key!r}")
+        if key in _RESERVED_FIELDS:
+            raise DataError(f"markdown frontmatter key collides with reserved field: {key!r}")
+        canonical[key] = value
+    return canonical, body, False
+
+
+def _positive_limit(credentials: Credentials, key: str, default: int) -> int:
+    raw = credentials.settings.get(key, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as error:
+        raise ConfigurationError(f"markdown source {key} must be a positive integer") from error
+    if value <= 0:
+        raise ConfigurationError(f"markdown source {key} must be a positive integer")
+    return value
 
 
 def _type_name(value: Any) -> str:

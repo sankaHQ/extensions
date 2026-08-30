@@ -71,12 +71,12 @@ def scratch_table() -> Iterator[Callable[[], str]]:
     client.close()
 
 
-async def test_batch_write_dedup_final_count_and_inventory(
+async def test_batch_create_appends_repeated_identities_and_inventory_counts_rows(
     credentials: Credentials, scratch_table: Callable[[], str]
 ) -> None:
     destination = ClickHouseDestination()
     table = scratch_table()
-    options = WriteOptions(conflict_policy="update_existing", identity_fields=["path"])
+    options = WriteOptions(conflict_policy="create", identity_fields=["path"])
 
     first = [
         BatchWriteInput(
@@ -98,9 +98,7 @@ async def test_batch_write_dedup_final_count_and_inventory(
     assert [result.trace_id for result in results] == ["t0", "t1", "t2"]
     assert all(result.status == "created" for result in results)
 
-    # Re-apply the same identities: at-least-once semantics insert new
-    # versions, and ReplacingMergeTree dedups them by ORDER BY key at merge
-    # time — the FINAL count must stay stable.
+    # Re-applying the same identities appends new rows under create semantics.
     second = [
         BatchWriteInput(
             trace_id=f"r{index}",
@@ -117,7 +115,7 @@ async def test_batch_write_dedup_final_count_and_inventory(
     assert len(inventory.objects) == 1
     schema = inventory.objects[0]
     assert schema.key == table
-    assert schema.record_count == 3  # FINAL count, stable across the re-write
+    assert schema.record_count == 6
     field_keys = {field.key for field in schema.fields}
     assert {"path", "title", "published", "views", "score", "tags"} <= field_keys
 
@@ -128,18 +126,13 @@ async def test_batch_write_dedup_final_count_and_inventory(
             "WHERE database = currentDatabase() AND name = {name:String}",
             parameters={"name": table},
         ).result_rows[0]
-        assert engine == "ReplacingMergeTree"
+        assert engine == "MergeTree"
         assert sorting_key == "path"
 
-        final_rows = client.query(
-            f"SELECT title, views FROM `{table}` FINAL WHERE path = 'doc-1.md'"
+        rows = client.query(
+            f"SELECT title, views FROM `{table}` WHERE path = 'doc-1.md' ORDER BY title"
         ).result_rows
-        assert len(final_rows) == 1
-        assert final_rows[0][0] == "Rewritten 1"  # FINAL reads the latest version
-        assert final_rows[0][1] is None  # keys missing from the re-write became None
-
-        raw_count = int(client.query(f"SELECT count() FROM `{table}`").result_rows[0][0])
-        assert raw_count >= 3  # unmerged versions may linger — why inventory counts FINAL
+        assert rows == [("Rewritten 1", None), ("Title 1", 10)]
     finally:
         client.close()
 

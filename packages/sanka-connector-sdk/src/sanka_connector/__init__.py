@@ -71,6 +71,7 @@ from sanka_connector.records import (
     SourceFilter,
     WriteOptions,
     WriteResult,
+    require_identity_values,
 )
 from sanka_connector.registration import ENTRY_POINT_GROUP, ConnectorRegistration
 from sanka_connector.schema import (
@@ -144,4 +145,5 @@ __all__ = [
     "WriteOptions",
     "WriteResult",
     "__version__",
+    "require_identity_values",
 ]

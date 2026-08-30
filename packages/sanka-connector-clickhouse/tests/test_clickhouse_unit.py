@@ -16,6 +16,7 @@ from sanka_connector import (
     RelationshipWrite,
     SupportsBatchWrites,
     TransientProviderError,
+    UnsupportedFeatureError,
     WriteOptions,
 )
 from sanka_connector_clickhouse import (
@@ -25,6 +26,7 @@ from sanka_connector_clickhouse import (
     _create_table_ddl,
     _encode,
     _encode_row,
+    _ensure_table,
     _identifier,
     _infer_columns,
     _map_error,
@@ -117,11 +119,13 @@ def test_parse_requires_connection_and_never_echoes_secrets() -> None:
 
 def test_identifier_sanitization() -> None:
     target = ClickHouseDestination().automatic_target_object("My Docs!")
-    assert target is not None and target.startswith("my_docs_")
-    assert _identifier("42nd Street", kind="table").startswith("t_42nd_street_")
+    assert target is not None and target.startswith("sanka_e_my_docs_")
+    assert _identifier("42nd Street", kind="table").startswith("sanka_e_t_42nd_street_")
     assert _identifier("safe_name", kind="table") == "safe_name"
     assert _identifier("a-b", kind="column") != _identifier("a b", kind="column")
     assert _identifier("A", kind="column") != _identifier("a", kind="column")
+    encoded = _identifier("a-b", kind="column")
+    assert _identifier(encoded, kind="column") != encoded
     with pytest.raises(DataError):
         _identifier("!!!", kind="table")
 
@@ -173,14 +177,14 @@ def test_encode_row_fills_missing_keys_with_none() -> None:
 # -- DDL generation ---------------------------------------------------------
 
 
-def test_create_table_ddl_with_identity_uses_replacing_merge_tree() -> None:
+def test_create_table_ddl_with_identity_uses_merge_tree() -> None:
     ddl = _create_table_ddl(
         "documents", {"path": "String", "title": "String", "views": "Int64"}, ["path"]
     )
     assert ddl == (
         "CREATE TABLE IF NOT EXISTS `documents` "
         "(`path` String, `title` Nullable(String), `views` Nullable(Int64)) "
-        "ENGINE = ReplacingMergeTree ORDER BY (`path`)"
+        "ENGINE = MergeTree ORDER BY (`path`)"
     )
 
 
@@ -211,6 +215,28 @@ def test_supports_final_only_for_collapsing_engines() -> None:
     assert not _supports_final("ReplicatedMergeTree")
     assert not _supports_final("SharedMergeTree")
     assert not _supports_final("Memory")
+
+
+def test_existing_replacing_table_is_rejected_for_create_semantics() -> None:
+    class Result:
+        def __init__(self) -> None:
+            self.result_rows = [("ReplacingMergeTree",)]
+
+    class LegacyClient:
+        def query(self, _query: str, *, parameters: object | None = None) -> Result:
+            del parameters
+            return Result()
+
+        def command(self, _query: str) -> None:
+            raise AssertionError("legacy table must be rejected before alteration")
+
+    with pytest.raises(UnsupportedFeatureError, match="ReplacingMergeTree"):
+        _ensure_table(
+            LegacyClient(),  # type: ignore[arg-type]
+            "events",
+            {"id": "String"},
+            ["id"],
+        )
 
 
 # -- error mapping ----------------------------------------------------------
@@ -268,6 +294,44 @@ async def test_empty_writes_skip_without_server() -> None:
         )
         == []
     )
+
+    with pytest.raises(DataError, match="missing required identity"):
+        await destination.write_record(
+            Credentials(provider="clickhouse", settings={}),
+            object_type="documents",
+            properties={},
+            options=WriteOptions(conflict_policy="create", identity_fields=["id"]),
+        )
+
+
+@pytest.mark.parametrize("policy", ["skip_existing", "update_existing"])
+async def test_unsupported_conflict_policies_fail_before_connection(policy: str) -> None:
+    with pytest.raises(UnsupportedFeatureError, match="does not support"):
+        await ClickHouseDestination().write_record(
+            Credentials(provider="clickhouse", settings={}),
+            object_type="documents",
+            properties={"path": "a.md"},
+            options=WriteOptions(conflict_policy=policy, identity_fields=["path"]),  # type: ignore[arg-type]
+        )
+    with pytest.raises(UnsupportedFeatureError, match="does not support"):
+        await ClickHouseDestination().write_records(
+            Credentials(provider="clickhouse", settings={}),
+            object_type="documents",
+            records=[],
+            options=WriteOptions(conflict_policy=policy),  # type: ignore[arg-type]
+        )
+
+
+async def test_incomplete_identity_fails_before_connection() -> None:
+    with pytest.raises(DataError, match="missing required identity"):
+        await ClickHouseDestination().write_record(
+            Credentials(provider="clickhouse", settings={}),
+            object_type="documents",
+            properties={"tenant": "acme"},
+            options=WriteOptions(
+                conflict_policy="create", identity_fields=["tenant", "external_id"]
+            ),
+        )
 
 
 async def test_write_relationship_is_skipped() -> None:

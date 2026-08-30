@@ -9,23 +9,14 @@ JSON text, everything else → ``String``; all-``None`` columns default to
 ClickHouse forbids ``Nullable`` ORDER BY columns. Fields that appear later are
 added with ``ALTER TABLE … ADD COLUMN IF NOT EXISTS`` as ``Nullable``.
 
-Engine choice is deliberate: when the run's
-:class:`sanka_connector.WriteOptions` declare identity fields, tables are
-created as ``ReplacingMergeTree ORDER BY (<identity columns>)``. Sanka's
-engine guarantees at-least-once writes reconciled against an identity ledger,
-so a re-applied migration inserts a fresh *version* of each row rather than
-mutating in place — exactly the contract ReplacingMergeTree implements by
-deduplicating rows that share an ORDER BY key at merge time. Without identity
-fields, tables fall back to ``MergeTree ORDER BY tuple()``.
-
-ClickHouse has no per-row upsert, so ``conflict_policy`` is effectively
-ignored beyond that merge-time dedup: every successfully inserted row honestly
-reports status ``created`` (never ``updated``/``skipped``), and duplicate
-versions collapse later inside ClickHouse. For the same reason ``inventory``
-counts with ``SELECT count() … FINAL``: a raw ``count()`` overcounts unmerged
-versions and is not valid parity evidence. ``FINAL`` is guarded by an engine
-readback because ClickHouse (observed on 24.8) rejects it on engines without
-merge-time collapse — plain ``MergeTree`` included — with ``ILLEGAL_FINAL``.
+Engine choice is deliberate: create-only writes whose reviewed options declare
+identity fields use ``MergeTree ORDER BY (<identity columns>)``; identity-free
+writes use ``MergeTree ORDER BY tuple()``. Repeated identities remain separate
+rows, matching create/append semantics. ``skip_existing`` and
+``update_existing`` fail before a connection is opened because ClickHouse
+cannot enforce either policy atomically through this connector. Every accepted
+write therefore reports ``created``. Inventory counts replacing tables with
+``SELECT count() … FINAL`` so verification observes merge-accurate row counts.
 
 Connections come from ``settings["connection"]`` as ``http://host:8123/db``,
 ``https://host:8443/db``, or ``clickhouse://host:8123/db`` (treated as HTTP).
@@ -68,14 +59,19 @@ from sanka_connector import (
     RelationshipWrite,
     RelationshipWriteResult,
     TransientProviderError,
+    UnsupportedFeatureError,
     WriteOptions,
     WriteResult,
+    require_identity_values,
 )
 
 _T = TypeVar("_T")
 
 _IDENTIFIER = re.compile(r"[^a-z0-9_]+")
 _ERROR_CODE = re.compile(r"Code:\s*(\d+)")
+_RESERVED_IDENTIFIER_PREFIX = "sanka_"
+_ENCODED_IDENTIFIER_PREFIX = "sanka_e_"
+_ESCAPED_IDENTIFIER_PREFIX = "sanka_r_"
 
 # scheme → clickhouse-connect interface; clickhouse:// is the HTTP protocol.
 _SCHEME_INTERFACES = {"http": "http", "https": "https", "clickhouse": "http"}
@@ -170,10 +166,41 @@ def _identifier(value: str, *, kind: str) -> str:
         raise DataError(f"cannot derive a ClickHouse {kind} name from {value!r}")
     if normalized[0].isdigit():
         normalized = f"t_{normalized}"
-    if raw != normalized:
-        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
-        normalized = f"{normalized}_{digest}"
+    if raw == normalized and not normalized.startswith(_RESERVED_IDENTIFIER_PREFIX):
+        return normalized
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+    prefix = (
+        _ESCAPED_IDENTIFIER_PREFIX
+        if raw == normalized and normalized.startswith(_RESERVED_IDENTIFIER_PREFIX)
+        else _ENCODED_IDENTIFIER_PREFIX
+    )
+    return f"{prefix}{normalized}_{digest}"
+
+
+def _normalized_row(properties: Mapping[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    origins: dict[str, str] = {}
+    for raw_name, value in properties.items():
+        name = _identifier(raw_name, kind="column")
+        if name in normalized:
+            raise DataError(
+                f"ClickHouse fields {origins[name]!r} and {raw_name!r} map to "
+                f"the same destination column {name!r}"
+            )
+        normalized[name] = value
+        origins[name] = raw_name
     return normalized
+
+
+def _validate_write_options(rows: Sequence[Mapping[str, Any]], options: WriteOptions) -> None:
+    if options.conflict_policy != "create":
+        raise UnsupportedFeatureError(
+            f"clickhouse destination does not support {options.conflict_policy!r}; "
+            "it cannot apply that policy atomically",
+            remediation="use conflict_policy='create' or select a destination with upsert support",
+        )
+    for row in rows:
+        require_identity_values(row, options.identity_fields)
 
 
 def _column_type(value: Any) -> str:
@@ -204,16 +231,15 @@ def _infer_columns(rows: Sequence[Mapping[str, Any]]) -> dict[str, str]:
     """
     inferred: dict[str, str | None] = {}
     for row in rows:
-        for key, value in row.items():
-            name = _identifier(key, kind="column")
-            if inferred.get(name) is None:
-                inferred[name] = None if value is None else _column_type(value)
+        for key, value in _normalized_row(row).items():
+            if inferred.get(key) is None:
+                inferred[key] = None if value is None else _column_type(value)
     return {name: column_type or "String" for name, column_type in inferred.items()}
 
 
 def _encode_row(properties: Mapping[str, Any], column_names: Sequence[str]) -> list[Any]:
     """One insert row aligned to ``column_names``; missing keys become None."""
-    encoded = {_identifier(key, kind="column"): _encode(value) for key, value in properties.items()}
+    encoded = {key: _encode(value) for key, value in _normalized_row(properties).items()}
     return [encoded.get(name) for name in column_names]
 
 
@@ -231,8 +257,8 @@ def _create_table_ddl(
 ) -> str:
     """DDL for a table's first write.
 
-    Identity columns stay non-Nullable and become the ReplacingMergeTree
-    ORDER BY key (see the module docstring for why); everything else is
+    Identity columns stay non-Nullable and become the MergeTree ORDER BY key
+    (see the module docstring for why); everything else is
     Nullable. Without identity columns the table is a plain MergeTree.
     """
     order_by = [name for name in identity_columns if name in columns]
@@ -242,7 +268,7 @@ def _create_table_ddl(
     )
     if order_by:
         keys = ", ".join(f"`{name}`" for name in order_by)
-        engine = f"ReplacingMergeTree ORDER BY ({keys})"
+        engine = f"MergeTree ORDER BY ({keys})"
     else:
         engine = "MergeTree ORDER BY tuple()"
     return f"CREATE TABLE IF NOT EXISTS `{table}` ({rendered}) ENGINE = {engine}"
@@ -328,8 +354,19 @@ def _ensure_table(
     unconditional describe-and-widen pass after creation also heals the race
     where another writer created the table with a narrower column set.
     """
-    if _table_engine(client, table) is None:
+    engine = _table_engine(client, table)
+    if engine is None:
         client.command(_create_table_ddl(table, columns, identity_columns))
+        engine = _table_engine(client, table)
+    base_engine = str(engine or "").removeprefix("Shared").removeprefix("Replicated")
+    if base_engine != "MergeTree":
+        raise UnsupportedFeatureError(
+            f"clickhouse table {table!r} uses {engine or 'an unknown engine'}, which cannot "
+            "guarantee create/append semantics",
+            remediation=(
+                "create a new MergeTree table and migrate the existing rows before writing"
+            ),
+        )
     existing = {name for name, _ in _describe_table(client, table)}
     for name, column_type in columns.items():
         if name not in existing:
@@ -402,6 +439,7 @@ class ClickHouseDestination:
         properties: dict[str, Any],
         options: WriteOptions,
     ) -> WriteResult:
+        _validate_write_options([properties], options)
         if not properties:
             return WriteResult(status="skipped", message="empty record")
         target = _parse_connection(credentials)
@@ -411,7 +449,7 @@ class ClickHouseDestination:
             self._insert_rows(target, table, [properties], options)
 
         await self._run("write", _work)
-        # ClickHouse has no row ids to report; dedup happens at merge time.
+        # ClickHouse has no row ids to report; every accepted row is appended.
         return WriteResult(status="created")
 
     async def write_records(
@@ -422,11 +460,12 @@ class ClickHouseDestination:
         records: list[BatchWriteInput],
         options: WriteOptions,
     ) -> list[BatchWriteResult]:
+        writable = [record.properties for record in records if record.properties]
+        _validate_write_options(writable, options)
         if not records:
             return []
         target = _parse_connection(credentials)
         table = _identifier(object_type, kind="table")
-        writable = [record.properties for record in records if record.properties]
 
         def _work() -> None:
             self._insert_rows(target, table, writable, options)
@@ -461,11 +500,16 @@ class ClickHouseDestination:
         rows: Sequence[Mapping[str, Any]],
         options: WriteOptions,
     ) -> None:
+        _validate_write_options(rows, options)
         client = self._client_for(target)
         columns = _infer_columns(rows)
         _ensure_table(client, table, columns, _identity_columns(options))
         names = list(columns)
-        client.insert(table, [_encode_row(row, names) for row in rows], column_names=names)
+        client.insert(
+            table,
+            [_encode_row(row, names) for row in rows],
+            column_names=names,
+        )
 
     def _client_for(self, target: _ConnectionTarget) -> Client:
         with self._clients_lock:

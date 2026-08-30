@@ -32,6 +32,7 @@ from psycopg.types.json import Json
 
 from sanka_connector import (
     Credentials,
+    DataError,
     FieldSchema,
     Inventory,
     ObjectSchema,
@@ -39,6 +40,7 @@ from sanka_connector import (
     RelationshipWriteResult,
     WriteOptions,
     WriteResult,
+    require_identity_values,
 )
 from sanka_connector_postgres._base import (
     PostgresConnectorBase,
@@ -56,6 +58,21 @@ _MAX_INDEX_NAME_LENGTH = 63
 _BOOLEAN_LITERALS: Final = frozenset(
     {"true", "false", "t", "f", "yes", "no", "y", "n", "on", "off", "1", "0"}
 )
+
+
+def _normalized_properties(properties: dict[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    origins: dict[str, str] = {}
+    for raw_name, value in properties.items():
+        name = identifier(raw_name, kind="column")
+        if name in normalized:
+            raise DataError(
+                f"PostgreSQL fields {origins[name]!r} and {raw_name!r} map to "
+                f"the same destination column {name!r}"
+            )
+        normalized[name] = value
+        origins[name] = raw_name
+    return normalized
 
 
 def _column_type(value: Any) -> str:
@@ -226,8 +243,10 @@ class PostgresDestination(PostgresConnectorBase):
         properties: dict[str, Any],
         options: WriteOptions,
     ) -> WriteResult:
+        require_identity_values(properties, options.identity_fields)
         if not properties:
             return WriteResult(status="skipped", message="empty record")
+        _normalized_properties(properties)
         async with pg_errors(f"postgres destination: write into {object_type!r}"):
             dsn = self._dsn(credentials)
             schema = self._schema_name(credentials)
@@ -259,10 +278,9 @@ class PostgresDestination(PostgresConnectorBase):
         properties: dict[str, Any],
         options: WriteOptions,
     ) -> WriteResult:
-        values = {identifier(key, kind="column"): value for key, value in properties.items()}
-        identity_columns = [
-            identifier(field, kind="column") for field in (options.identity_fields or [])
-        ]
+        identity_values = require_identity_values(properties, options.identity_fields)
+        values = _normalized_properties(properties)
+        identity_columns = [identifier(field, kind="column") for field, _ in identity_values]
         column_types = await self._ensure_table(
             connection, dsn, schema, table, values, identity_columns
         )
@@ -285,7 +303,7 @@ class PostgresDestination(PostgresConnectorBase):
             name: _write_param(column_types.get(name, "text"), value)
             for name, value in values.items()
         }
-        usable = [name for name in identity_columns if name in values]
+        usable = identity_columns
         identity_text = str(values[usable[0]]) if len(usable) == 1 else None
         table_ident = sql.Identifier(schema, table)
 

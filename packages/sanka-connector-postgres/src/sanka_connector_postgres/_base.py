@@ -37,6 +37,9 @@ from sanka_connector import (
 
 _IDENTIFIER = re.compile(r"[^a-z0-9_]+")
 _MAX_IDENTIFIER_LENGTH = 63
+_RESERVED_IDENTIFIER_PREFIX = "sanka_"
+_ENCODED_IDENTIFIER_PREFIX = "sanka_e_"
+_ESCAPED_IDENTIFIER_PREFIX = "sanka_r_"
 
 # information_schema ``data_type`` groupings (already lowercase for built-ins).
 _NUMBER_TYPES: Final = frozenset(
@@ -60,18 +63,29 @@ SKIPPED_BINARY: Final = object()
 
 
 def identifier(value: str, *, kind: str) -> str:
-    """Map ``value`` to a stable, collision-resistant PostgreSQL identifier."""
+    """Map ``value`` to a stable, injective PostgreSQL identifier domain."""
     raw = value
     normalized = _IDENTIFIER.sub("_", raw.strip().lower()).strip("_")
     if not normalized:
         raise DataError(f"cannot derive a PostgreSQL {kind} name from {value!r}")
     if normalized[0].isdigit():
         normalized = f"t_{normalized}"
-    if raw != normalized or len(normalized) > _MAX_IDENTIFIER_LENGTH:
-        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
-        prefix_length = _MAX_IDENTIFIER_LENGTH - len(digest) - 1
-        normalized = f"{normalized[:prefix_length].rstrip('_')}_{digest}"
-    return normalized
+    if (
+        raw == normalized
+        and len(normalized) <= _MAX_IDENTIFIER_LENGTH
+        and not normalized.startswith(_RESERVED_IDENTIFIER_PREFIX)
+    ):
+        return normalized
+
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+    prefix = (
+        _ESCAPED_IDENTIFIER_PREFIX
+        if raw == normalized and normalized.startswith(_RESERVED_IDENTIFIER_PREFIX)
+        else _ENCODED_IDENTIFIER_PREFIX
+    )
+    stem_length = _MAX_IDENTIFIER_LENGTH - len(prefix) - len(digest) - 1
+    stem = normalized[:stem_length].rstrip("_") or "name"
+    return f"{prefix}{stem}_{digest}"
 
 
 def field_family(data_type: str) -> str:

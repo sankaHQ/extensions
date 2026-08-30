@@ -41,10 +41,11 @@ written to jsonb are JSON-encoded too), non-string values headed for text
 columns are stringified client-side, and strings are sent untyped so the
 server casts them into any column.
 
-Safe lowercase SQL identifiers are preserved. Names that require case folding,
-punctuation/Unicode replacement, a numeric prefix, or PostgreSQL length
-truncation receive a deterministic digest suffix so distinct source fields and
-object routes cannot silently collapse onto the same target name.
+Ordinary safe lowercase SQL identifiers are preserved. Names that require case
+folding, punctuation/Unicode replacement, a numeric prefix, or PostgreSQL
+length truncation—and names inside Sanka's reserved encoded namespace—receive
+distinct deterministic prefixes and digest suffixes. Declared composite
+identities must be complete and non-NULL on every record.
 
 Apache-2.0; depends only on the `sanka-connector-sdk` interface and `psycopg[binary]`.
 Integration tests need `SANKA_MIGRATE_TEST_POSTGRES_DSN` and skip cleanly without it.

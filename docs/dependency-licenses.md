@@ -24,7 +24,6 @@ terms. They are not included in published connector metadata.
 
 ## Review boundary
 
-This is an engineering compatibility review, not legal advice. Counsel still
-owns adoption of the commercial license and any dataset license. Any future
+This is an engineering compatibility review, not legal advice. Any future
 vendoring, copying, static linking, or modification of third-party code
 requires a fresh review even if the dependency name already appears above.
