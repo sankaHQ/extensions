@@ -29,14 +29,19 @@ def _wheel_metadata(wheel: Path) -> tuple[email.message.Message, str]:
 
 def main() -> int:
     errors: list[str] = []
+    expected_packages = sorted(path.name for path in (ROOT / "packages").iterdir() if path.is_dir())
+    expected_count = len(expected_packages)
     unexpected = sorted(path.name for path in RELEASE.iterdir() if not _is_distribution(path))
     if unexpected:
         errors.append(f"combined release directory contains non-distributions: {unexpected}")
 
     package_root = RELEASE.parent / "packages"
     package_directories = sorted(path for path in package_root.iterdir() if path.is_dir())
-    if len(package_directories) != 9:
-        errors.append(f"expected 9 package release directories, found {len(package_directories)}")
+    released_packages = [path.name for path in package_directories]
+    if released_packages != expected_packages:
+        errors.append(
+            f"expected package release directories {expected_packages}, found {released_packages}"
+        )
     for package_directory in package_directories:
         package_files = sorted(path for path in package_directory.iterdir() if path.is_file())
         package_unexpected = [path.name for path in package_files if not _is_distribution(path)]
@@ -54,10 +59,10 @@ def main() -> int:
 
     wheels = sorted(RELEASE.glob("*.whl"))
     sdists = sorted(RELEASE.glob("*.tar.gz"))
-    if len(wheels) != 9:
-        errors.append(f"expected 9 wheels, found {len(wheels)}")
-    if len(sdists) != 9:
-        errors.append(f"expected 9 sdists, found {len(sdists)}")
+    if len(wheels) != expected_count:
+        errors.append(f"expected {expected_count} wheels, found {len(wheels)}")
+    if len(sdists) != expected_count:
+        errors.append(f"expected {expected_count} sdists, found {len(sdists)}")
 
     for wheel in wheels:
         metadata, entries = _wheel_metadata(wheel)

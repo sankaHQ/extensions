@@ -10,14 +10,13 @@ or another connector.
 |---|---|---|---|
 | `sanka-connector-sdk` | Apache-2.0 | every connector | Sanka-owned dependency-free interface package |
 | PyYAML | MIT | Markdown connector | permissive |
-| httpx, httpcore, idna | BSD-3-Clause | HubSpot, Salesforce, and SendGrid connectors | permissive |
-| anyio, h11, urllib3 | MIT | HTTP and ClickHouse transitive dependencies | permissive |
-| certifi | MPL-2.0 | HTTP and ClickHouse transitive dependency | file-level copyleft; consumed unmodified as a separate package |
+| urllib3 | MIT | ClickHouse transitive dependency | permissive |
+| certifi | MPL-2.0 | ClickHouse transitive dependency | file-level copyleft; consumed unmodified as a separate package |
 | clickhouse-connect | Apache-2.0 | ClickHouse connector | permissive |
 | lz4 | BSD | ClickHouse transitive dependency | permissive; upstream metadata uses the generic BSD classifier |
 | backports.zstd | PSF-2.0 | ClickHouse transitive dependency | permissive |
 | psycopg, psycopg-binary | LGPL-3.0-only | PostgreSQL connector | dynamically consumed, unmodified, and installed as separate third-party distributions; retain notices and re-review before vendoring or static linking |
-| typing-extensions | PSF-2.0 | HTTP/PostgreSQL transitive dependency | permissive |
+| typing-extensions | PSF-2.0 | PostgreSQL transitive dependency | permissive |
 
 Development-only dependencies resolve to MIT, Apache-2.0, BSD, MPL-2.0,
 PSF-2.0, dual MIT/PSF terms (SQLAlchemy's `greenlet`), or dual Apache/BSD

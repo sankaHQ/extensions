@@ -34,11 +34,8 @@ known-first-party = [
   "sanka_connector",
   "sanka_connector_clickhouse",
   "sanka_connector_csv",
-  "sanka_connector_hubspot",
   "sanka_connector_markdown",
   "sanka_connector_postgres",
-  "sanka_connector_salesforce",
-  "sanka_connector_sendgrid",
   "sanka_connector_sqlite",
 ]
 

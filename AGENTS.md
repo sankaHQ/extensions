@@ -1,6 +1,6 @@
 # Sanka Connectors
 
-This repository owns the Apache-2.0 Connector SDK and first-party connector
+This repository owns the Apache-2.0 Connector SDK and local/offline connector
 distributions used by the Sanka migration runtime.
 
 ## Boundaries
@@ -14,6 +14,9 @@ distributions used by the Sanka migration runtime.
 - Connector entry points use the `sanka.connectors` group and resolve to a
   `sanka_connector.ConnectorRegistration`.
 - Provider code must never import `sanka`, `sanka.runtime`, or another provider.
+- SaaS and managed-system providers such as HubSpot, Salesforce, and SendGrid
+  are hosted Sanka API capabilities. Do not add their credentials, clients,
+  adapters, or entry points to this repository.
 - Keep all source files Apache-2.0 and retain SPDX headers.
 
 ## Development
