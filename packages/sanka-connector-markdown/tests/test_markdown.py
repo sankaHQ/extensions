@@ -1,11 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
-from sanka_connector import ConfigurationError, Credentials
+from sanka_connector import (
+    ConfigurationError,
+    Credentials,
+    DataError,
+    SourceFilter,
+    UnsupportedFeatureError,
+)
 from sanka_connector_markdown import CONNECTOR, MarkdownSource
 
 
@@ -70,6 +77,89 @@ async def test_count_capability_and_registration(tmp_path: Path) -> None:
     assert count == 3
     assert CONNECTOR.name == "markdown"
     assert CONNECTOR.source is not None and CONNECTOR.destination is None
+
+
+async def test_source_filter_is_rejected_before_directory_access(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    source_filter = SourceFilter(field="published")
+    with pytest.raises(UnsupportedFeatureError):
+        await MarkdownSource().read_records(
+            _credentials(missing),
+            object_type="documents",
+            field_keys=["path"],
+            limit=1,
+            source_filter=source_filter,
+        )
+    with pytest.raises(UnsupportedFeatureError):
+        await MarkdownSource().count_records(
+            _credentials(missing), object_type="documents", source_filter=source_filter
+        )
+
+
+async def test_count_rejects_unknown_object_type(tmp_path: Path) -> None:
+    _write_content(tmp_path)
+    with pytest.raises(DataError):
+        await MarkdownSource().count_records(_credentials(tmp_path), object_type="other")
+
+
+async def test_external_markdown_symlink_is_rejected(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside.md"
+    outside.write_text("secret\n", encoding="utf-8")
+    (root / "leak.md").symlink_to(outside)
+
+    with pytest.raises(DataError, match="symbolic-link"):
+        await MarkdownSource().inventory(_credentials(root))
+
+
+async def test_markdown_replacement_race_cannot_escape_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if not hasattr(os, "O_NOFOLLOW") or os.open not in os.supports_dir_fd:
+        pytest.skip("descriptor-relative no-follow opens are unavailable")
+
+    root = tmp_path / "root"
+    root.mkdir()
+    victim = root / "victim.md"
+    victim.write_text("safe\n", encoding="utf-8")
+    outside = tmp_path / "outside.md"
+    outside.write_text("secret\n", encoding="utf-8")
+    real_open = os.open
+    replaced = False
+
+    def racing_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal replaced
+        if path == "victim.md" and dir_fd is not None and not replaced:
+            victim.unlink()
+            victim.symlink_to(outside)
+            replaced = True
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", racing_open)
+    with pytest.raises(DataError, match="cannot be opened safely"):
+        await MarkdownSource().inventory(_credentials(root))
+    assert replaced
+
+
+async def test_symlinked_configured_root_preserves_relative_paths(tmp_path: Path) -> None:
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    (actual / "nested").mkdir()
+    (actual / "nested" / "safe.md").write_text("safe\n", encoding="utf-8")
+    configured = tmp_path / "configured"
+    configured.symlink_to(actual, target_is_directory=True)
+
+    page = await MarkdownSource().read_records(
+        _credentials(configured), object_type="documents", field_keys=["path"], limit=10
+    )
+    assert page.records == [{"path": "nested/safe.md"}]
 
 
 async def test_missing_directory_is_configuration_error(tmp_path: Path) -> None:

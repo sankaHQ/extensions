@@ -9,3 +9,5 @@ passed through as strings. A column named `id` (case-insensitive) is the
 identity — otherwise a synthetic 1-based `row` field is exposed and used,
 with a warning. Apache-2.0; depends only on the `sanka-connector-sdk` interface (stdlib
 `csv`).
+
+Source filters are not supported yet and fail closed instead of being ignored.

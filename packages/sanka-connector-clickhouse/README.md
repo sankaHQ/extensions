@@ -10,3 +10,7 @@ inventory therefore counts with `SELECT count() … FINAL` — the merge-accurat
 number — for verification. Connections accept `http://`, `https://`, or
 `clickhouse://` URLs (the last treated as HTTP). Apache-2.0; depends only on
 the `sanka-connector-sdk` interface and `clickhouse-connect`.
+
+Safe lowercase SQL identifiers are preserved. Any source name that requires a
+lossy normalization receives a deterministic digest suffix, preventing
+distinct fields or object routes from silently sharing one target name.

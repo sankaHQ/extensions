@@ -116,8 +116,12 @@ def test_parse_requires_connection_and_never_echoes_secrets() -> None:
 
 
 def test_identifier_sanitization() -> None:
-    assert ClickHouseDestination().automatic_target_object("My Docs!") == "my_docs"
-    assert _identifier("42nd Street", kind="table") == "t_42nd_street"
+    target = ClickHouseDestination().automatic_target_object("My Docs!")
+    assert target is not None and target.startswith("my_docs_")
+    assert _identifier("42nd Street", kind="table").startswith("t_42nd_street_")
+    assert _identifier("safe_name", kind="table") == "safe_name"
+    assert _identifier("a-b", kind="column") != _identifier("a b", kind="column")
+    assert _identifier("A", kind="column") != _identifier("a", kind="column")
     with pytest.raises(DataError):
         _identifier("!!!", kind="table")
 
@@ -136,13 +140,13 @@ def test_infer_columns_types_first_seen_order_and_first_non_none() -> None:
         {"Empty": 7, "Count": 2.5},
     ]
     assert _infer_columns(rows) == {
-        "ok": "Bool",  # bool checked before int
-        "count": "Int64",  # first non-None value wins; the later 2.5 is ignored
-        "score": "Float64",
-        "name": "String",
-        "tags": "String",
-        "meta": "String",
-        "empty": "Int64",  # None rows do not pin a type
+        _identifier("OK?", kind="column"): "Bool",  # bool checked before int
+        _identifier("Count", kind="column"): "Int64",  # first non-None value wins
+        _identifier("Score", kind="column"): "Float64",
+        _identifier("Name", kind="column"): "String",
+        _identifier("Tags", kind="column"): "String",
+        _identifier("Meta", kind="column"): "String",
+        _identifier("Empty", kind="column"): "Int64",  # None does not pin a type
     }
     assert _infer_columns([{"x": None}]) == {"x": "String"}
 
@@ -162,7 +166,8 @@ def test_encode_json_containers_and_fallback() -> None:
 
 
 def test_encode_row_fills_missing_keys_with_none() -> None:
-    assert _encode_row({"Path": "a.md", "n": 1}, ["path", "n", "missing"]) == ["a.md", 1, None]
+    path = _identifier("Path", kind="column")
+    assert _encode_row({"Path": "a.md", "n": 1}, [path, "n", "missing"]) == ["a.md", 1, None]
 
 
 # -- DDL generation ---------------------------------------------------------

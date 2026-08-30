@@ -14,6 +14,7 @@ conflict policy from :class:`sanka_connector.WriteOptions`.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -43,12 +44,24 @@ _ROWID = "rowid"
 
 
 def _identifier(value: str, *, kind: str) -> str:
-    normalized = _IDENTIFIER.sub("_", value.strip().lower()).strip("_")
+    raw = value
+    normalized = _IDENTIFIER.sub("_", raw.strip().lower()).strip("_")
     if not normalized:
         raise DataError(f"cannot derive a SQLite {kind} name from {value!r}")
     if normalized[0].isdigit():
         normalized = f"t_{normalized}"
+    if raw != normalized:
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+        normalized = f"{normalized}_{digest}"
     return normalized
+
+
+def _reject_filter(source_filter: SourceFilter | None) -> None:
+    if source_filter is not None:
+        raise UnsupportedFeatureError(
+            "sqlite source filters are not supported",
+            remediation="remove the source filter or use a connector that supports it",
+        )
 
 
 def _quote(name: str) -> str:
@@ -168,6 +181,7 @@ class SqliteSource(_SqliteConnectionCache):
         cursor: str | None = None,
         source_filter: SourceFilter | None = None,
     ) -> RecordPage:
+        _reject_filter(source_filter)
         connection = self._connect(credentials)
         self._require_table(connection, object_type)
         columns = self._columns(connection, object_type)
@@ -227,6 +241,7 @@ class SqliteSource(_SqliteConnectionCache):
         object_type: str,
         source_filter: SourceFilter | None = None,
     ) -> int:
+        _reject_filter(source_filter)
         connection = self._connect(credentials)
         self._require_table(connection, object_type)
         row = connection.execute(f"SELECT COUNT(*) FROM {_quote(object_type)}").fetchone()

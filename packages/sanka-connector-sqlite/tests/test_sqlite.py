@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from sanka_connector import Credentials, WriteOptions
-from sanka_connector_sqlite import CONNECTOR, SqliteDestination
+from sanka_connector_sqlite import CONNECTOR, SqliteDestination, _identifier
 
 
 def _credentials(path: Path) -> Credentials:
@@ -68,7 +68,10 @@ async def test_inventory_readback_and_target_suggestion(tmp_path: Path) -> None:
     inventory = await destination.inventory(credentials, canonical_types={"documents", "absent"})
     assert len(inventory.objects) == 1
     assert inventory.objects[0].record_count == 3
-    assert destination.automatic_target_object("My Docs!") == "my_docs"
+    lossy = destination.automatic_target_object("My Docs!")
+    assert lossy is not None and lossy.startswith("my_docs_")
+    assert lossy != destination.automatic_target_object("my docs")
+    assert destination.automatic_target_object("my_docs") == "my_docs"
     assert CONNECTOR.name == "sqlite"
     assert CONNECTOR.destination is not None and CONNECTOR.source is not None
 
@@ -93,3 +96,8 @@ async def test_sqlite_url_prefix_is_accepted(tmp_path: Path) -> None:
     )
     assert result.status == "created"
     assert sqlite3.connect(db).execute("SELECT COUNT(*) FROM items").fetchone()[0] == 1
+
+
+def test_identifier_mapping_is_collision_resistant() -> None:
+    assert _identifier("a-b", kind="column") != _identifier("a b", kind="column")
+    assert _identifier("A", kind="column") != _identifier("a", kind="column")

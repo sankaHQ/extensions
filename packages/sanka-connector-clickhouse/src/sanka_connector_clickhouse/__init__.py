@@ -40,6 +40,7 @@ a server session so concurrent worker threads never contend on a session lock.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import threading
@@ -163,11 +164,15 @@ def _parse_connection(credentials: Credentials) -> _ConnectionTarget:
 
 
 def _identifier(value: str, *, kind: str) -> str:
-    normalized = _IDENTIFIER.sub("_", value.strip().lower()).strip("_")
+    raw = value
+    normalized = _IDENTIFIER.sub("_", raw.strip().lower()).strip("_")
     if not normalized:
         raise DataError(f"cannot derive a ClickHouse {kind} name from {value!r}")
     if normalized[0].isdigit():
         normalized = f"t_{normalized}"
+    if raw != normalized:
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+        normalized = f"{normalized}_{digest}"
     return normalized
 
 

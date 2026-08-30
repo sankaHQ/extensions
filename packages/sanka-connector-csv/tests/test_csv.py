@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from sanka_connector import ConfigurationError, Credentials, DataError, SupportsRecordCounts
+from sanka_connector import (
+    ConfigurationError,
+    Credentials,
+    DataError,
+    SourceFilter,
+    SupportsRecordCounts,
+    UnsupportedFeatureError,
+)
 from sanka_connector_csv import CONNECTOR, CsvSource
 
 
@@ -119,6 +126,23 @@ async def test_count_capability(tmp_path: Path) -> None:
     source = CsvSource()
     assert await source.count_records(_credentials(path), object_type="notes") == 3
     assert isinstance(source, SupportsRecordCounts)
+
+
+async def test_source_filter_is_rejected_before_file_access(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.csv"
+    source_filter = SourceFilter(field="active")
+    with pytest.raises(UnsupportedFeatureError):
+        await CsvSource().read_records(
+            _credentials(missing),
+            object_type="missing",
+            field_keys=["id"],
+            limit=1,
+            source_filter=source_filter,
+        )
+    with pytest.raises(UnsupportedFeatureError):
+        await CsvSource().count_records(
+            _credentials(missing), object_type="missing", source_filter=source_filter
+        )
 
 
 async def test_missing_and_empty_files_are_configuration_errors(tmp_path: Path) -> None:

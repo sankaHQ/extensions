@@ -15,3 +15,8 @@ identity-based upserts honoring the run's conflict policy and JSON-encoded
 complex values. Inventory reads back table row counts for verification.
 
 Apache-2.0; depends only on the `sanka-connector-sdk` interface (stdlib `sqlite3`).
+
+Source filters are not supported yet and fail closed instead of being ignored.
+Safe lowercase SQL identifiers are preserved; names requiring lossy
+normalization receive a deterministic digest suffix so distinct fields or
+object routes cannot silently collapse onto one target name.
