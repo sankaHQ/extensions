@@ -12,6 +12,7 @@ from typing import Any, cast
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ROOT / "packages"
 SDK_NAME = "sanka-connector-sdk"
+HOSTED_SYSTEM_PROVIDERS = frozenset({"hubspot", "salesforce", "sendgrid"})
 
 
 def _project(package: Path) -> dict[str, Any]:
@@ -51,6 +52,10 @@ def main() -> int:
         if package.name == SDK_NAME:
             continue
         provider = package.name.removeprefix("sanka-connector-")
+        if provider in HOSTED_SYSTEM_PROVIDERS:
+            errors.append(
+                f"{package.name} is hosted-only and must remain in Sanka's managed API runtime"
+            )
         own_module = f"sanka_connector_{provider.replace('-', '_')}"
         project = _project(package)
         dependencies = [str(item).lower() for item in project.get("dependencies", [])]

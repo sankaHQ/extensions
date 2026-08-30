@@ -14,5 +14,10 @@ Rules:
 - One package, documentation file, and test directory per provider; each
   provider distribution owns its `sanka.connectors` entry point.
 
-First-party providers: `markdown`, `csv`, `sqlite`, `postgres`, `clickhouse`,
-`salesforce`, `hubspot`, and `sendgrid`.
+First-party local providers: `markdown`, `csv`, `sqlite`, `postgres`, and
+`clickhouse`.
+
+SaaS and managed-system providers such as HubSpot, Salesforce, and SendGrid do
+not belong in this repository. They run inside Sanka's hosted API and job
+runtime so credentials, execution controls, and audit evidence stay managed by
+Sanka.

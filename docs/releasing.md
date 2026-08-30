@@ -1,11 +1,11 @@
 # Releasing Sanka connector packages
 
-All nine packages share one version and one reviewed source tag. Publishing is
+All six packages share one version and one reviewed source tag. Publishing is
 manual; merges and tags do not upload packages automatically.
 
 ## Package order
 
-Publish `sanka-connector-sdk` first. Publish the eight provider packages only
+Publish `sanka-connector-sdk` first. Publish the five provider packages only
 after the SDK upload succeeds, because every provider declares the SDK as its
 only Sanka dependency.
 
@@ -15,7 +15,7 @@ only Sanka dependency.
 uv sync --frozen --all-packages
 make check
 make build-release
-uv run python scripts/check_release_tag.py v0.1.0a9 tag
+uv run python scripts/check_release_tag.py v0.1.0a10 tag
 ```
 
 `make build-release` writes per-package wheels and source distributions under

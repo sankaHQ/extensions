@@ -21,11 +21,8 @@ on:
           - sanka-connector-sdk
           - sanka-connector-clickhouse
           - sanka-connector-csv
-          - sanka-connector-hubspot
           - sanka-connector-markdown
           - sanka-connector-postgres
-          - sanka-connector-salesforce
-          - sanka-connector-sendgrid
           - sanka-connector-sqlite
       confirmation:
         description: Enter the exact target, or target-package for a bootstrap target
@@ -95,11 +92,8 @@ jobs:
         package:
           - sanka-connector-clickhouse
           - sanka-connector-csv
-          - sanka-connector-hubspot
           - sanka-connector-markdown
           - sanka-connector-postgres
-          - sanka-connector-salesforce
-          - sanka-connector-sendgrid
           - sanka-connector-sqlite
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -149,11 +143,8 @@ jobs:
         package:
           - sanka-connector-clickhouse
           - sanka-connector-csv
-          - sanka-connector-hubspot
           - sanka-connector-markdown
           - sanka-connector-postgres
-          - sanka-connector-salesforce
-          - sanka-connector-sendgrid
           - sanka-connector-sqlite
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
