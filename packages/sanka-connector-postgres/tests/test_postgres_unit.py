@@ -6,6 +6,7 @@ validation, and registration shape."""
 from __future__ import annotations
 
 import datetime
+import hashlib
 import uuid
 from decimal import Decimal
 
@@ -46,10 +47,15 @@ from sanka_connector_postgres._destination import (
 
 
 def test_identifier_sanitization() -> None:
-    assert identifier("My Docs!", kind="table") == "my_docs"
-    assert identifier("  Ärger--Straße  ", kind="table") == "rger_stra_e"
-    assert identifier("42nd_street", kind="column") == "t_42nd_street"
-    assert identifier("a" * 80, kind="table") == "a" * 63
+    assert identifier("My Docs!", kind="table").startswith("my_docs_")
+    assert identifier("  Ärger--Straße  ", kind="table").startswith("rger_stra_e_")
+    assert identifier("42nd_street", kind="column").startswith("t_42nd_street_")
+    long = identifier("a" * 80, kind="table")
+    assert len(long) == 63
+    assert long.endswith("_" + hashlib.sha256(("a" * 80).encode()).hexdigest()[:20])
+    assert identifier("safe_name", kind="table") == "safe_name"
+    assert identifier("a-b", kind="column") != identifier("a b", kind="column")
+    assert identifier("A", kind="column") != identifier("a", kind="column")
     with pytest.raises(DataError):
         identifier("!!!", kind="table")
 
@@ -222,4 +228,5 @@ def test_registration_shape_and_capabilities() -> None:
     assert isinstance(source, SupportsRecordCounts)
     assert isinstance(source, SupportsSnapshotBounds)
     assert isinstance(destination, DestinationConnector)
-    assert destination.automatic_target_object("Sales Orders (2026)") == "sales_orders_2026"
+    target = destination.automatic_target_object("Sales Orders (2026)")
+    assert target is not None and target.startswith("sales_orders_2026_")

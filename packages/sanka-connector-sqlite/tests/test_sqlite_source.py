@@ -9,6 +9,7 @@ import pytest
 from sanka_connector import (
     ConfigurationError,
     Credentials,
+    SourceFilter,
     SupportsRecordCounts,
     UnsupportedFeatureError,
 )
@@ -164,6 +165,23 @@ async def test_count_capability_and_registration_has_both_roles(tmp_path: Path) 
     assert CONNECTOR.name == "sqlite"
     assert CONNECTOR.source is not None
     assert CONNECTOR.destination is not None
+
+
+async def test_source_filter_is_rejected_before_database_access(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.db"
+    source_filter = SourceFilter(field="active")
+    with pytest.raises(UnsupportedFeatureError):
+        await SqliteSource().read_records(
+            _credentials(missing),
+            object_type="items",
+            field_keys=["id"],
+            limit=1,
+            source_filter=source_filter,
+        )
+    with pytest.raises(UnsupportedFeatureError):
+        await SqliteSource().count_records(
+            _credentials(missing), object_type="items", source_filter=source_filter
+        )
 
 
 async def test_missing_database_is_configuration_error(tmp_path: Path) -> None:

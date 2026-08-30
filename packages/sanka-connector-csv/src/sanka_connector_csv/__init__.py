@@ -30,6 +30,7 @@ from sanka_connector import (
     RecordPage,
     SourceFilter,
     SourceObject,
+    UnsupportedFeatureError,
 )
 
 _ROW_FIELD = "row"
@@ -133,6 +134,7 @@ class CsvSource:
         cursor: str | None = None,
         source_filter: SourceFilter | None = None,
     ) -> RecordPage:
+        _reject_filter(source_filter)
         parsed = self._load(credentials)
         if object_type != parsed.key:
             raise DataError(f"csv source has no object type {object_type!r}")
@@ -160,6 +162,7 @@ class CsvSource:
         object_type: str,
         source_filter: SourceFilter | None = None,
     ) -> int:
+        _reject_filter(source_filter)
         parsed = self._load(credentials)
         if object_type != parsed.key:
             raise DataError(f"csv source has no object type {object_type!r}")
@@ -235,6 +238,14 @@ def _cell_type(text: str) -> str:
 
 def _pick_type(types: set[str]) -> str:
     return next(iter(types)) if len(types) == 1 else "string"
+
+
+def _reject_filter(source_filter: SourceFilter | None) -> None:
+    if source_filter is not None:
+        raise UnsupportedFeatureError(
+            "csv source filters are not supported",
+            remediation="remove the source filter or use a connector that supports it",
+        )
 
 
 CONNECTOR = ConnectorRegistration(name="csv", source=CsvSource())

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import re
 import uuid
 from collections.abc import AsyncIterator
@@ -59,14 +60,17 @@ SKIPPED_BINARY: Final = object()
 
 
 def identifier(value: str, *, kind: str) -> str:
-    """Sanitize ``value`` into a lowercase PostgreSQL identifier."""
-    normalized = _IDENTIFIER.sub("_", value.strip().lower()).strip("_")
+    """Map ``value`` to a stable, collision-resistant PostgreSQL identifier."""
+    raw = value
+    normalized = _IDENTIFIER.sub("_", raw.strip().lower()).strip("_")
     if not normalized:
         raise DataError(f"cannot derive a PostgreSQL {kind} name from {value!r}")
     if normalized[0].isdigit():
         normalized = f"t_{normalized}"
-    if len(normalized) > _MAX_IDENTIFIER_LENGTH:
-        normalized = normalized[:_MAX_IDENTIFIER_LENGTH].rstrip("_")
+    if raw != normalized or len(normalized) > _MAX_IDENTIFIER_LENGTH:
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+        prefix_length = _MAX_IDENTIFIER_LENGTH - len(digest) - 1
+        normalized = f"{normalized[:prefix_length].rstrip('_')}_{digest}"
     return normalized
 
 

@@ -8,7 +8,7 @@ Rules:
 
 - A connector imports **only** `sanka_connector` (the Apache-2.0 SDK) — never
   `sanka.runtime`, `sanka.cli`, or any other runtime module. CI enforces this
-  (`scripts/check_import_boundaries.py`), which is what keeps connectors from
+  (`scripts/check_boundaries.py`), which is what keeps connectors from
   becoming derivative works of the AGPL runtime.
 - Every source file carries `# SPDX-License-Identifier: Apache-2.0`.
 - One package, documentation file, and test directory per provider; each

@@ -8,6 +8,8 @@ scanned in sorted order so pagination cursors are deterministic.
 
 from __future__ import annotations
 
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,7 +27,10 @@ from sanka_connector import (
     RecordPage,
     SourceFilter,
     SourceObject,
+    UnsupportedFeatureError,
 )
+
+_SECURE_OPEN_AVAILABLE = hasattr(os, "O_NOFOLLOW") and os.open in os.supports_dir_fd
 
 _RESERVED_FIELDS = ("path", "slug", "content")
 
@@ -116,6 +121,7 @@ class MarkdownSource:
         cursor: str | None = None,
         source_filter: SourceFilter | None = None,
     ) -> RecordPage:
+        _reject_filter(source_filter)
         if object_type != "documents":
             raise DataError(f"markdown source has no object type {object_type!r}")
         documents = self._scan(self._root(credentials))
@@ -145,6 +151,9 @@ class MarkdownSource:
         object_type: str,
         source_filter: SourceFilter | None = None,
     ) -> int:
+        _reject_filter(source_filter)
+        if object_type != "documents":
+            raise DataError(f"markdown source has no object type {object_type!r}")
         return len(self._scan(self._root(credentials)))
 
     def _root(self, credentials: Credentials) -> Path:
@@ -157,13 +166,20 @@ class MarkdownSource:
         return root
 
     def _scan(self, root: Path) -> list[_Document]:
+        resolved_root = root.resolve(strict=True)
         documents: list[_Document] = []
-        for file_path in sorted(root.rglob("*.md")):
-            text = file_path.read_text(encoding="utf-8")
+        for file_path in sorted(resolved_root.rglob("*.md")):
+            relative_path = file_path.relative_to(resolved_root)
+            if file_path.is_symlink():
+                raise DataError(
+                    "markdown source contains a symbolic-link file outside its trusted "
+                    f"file boundary: {relative_path}"
+                )
+            text = _read_confined_text(resolved_root, relative_path)
             frontmatter, content, failed = _split_frontmatter(text)
             documents.append(
                 _Document(
-                    path=file_path.relative_to(root).as_posix(),
+                    path=relative_path.as_posix(),
                     slug=file_path.stem,
                     content=content,
                     frontmatter=frontmatter,
@@ -171,6 +187,96 @@ class MarkdownSource:
                 )
             )
         return documents
+
+
+def _read_confined_text(root: Path, relative_path: Path) -> str:
+    """Read one regular file without following a replaced path component."""
+
+    if (
+        not relative_path.parts
+        or relative_path.is_absolute()
+        or any(part in {"", ".", ".."} for part in relative_path.parts)
+    ):
+        raise DataError(f"markdown source path cannot be opened safely: {relative_path}")
+    if not _SECURE_OPEN_AVAILABLE:
+        if os.name == "nt":
+            return _read_confined_text_windows(root, relative_path)
+        raise DataError(f"markdown source path cannot be opened safely: {relative_path}")
+
+    nofollow = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    directory_flags = nofollow | getattr(os, "O_DIRECTORY", 0)
+    directory_fds: list[int] = []
+    file_fd: int | None = None
+    try:
+        root_fd = os.open(root, directory_flags)
+        directory_fds.append(root_fd)
+        parent_fd = root_fd
+        for component in relative_path.parts[:-1]:
+            parent_fd = os.open(component, directory_flags, dir_fd=parent_fd)
+            directory_fds.append(parent_fd)
+        file_fd = os.open(relative_path.parts[-1], nofollow, dir_fd=parent_fd)
+        if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+            raise DataError(f"markdown source path is not a regular file: {relative_path}")
+        with os.fdopen(file_fd, encoding="utf-8") as stream:
+            file_fd = None
+            return stream.read()
+    except OSError as error:
+        raise DataError(f"markdown source path cannot be opened safely: {relative_path}") from error
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        for descriptor in reversed(directory_fds):
+            os.close(descriptor)
+
+
+def _read_confined_text_windows(root: Path, relative_path: Path) -> str:
+    """Validate the final Windows handle before reading through it."""
+
+    import ctypes
+    import importlib
+
+    windows_api: Any = ctypes
+    msvcrt_api: Any = importlib.import_module("msvcrt")
+
+    file_fd: int | None = None
+    try:
+        file_fd = os.open(
+            root / relative_path,
+            os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0),
+        )
+        if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+            raise DataError(f"markdown source path is not a regular file: {relative_path}")
+
+        buffer = ctypes.create_unicode_buffer(32768)
+        kernel32 = windows_api.WinDLL("kernel32", use_last_error=True)
+        written = kernel32.GetFinalPathNameByHandleW(
+            msvcrt_api.get_osfhandle(file_fd), buffer, len(buffer), 0
+        )
+        if written == 0 or written >= len(buffer):
+            raise OSError(
+                windows_api.get_last_error(),
+                "could not resolve the opened file handle",
+            )
+        opened_path = buffer.value
+        if opened_path.startswith("\\\\?\\UNC\\"):
+            opened_path = "\\\\" + opened_path[8:]
+        elif opened_path.startswith("\\\\?\\"):
+            opened_path = opened_path[4:]
+        expected_root = os.path.normcase(os.path.abspath(root))
+        opened_path = os.path.normcase(os.path.abspath(opened_path))
+        if os.path.commonpath([expected_root, opened_path]) != expected_root:
+            raise DataError(
+                f"markdown source file resolves outside the configured directory: {relative_path}"
+            )
+
+        with os.fdopen(file_fd, encoding="utf-8") as stream:
+            file_fd = None
+            return stream.read()
+    except OSError as error:
+        raise DataError(f"markdown source path cannot be opened safely: {relative_path}") from error
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, Any], str, bool]:
@@ -206,6 +312,14 @@ def _type_name(value: Any) -> str:
 
 def _pick_type(types: set[str]) -> str:
     return next(iter(types)) if len(types) == 1 else "string"
+
+
+def _reject_filter(source_filter: SourceFilter | None) -> None:
+    if source_filter is not None:
+        raise UnsupportedFeatureError(
+            "markdown source filters are not supported",
+            remediation="remove the source filter or use a connector that supports it",
+        )
 
 
 CONNECTOR = ConnectorRegistration(name="markdown", source=MarkdownSource())
