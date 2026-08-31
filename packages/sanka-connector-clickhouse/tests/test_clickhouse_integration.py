@@ -60,7 +60,9 @@ def scratch_table() -> Iterator[Callable[[], str]]:
     created: list[str] = []
 
     def make() -> str:
-        name = f"sanka_migrate_it_{uuid.uuid4().hex[:12]}"
+        # Keep fixture names outside the connector-reserved ``sanka_`` domain.
+        # Reserved names are intentionally escaped to an injective physical name.
+        name = f"migration_it_{uuid.uuid4().hex[:12]}"
         created.append(name)
         return name
 
@@ -155,7 +157,10 @@ async def test_single_write_schema_evolution_and_empty_skip(
     assert evolved.status == "created"
 
     skipped = await destination.write_record(
-        credentials, object_type=table, properties={}, options=options
+        credentials,
+        object_type=table,
+        properties={},
+        options=WriteOptions(conflict_policy="create"),
     )
     assert skipped.status == "skipped"
 

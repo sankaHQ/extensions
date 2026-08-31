@@ -402,7 +402,7 @@ async def test_destination_inventory_and_create_policy(
     assert inventory.objects[0].key == "documents"
     assert inventory.objects[0].record_count == 3
     target = destination.automatic_target_object("My Docs!")
-    assert target is not None and target.startswith("my_docs_")
+    assert target is not None and target.startswith("sanka_e_my_docs_")
 
     # create policy without identity: plain inserts, no destination id.
     for _ in range(2):
