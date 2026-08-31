@@ -15,7 +15,7 @@ only Sanka dependency.
 uv sync --frozen --all-packages
 make check
 make build-release
-uv run python scripts/check_release_tag.py v0.1.0a10 tag
+uv run python scripts/check_release_tag.py v0.1.0a11 tag
 ```
 
 `make build-release` writes per-package wheels and source distributions under

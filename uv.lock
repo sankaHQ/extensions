@@ -607,7 +607,7 @@ wheels = [
 
 [[package]]
 name = "sanka-connector-clickhouse"
-version = "0.1.0a10"
+version = "0.1.0a11"
 source = { editable = "packages/sanka-connector-clickhouse" }
 dependencies = [
     { name = "clickhouse-connect" },
@@ -622,7 +622,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-connector-csv"
-version = "0.1.0a10"
+version = "0.1.0a11"
 source = { editable = "packages/sanka-connector-csv" }
 dependencies = [
     { name = "sanka-connector-sdk" },
@@ -633,7 +633,7 @@ requires-dist = [{ name = "sanka-connector-sdk", editable = "packages/sanka-conn
 
 [[package]]
 name = "sanka-connector-markdown"
-version = "0.1.0a10"
+version = "0.1.0a11"
 source = { editable = "packages/sanka-connector-markdown" }
 dependencies = [
     { name = "pyyaml" },
@@ -648,7 +648,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-connector-postgres"
-version = "0.1.0a10"
+version = "0.1.0a11"
 source = { editable = "packages/sanka-connector-postgres" }
 dependencies = [
     { name = "psycopg", extra = ["binary"] },
@@ -663,12 +663,12 @@ requires-dist = [
 
 [[package]]
 name = "sanka-connector-sdk"
-version = "0.1.0a10"
+version = "0.1.0a11"
 source = { editable = "packages/sanka-connector-sdk" }
 
 [[package]]
 name = "sanka-connector-sqlite"
-version = "0.1.0a10"
+version = "0.1.0a11"
 source = { editable = "packages/sanka-connector-sqlite" }
 dependencies = [
     { name = "sanka-connector-sdk" },
