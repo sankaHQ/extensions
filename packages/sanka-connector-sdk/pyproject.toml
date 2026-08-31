@@ -1,6 +1,6 @@
 [project]
 name = "sanka-connector-sdk"
-version = "0.1.0a10"
+version = "0.1.0a11"
 description = "Typed connector interfaces for the Sanka migration runtime"
 readme = "README.md"
 requires-python = ">=3.12"

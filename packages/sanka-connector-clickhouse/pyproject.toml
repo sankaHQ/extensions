@@ -1,13 +1,13 @@
 [project]
 name = "sanka-connector-clickhouse"
-version = "0.1.0a10"
+version = "0.1.0a11"
 description = "ClickHouse connector for the Sanka migration runtime"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Sanka, Inc." }]
-dependencies = ["clickhouse-connect>=0.8", "sanka-connector-sdk==0.1.0a10"]
+dependencies = ["clickhouse-connect>=0.8", "sanka-connector-sdk==0.1.0a11"]
 
 [project.entry-points."sanka.connectors"]
 clickhouse = "sanka_connector_clickhouse:CONNECTOR"
