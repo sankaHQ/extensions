@@ -13,8 +13,8 @@ dependencies = ["psycopg[binary]>=3.2", "sanka-connector-sdk==0.1.0a10"]
 postgres = "sanka_connector_postgres:CONNECTOR"
 
 [project.urls]
-Repository = "https://github.com/sankaHQ/sanka-extensions"
-Issues = "https://github.com/sankaHQ/sanka-extensions/issues"
+Repository = "https://github.com/sankaHQ/extensions"
+Issues = "https://github.com/sankaHQ/extensions/issues"
 
 [build-system]
 requires = ["hatchling>=1.27"]
