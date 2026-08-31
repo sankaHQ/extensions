@@ -1,10 +1,16 @@
-# Sanka Connectors
+# Sanka Extensions
 
-Apache-2.0 connector interfaces and local/offline provider plugins for the
+Apache-2.0 interfaces and independently installable extensions for the
 [Sanka migration runtime](https://github.com/sankaHQ/sanka).
 
-The repository is a Python 3.12+ `uv` workspace. The core SDK is deliberately
-small and has no runtime dependencies:
+Sanka owns the migration lifecycle—`scan`, `plan`, `apply`, `test`, and
+`verify`. Extensions own stack-specific detection, inspection, generation, and data
+access. Keeping those concerns here lets the base runtime stay small while
+developers contribute support for frameworks, databases, languages, libraries,
+and file formats without adding every optional dependency to Sanka itself.
+
+The repository is a Python 3.12+ `uv` workspace. Its first stable extension interface
+is the deliberately small, zero-dependency Connector SDK:
 
 - `sanka-connector-sdk` — typed source/destination protocols, records,
   capabilities, credentials, errors, and entry-point registration
@@ -14,9 +20,21 @@ small and has no runtime dependencies:
 - `sanka-connector-postgres` — PostgreSQL source and destination
 - `sanka-connector-sqlite` — SQLite source and destination
 
-Provider packages advertise themselves through the `sanka.connectors` Python
-entry-point group. Installing one adds that provider to Sanka without adding its
-driver or client dependencies to the base Sanka installation.
+Connector extensions advertise themselves through the existing `sanka.connectors`
+Python entry-point group. Installing one adds that capability to Sanka without
+adding its driver dependencies to the base Sanka installation. These published
+package names and entry points remain stable after the repository rename.
+
+Framework and code-transformation extensions—for example Flask inspection or a future
+framework target—will use typed extension interfaces added here. They must not import
+Sanka's AGPL runtime or use ad hoc in-process hooks. See [The extension
+model](docs/extensions.md) for the contribution boundary and planned resolver flow.
+
+Today Sanka discovers connector extensions that are already installed. It does not
+silently download arbitrary packages during `scan` or `plan`. The resolver work
+will let Sanka fingerprint a project, select only reviewed extensions required for
+that project, materialize exact versions in an isolated environment, and record
+their versions and hashes in the plan.
 
 HubSpot, Salesforce, SendGrid, and other SaaS/system migrations run through
 Sanka's hosted System Migration API. Their credentials and provider runtimes
@@ -29,6 +47,7 @@ uv sync --all-packages
 make check
 ```
 
-See [Connector development](docs/connector-development.md) for the interface
-boundary and provider rules. See [Releasing](docs/releasing.md) for the
-SDK-first, trusted-publishing release gate.
+See [The extension model](docs/extensions.md) for extension and resolution rules,
+[Connector-extension development](docs/connector-development.md) for the current
+interface boundary, and [Releasing](docs/releasing.md) for the SDK-first,
+trusted-publishing release gate.
