@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Sanka Mods is currently pre-1.0. Security fixes are provided for the
+Sanka Extensions is currently pre-1.0. Security fixes are provided for the
 latest published prerelease only. Older prereleases do not receive security
 backports.
 
@@ -11,7 +11,7 @@ backports.
 Do not open a public GitHub issue for a suspected vulnerability.
 
 Email `hey@sanka.com` with a subject beginning
-`[Security][mods]`. Include the affected package and version,
+`[Security][extensions]`. Include the affected package and version,
 reproduction steps, expected impact, and any suggested mitigation. Do not
 include real customer data, access tokens, passwords, or other credentials.
 
@@ -21,7 +21,7 @@ policy.
 
 ## Security boundaries
 
-This repository contains extension SDKs and local or offline mod packages.
+This repository contains extension SDKs and local or offline extension packages.
 Credentials and endpoint configuration are trusted operator inputs; source
 code, records, file trees, schema names, and database contents are untrusted.
 
@@ -30,8 +30,8 @@ identifiers are enforced scope boundaries. Unsupported filters must fail
 closed, files must remain inside their configured roots, and distinct source
 names must never be silently merged.
 
-Mod resolution must not treat an accepted community contribution as trusted
+Extension resolution must not treat an accepted community contribution as trusted
 runtime code automatically. Exact distribution versions and hashes must be
-reviewed and locked before execution, and mod code must run through its typed
+reviewed and locked before execution, and extension code must run through its typed
 capability boundary. Hosted SaaS and managed-system connectors are private
 Sanka API capabilities and are outside this repository.

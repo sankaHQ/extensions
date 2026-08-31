@@ -1,8 +1,8 @@
-# Sanka Mods
+# Sanka Extensions
 
 This repository owns Apache-2.0 extension SDKs and independently installable
-mods used by the Sanka migration runtime. The current executable mod interface
-is the Connector SDK; new framework, language, library, or generation mod kinds
+extensions used by the Sanka migration runtime. The current executable extension interface
+is the Connector SDK; new framework, language, library, or generation extension kinds
 must establish a typed interface and boundary checks before adding packages.
 
 ## Boundaries
@@ -11,12 +11,12 @@ must establish a typed interface and boundary checks before adding packages.
   declarations, credentials, errors, and entry-point registration only.
 - The SDK must not depend on Sanka's AGPL runtime, database drivers, framework
   runtimes, or provider clients.
-- Each `packages/sanka-connector-*` connector mod depends on the SDK and only
-  the third-party libraries that mod needs.
+- Each `packages/sanka-connector-*` connector extension depends on the SDK and only
+  the third-party libraries that extension needs.
 - Connector entry points use the `sanka.connectors` group and resolve to a
   `sanka_connector.ConnectorRegistration`.
-- Mod code must never import `sanka`, `sanka.runtime`, or another mod.
-- Do not add arbitrary in-process hooks. New mod kinds need typed, versioned
+- Extension code must never import `sanka`, `sanka.runtime`, or another extension.
+- Do not add arbitrary in-process hooks. New extension kinds need typed, versioned
   contracts, isolated execution, deterministic discovery, and fail-closed
   capability validation.
 - SaaS and managed-system providers such as HubSpot, Salesforce, and SendGrid

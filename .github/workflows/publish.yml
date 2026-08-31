@@ -1,4 +1,4 @@
-name: Publish mod packages
+name: Publish extension packages
 
 on:
   workflow_dispatch:
@@ -57,7 +57,7 @@ jobs:
   publish-sdk-testpypi:
     name: Publish SDK to TestPyPI
     if: >-
-      vars.SANKA_MODS_PUBLISH_ENABLED == 'true' &&
+      vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
       inputs.target == 'testpypi' &&
       inputs.confirmation == 'publish-testpypi'
     needs: build
@@ -79,7 +79,7 @@ jobs:
   publish-providers-testpypi:
     name: Publish providers to TestPyPI
     if: >-
-      vars.SANKA_MODS_PUBLISH_ENABLED == 'true' &&
+      vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
       inputs.target == 'testpypi' &&
       inputs.confirmation == 'publish-testpypi'
     needs: [build, publish-sdk-testpypi]
@@ -109,7 +109,7 @@ jobs:
   publish-sdk-pypi:
     name: Publish SDK to PyPI
     if: >-
-      vars.SANKA_MODS_PUBLISH_ENABLED == 'true' &&
+      vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
       inputs.target == 'pypi' &&
       inputs.confirmation == 'publish-pypi'
     needs: build
@@ -130,7 +130,7 @@ jobs:
   publish-providers-pypi:
     name: Publish providers to PyPI
     if: >-
-      vars.SANKA_MODS_PUBLISH_ENABLED == 'true' &&
+      vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
       inputs.target == 'pypi' &&
       inputs.confirmation == 'publish-pypi'
     needs: [build, publish-sdk-pypi]
@@ -160,7 +160,7 @@ jobs:
     name: Bootstrap ${{ inputs.package }} on TestPyPI
     if: >-
       inputs.target == 'bootstrap-testpypi' &&
-      vars.SANKA_MODS_BOOTSTRAP_ENABLED == 'true' &&
+      vars.SANKA_EXTENSIONS_BOOTSTRAP_ENABLED == 'true' &&
       inputs.confirmation == format('bootstrap-testpypi-{0}', inputs.package)
     needs: build
     runs-on: ubuntu-latest
@@ -182,7 +182,7 @@ jobs:
     name: Bootstrap ${{ inputs.package }} on PyPI
     if: >-
       inputs.target == 'bootstrap-pypi' &&
-      vars.SANKA_MODS_BOOTSTRAP_ENABLED == 'true' &&
+      vars.SANKA_EXTENSIONS_BOOTSTRAP_ENABLED == 'true' &&
       inputs.confirmation == format('bootstrap-pypi-{0}', inputs.package)
     needs: build
     runs-on: ubuntu-latest

@@ -1,7 +1,7 @@
-# Connector mods
+# Connector extensions
 
-Connector mods live under `packages/`, one distribution per provider, and are
-licensed **Apache-2.0**. Each mod is installed independently from the Sanka
+Connector extensions live under `packages/`, one distribution per provider, and are
+licensed **Apache-2.0**. Each extension is installed independently from the Sanka
 migration runtime.
 
 Rules:
@@ -14,7 +14,7 @@ Rules:
 - One package, documentation file, and test directory per provider; each
   provider distribution owns its `sanka.connectors` entry point.
 
-Current first-party connector mods: `markdown`, `csv`, `sqlite`, `postgres`, and
+Current first-party connector extensions: `markdown`, `csv`, `sqlite`, `postgres`, and
 `clickhouse`.
 
 SaaS and managed-system providers such as HubSpot, Salesforce, and SendGrid do

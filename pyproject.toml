@@ -1,7 +1,7 @@
 [project]
-name = "sanka-mods-workspace"
+name = "sanka-extensions-workspace"
 version = "0.0.0"
-description = "Development workspace for Sanka extension SDKs and mods"
+description = "Development workspace for Sanka extension SDKs and packages"
 license = "Apache-2.0"
 requires-python = ">=3.12"
 

@@ -16,8 +16,8 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Repository = "https://github.com/sankaHQ/mods"
-Issues = "https://github.com/sankaHQ/mods/issues"
+Repository = "https://github.com/sankaHQ/extensions"
+Issues = "https://github.com/sankaHQ/extensions/issues"
 
 [build-system]
 requires = ["hatchling>=1.27"]
