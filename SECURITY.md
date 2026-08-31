@@ -11,7 +11,7 @@ backports.
 Do not open a public GitHub issue for a suspected vulnerability.
 
 Email `hey@sanka.com` with a subject beginning
-`[Security][sanka-extensions]`. Include the affected package and version,
+`[Security][extensions]`. Include the affected package and version,
 reproduction steps, expected impact, and any suggested mitigation. Do not
 include real customer data, access tokens, passwords, or other credentials.
 

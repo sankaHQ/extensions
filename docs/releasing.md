@@ -27,7 +27,7 @@ commit, and SHA-256 hashes. It does not publish anything.
 Each PyPI and TestPyPI project must trust this exact identity:
 
 - owner: `sankaHQ`
-- repository: `sanka-extensions`
+- repository: `extensions`
 - workflow: `publish.yml`
 - environment: `pypi` or `testpypi`
 
