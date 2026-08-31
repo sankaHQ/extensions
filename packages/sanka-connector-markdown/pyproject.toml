@@ -13,8 +13,8 @@ dependencies = ["pyyaml>=6", "sanka-connector-sdk==0.1.0a10"]
 markdown = "sanka_connector_markdown:CONNECTOR"
 
 [project.urls]
-Repository = "https://github.com/sankaHQ/sanka-connectors"
-Issues = "https://github.com/sankaHQ/sanka-connectors/issues"
+Repository = "https://github.com/sankaHQ/mods"
+Issues = "https://github.com/sankaHQ/mods/issues"
 
 [build-system]
 requires = ["hatchling>=1.27"]

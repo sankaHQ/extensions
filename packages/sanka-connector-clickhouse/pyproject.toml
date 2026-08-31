@@ -13,8 +13,8 @@ dependencies = ["clickhouse-connect>=0.8", "sanka-connector-sdk==0.1.0a10"]
 clickhouse = "sanka_connector_clickhouse:CONNECTOR"
 
 [project.urls]
-Repository = "https://github.com/sankaHQ/sanka-connectors"
-Issues = "https://github.com/sankaHQ/sanka-connectors/issues"
+Repository = "https://github.com/sankaHQ/mods"
+Issues = "https://github.com/sankaHQ/mods/issues"
 
 [build-system]
 requires = ["hatchling>=1.27"]
