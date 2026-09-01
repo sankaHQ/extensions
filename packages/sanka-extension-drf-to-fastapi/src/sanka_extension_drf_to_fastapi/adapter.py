@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import math
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -63,8 +64,27 @@ def _artifact(request: ExtensionRequest, name: str) -> str:
     return str((Path(request.artifact_root) / name).resolve())
 
 
+def _artifacts(request: ExtensionRequest, values: Iterable[str | Path]) -> tuple[str, ...]:
+    roots = [Path(request.artifact_root).resolve()]
+    for name in ("output", "bench_candidate"):
+        value = request.configuration.get(name)
+        if not isinstance(value, str) or not value:
+            continue
+        root = Path(value)
+        roots.append((root if root.is_absolute() else Path(request.project_root) / root).resolve())
+    artifacts = tuple(str(Path(value).resolve()) for value in values)
+    for artifact in map(Path, artifacts):
+        if not any(artifact == root or artifact.is_relative_to(root) for root in roots):
+            raise ValueError(f"artifact path is outside allowed roots: {artifact}")
+    return artifacts
+
+
 def _json_value(value: object) -> JsonValue:
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("extension data contains a non-finite number")
+        return value
+    if value is None or isinstance(value, (str, int, bool)):
         return value
     if isinstance(value, Mapping):
         if not all(isinstance(key, str) for key in value):
@@ -99,7 +119,7 @@ def _handle_plan(request: ExtensionRequest) -> ExtensionResponse:
     return success_response(
         request,
         data=_data(plan.to_dict()),
-        artifacts=[_artifact(request, "plan-fastapi.json")],
+        artifacts=_artifacts(request, [_artifact(request, "plan-fastapi.json")]),
     )
 
 
@@ -157,7 +177,7 @@ def _handle_apply(request: ExtensionRequest) -> ExtensionResponse:
                         "plan_hash": plan.plan_hash,
                         "readiness": plan.readiness,
                     },
-                    artifacts=[str(report)],
+                    artifacts=_artifacts(request, [report]),
                 )
             reason = (
                 "the native plan contains no generatable routes"
@@ -174,7 +194,11 @@ def _handle_apply(request: ExtensionRequest) -> ExtensionResponse:
                     "readiness": plan.readiness,
                 },
             )
-            return replace(response, artifacts=(str(report),), limitations=(reason,))
+            return replace(
+                response,
+                artifacts=_artifacts(request, [report]),
+                limitations=(reason,),
+            )
     elif _boolean(configuration, "gap_report_only"):
         return failure_response(
             request,
@@ -209,7 +233,7 @@ def _handle_apply(request: ExtensionRequest) -> ExtensionResponse:
             "sql_engine": plan.sql_engine if plan.database_required else None,
             "plan_hash": plan.plan_hash,
         },
-        artifacts=artifacts,
+        artifacts=_artifacts(request, artifacts),
         limitations=(
             [f"{plan.needs_adaptation_routes} route(s) need manual adaptation"]
             if plan.needs_adaptation_routes
@@ -239,10 +263,13 @@ def _handle_test(request: ExtensionRequest) -> ExtensionResponse:
                 message="generated FastAPI tests failed",
                 details=_data(result),
             ),
-            artifacts=tuple(artifacts),
+            artifacts=_artifacts(request, artifacts),
         )
     return success_response(
-        request, data=_data(result), artifacts=artifacts, next_actions=["verify"]
+        request,
+        data=_data(result),
+        artifacts=_artifacts(request, artifacts),
+        next_actions=["verify"],
     )
 
 
@@ -265,7 +292,6 @@ def _handle_verify(request: ExtensionRequest) -> ExtensionResponse:
                 "manifest",
                 "pyproject",
                 "environment",
-                "python",
                 "lockfile",
             )
         ]
@@ -284,9 +310,9 @@ def _handle_verify(request: ExtensionRequest) -> ExtensionResponse:
                 message="FastAPI migration verification failed",
                 details=_data(result),
             ),
-            artifacts=tuple(artifacts),
+            artifacts=_artifacts(request, artifacts),
         )
-    return success_response(request, data=_data(result), artifacts=artifacts)
+    return success_response(request, data=_data(result), artifacts=_artifacts(request, artifacts))
 
 
 def handle(request: ExtensionRequest) -> ExtensionResponse:
@@ -301,7 +327,7 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             return success_response(
                 request,
                 data=_data(scan.to_dict()),
-                artifacts=[_artifact(request, "scan.json")],
+                artifacts=_artifacts(request, [_artifact(request, "scan.json")]),
             )
         if request.command == "plan":
             return _handle_plan(request)

@@ -291,7 +291,7 @@ def test_failed_generated_test_without_missing_dependency_has_no_verify_next_act
         "test_fastapi_app",
         lambda *_args, **_kwargs: {
             "ok": False,
-            "file": str(tmp_path / "test_generated.py"),
+            "file": str(tmp_path / ".sanka" / "output" / "fastapi" / "test_generated.py"),
             "tests": 2,
             "allow_writes": False,
             "log": "AssertionError: response status differed",

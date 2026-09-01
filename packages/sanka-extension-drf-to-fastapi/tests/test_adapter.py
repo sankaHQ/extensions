@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from sanka_extension_drf_to_fastapi import __main__, adapter
-from sanka_extension_sdk import ExtensionRequest, JsonValue, encode_request
+from sanka_extension_sdk import ExtensionRequest, JsonValue, encode_request, success_response
 
 
 def request_for(
@@ -120,3 +121,87 @@ def test_entrypoint_converts_exception_without_traceback_on_stdout(
     assert payload["outcome"] == "error"
     assert payload["error"]["code"] == "SANKA_EXTENSION_EXECUTION_FAILED"
     assert "Traceback" not in stdout.getvalue()
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+def test_adapter_rejects_recursive_non_finite_data(tmp_path: Path, value: float) -> None:
+    request = request_for(tmp_path, command="scan")
+    with patch.object(adapter, "scan_django") as scan:
+        scan.return_value.to_dict.return_value = {"nested": ({"value": value},)}
+        response = adapter.handle(request)
+
+    assert response.outcome == "error"
+    assert response.error is not None
+    assert response.error.code == "SANKA_EXTENSION_EXECUTION_FAILED"
+
+
+def test_entrypoint_converts_final_serialization_failure_to_one_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = request_for(tmp_path, command="scan")
+    stdin = io.StringIO(json.dumps(encode_request(request)))
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    real_dumps = json.dumps
+    calls = 0
+
+    def fail_once(value: object, **kwargs: object) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TypeError("serialization failed")
+        return real_dumps(value, **kwargs)
+
+    monkeypatch.setattr(__main__.json, "dumps", fail_once)
+    with patch.object(__main__, "handle", return_value=success_response(request, data={})):
+        assert __main__.main() == 1
+
+    documents = stdout.getvalue().splitlines()
+    assert len(documents) == 1
+    payload = json.loads(documents[0])
+    assert payload["error"]["code"] == "SANKA_EXTENSION_EXECUTION_FAILED"
+    assert payload["error"]["message"] == "serialization failed"
+
+
+def test_adapter_rejects_test_artifact_outside_configured_output(tmp_path: Path) -> None:
+    output = tmp_path / "generated"
+    request = request_for(
+        tmp_path,
+        command="test",
+        configuration={"output": str(output)},
+    )
+    with patch.object(
+        adapter,
+        "test_fastapi_app",
+        return_value={"ok": True, "file": str(tmp_path / "outside.py")},
+    ):
+        response = adapter.handle(request)
+
+    assert response.outcome == "error"
+    assert response.error is not None
+    assert response.error.code == "SANKA_EXTENSION_EXECUTION_FAILED"
+    assert response.artifacts == ()
+
+
+def test_adapter_rejects_verify_artifact_traversal(tmp_path: Path) -> None:
+    output = tmp_path / "generated"
+    request = request_for(
+        tmp_path,
+        command="verify",
+        configuration={"output": str(output)},
+    )
+    traversed = output / "nested" / ".." / ".." / "outside.py"
+    with patch.object(
+        adapter,
+        "verify_fastapi_migration",
+        return_value={"ok": True, "paths": {}, "generated_files": [str(traversed)]},
+    ):
+        response = adapter.handle(request)
+
+    assert response.outcome == "error"
+    assert response.error is not None
+    assert response.error.code == "SANKA_EXTENSION_EXECUTION_FAILED"
+    assert response.artifacts == ()

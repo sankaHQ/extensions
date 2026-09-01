@@ -21,6 +21,7 @@ def main() -> int:
     try:
         request = decode_request(json.loads(sys.stdin.read()))
         response = handle(request)
+        document = json.dumps(encode_response(response), sort_keys=True) + "\n"
     except Exception as error:
         if request is None:
             sys.stderr.write(f"invalid extension request: {error}\n")
@@ -36,7 +37,8 @@ def main() -> int:
             code="SANKA_EXTENSION_EXECUTION_FAILED",
             message=str(error),
         )
-    sys.stdout.write(json.dumps(encode_response(response), sort_keys=True) + "\n")
+        document = json.JSONEncoder(sort_keys=True).encode(encode_response(response)) + "\n"
+    sys.stdout.write(document)
     return 0 if response.outcome == "success" else 1
 
 
