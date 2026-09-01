@@ -1,0 +1,27 @@
+[project]
+name = "sanka-extension-sdk"
+version = "0.1.0a1"
+description = "Versioned subprocess contract for Sanka migration extensions"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Sanka, Inc." }]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/sankaHQ/extensions"
+Issues = "https://github.com/sankaHQ/extensions/issues"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sanka_extension_sdk"]

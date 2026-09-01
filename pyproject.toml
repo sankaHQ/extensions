@@ -13,6 +13,7 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 sanka-connector-sdk = { workspace = true }
+sanka-extension-sdk = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -38,6 +39,7 @@ known-first-party = [
   "sanka_connector_markdown",
   "sanka_connector_postgres",
   "sanka_connector_sqlite",
+  "sanka_extension_sdk",
 ]
 
 [tool.mypy]

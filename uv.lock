@@ -15,6 +15,7 @@ members = [
     "sanka-connector-postgres",
     "sanka-connector-sdk",
     "sanka-connector-sqlite",
+    "sanka-extension-sdk",
     "sanka-extensions-workspace",
 ]
 
@@ -676,6 +677,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "sanka-connector-sdk", editable = "packages/sanka-connector-sdk" }]
+
+[[package]]
+name = "sanka-extension-sdk"
+version = "0.1.0a1"
+source = { editable = "packages/sanka-extension-sdk" }
 
 [[package]]
 name = "sanka-extensions-workspace"
