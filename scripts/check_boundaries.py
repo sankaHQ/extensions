@@ -34,6 +34,10 @@ def _imports(path: Path) -> set[str]:
     return imported
 
 
+def _is_module_or_submodule(module: str, allowed: tuple[str, ...]) -> bool:
+    return any(module == name or module.startswith(f"{name}.") for name in allowed)
+
+
 def main() -> int:
     errors: list[str] = []
     sdk = PACKAGES / SDK_NAME
@@ -95,8 +99,10 @@ def main() -> int:
     extension_version = str(extension_sdk_project["version"])
     for package in (extension_sdk, PACKAGES / EXTENSION_NAME):
         own_module = package.name.replace("-", "_")
+        allowed_modules: tuple[str, ...] = (own_module,)
         project = _project(package)
         if package.name == EXTENSION_NAME:
+            allowed_modules += ("sanka_extension_sdk",)
             expected_dependency = f"{EXTENSION_SDK_NAME}=={extension_version}"
             if project.get("dependencies") != [expected_dependency]:
                 errors.append(f"{EXTENSION_NAME} must depend exactly on {expected_dependency}")
@@ -114,10 +120,8 @@ def main() -> int:
                     errors.append(
                         f"extension imports the Sanka runtime in {source.relative_to(ROOT)}"
                     )
-                if (
-                    module.startswith("sanka_extension_")
-                    and not module.startswith(own_module)
-                    and not module.startswith("sanka_extension_sdk")
+                if module.startswith("sanka_extension_") and not _is_module_or_submodule(
+                    module, allowed_modules
                 ):
                     errors.append(
                         f"extension imports another extension in "

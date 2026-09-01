@@ -6,12 +6,15 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from scripts.check_boundaries import _is_module_or_submodule
+from scripts.check_release_artifacts import main as release_gate
 from scripts.check_release_artifacts import validate_release
 from scripts.check_release_tag import expected_tag
 from scripts.update_marketplace_hashes import update_manifest
@@ -19,6 +22,7 @@ from scripts.update_marketplace_hashes import update_manifest
 RELEASE_TAG = "extensions-v0.1.0a1"
 SDK_WHEEL = "sanka_extension_sdk-0.1.0a1-py3-none-any.whl"
 EXTENSION_WHEEL = "sanka_extension_drf_to_fastapi-0.1.0a1-py3-none-any.whl"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def wheel(directory: Path, name: str, content: bytes) -> Path:
@@ -53,7 +57,10 @@ def _write_json(path: Path, payload: object) -> None:
 
 
 def _release_snapshot(
-    tmp_path: Path, *, extra_requirement: str | None = None
+    tmp_path: Path,
+    *,
+    extra_requirement: str | None = None,
+    entry_points: str | None = None,
 ) -> tuple[Path, Path, Path]:
     root = tmp_path / "snapshot"
     release = root / "release" / "all"
@@ -86,7 +93,8 @@ def _release_snapshot(
         version="0.1.0a1",
         filename=EXTENSION_WHEEL,
         requirements=tuple(requirements),
-        entry_points=(
+        entry_points=entry_points
+        or (
             "[console_scripts]\n"
             "sanka-extension-drf-to-fastapi = sanka_extension_drf_to_fastapi.__main__:main\n"
         ),
@@ -213,6 +221,75 @@ def test_artifact_validator_rejects_manifest_artifact_hash_mismatch(tmp_path: Pa
     errors = validate_release(root, release)
 
     assert any("hash does not match" in error for error in errors)
+
+
+def test_release_gate_fails_without_rewriting_a_stale_manifest(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root, release, manifest_path = _release_snapshot(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["wheels"][0]["sha256"] = "0" * 64
+    _write_json(manifest_path, manifest)
+    before = manifest_path.read_bytes()
+
+    assert release_gate(root, release) == 1
+    assert manifest_path.read_bytes() == before
+    assert "catalog hash does not match release artifact" in capsys.readouterr().err
+
+
+def test_build_release_target_does_not_update_marketplace_hashes() -> None:
+    result = subprocess.run(
+        ["make", "-n", "build-release"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "check_release_artifacts.py" in result.stdout
+    assert "update_marketplace_hashes.py" not in result.stdout
+
+
+def test_extension_import_allowlist_rejects_near_prefix_modules() -> None:
+    allowed = ("sanka_extension_sdk", "sanka_extension_drf_to_fastapi")
+
+    assert _is_module_or_submodule("sanka_extension_sdk", allowed)
+    assert _is_module_or_submodule("sanka_extension_sdk.contract", allowed)
+    assert not _is_module_or_submodule("sanka_extension_sdk_evil", allowed)
+    assert not _is_module_or_submodule("sanka_extension_drf_to_fastapi_other", allowed)
+
+
+def test_artifact_validator_rejects_misleading_entry_point_text(tmp_path: Path) -> None:
+    root, release, _ = _release_snapshot(
+        tmp_path,
+        entry_points=(
+            "[console_scripts]\n"
+            "other = other.module:main\n"
+            "# sanka-extension-drf-to-fastapi = "
+            "sanka_extension_drf_to_fastapi.__main__:main\n"
+        ),
+    )
+
+    errors = validate_release(root, release)
+
+    assert any("has no exact executable entry point" in error for error in errors)
+
+
+def test_artifact_validator_rejects_wrong_entry_point_target(tmp_path: Path) -> None:
+    root, release, _ = _release_snapshot(
+        tmp_path,
+        entry_points=(
+            "[console_scripts]\n"
+            "sanka-extension-drf-to-fastapi = "
+            "sanka_extension_drf_to_fastapi.__main__:wrong\n"
+            "# sanka-extension-drf-to-fastapi = "
+            "sanka_extension_drf_to_fastapi.__main__:main\n"
+        ),
+    )
+
+    errors = validate_release(root, release)
+
+    assert any("has no exact executable entry point" in error for error in errors)
 
 
 def test_release_families_keep_independent_exact_tags() -> None:

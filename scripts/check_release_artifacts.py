@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import configparser
 import email
 import hashlib
 import json
@@ -57,6 +58,11 @@ MANIFEST: dict[str, Any] = {
 }
 
 
+class _EntryPointParser(configparser.ConfigParser):
+    def optionxform(self, optionstr: str) -> str:
+        return optionstr
+
+
 def _is_distribution(path: Path) -> bool:
     return path.suffix == ".whl" or path.name.endswith(".tar.gz")
 
@@ -70,6 +76,15 @@ def _wheel_metadata(wheel: Path) -> tuple[email.message.Message, str]:
         entry_name = metadata_name.removesuffix("METADATA") + "entry_points.txt"
         entries = archive.read(entry_name).decode() if entry_name in archive.namelist() else ""
     return metadata, entries
+
+
+def _console_scripts(entries: str) -> dict[str, str] | None:
+    parser = _EntryPointParser(interpolation=None)
+    try:
+        parser.read_string(entries)
+    except configparser.Error:
+        return None
+    return dict(parser["console_scripts"]) if parser.has_section("console_scripts") else {}
 
 
 def _project_versions(root: Path) -> dict[str, str]:
@@ -216,10 +231,9 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
         elif name == EXTENSION:
             if normalized != [f"{EXTENSION_SDK}==0.1.0a1"]:
                 errors.append(f"{name} must depend exactly on {EXTENSION_SDK}==0.1.0a1")
-            expected_entry = (
-                "sanka-extension-drf-to-fastapi = sanka_extension_drf_to_fastapi.__main__:main"
-            )
-            if "[console_scripts]" not in entries or expected_entry not in entries:
+            if _console_scripts(entries) != {
+                EXTENSION: "sanka_extension_drf_to_fastapi.__main__:main"
+            }:
                 errors.append(f"{name} wheel has no exact executable entry point")
         else:
             errors.append(f"unexpected release distribution: {name}")
@@ -228,15 +242,15 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
     return errors
 
 
-def main() -> int:
-    errors = validate_release()
+def main(root: Path = ROOT, release: Path = RELEASE) -> int:
+    errors = validate_release(root, release)
     if errors:
         print("Release artifact validation failed:", file=sys.stderr)
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    connector_count = len(list(RELEASE.glob("sanka_connector_*.whl")))
-    extension_count = len(list(RELEASE.glob("sanka_extension_*.whl")))
+    connector_count = len(list(release.glob("sanka_connector_*.whl")))
+    extension_count = len(list(release.glob("sanka_extension_*.whl")))
     print(
         f"Release artifacts: OK ({connector_count} connector wheels, "
         f"{extension_count} extension wheels; catalog hashes match)"

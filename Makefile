@@ -12,5 +12,11 @@ check:
 
 build-release:
 	uv run python scripts/build_release.py
+	uv run python scripts/check_release_artifacts.py
+
+.PHONY: update-marketplace-hashes
+
+update-marketplace-hashes:
+	uv run python scripts/build_release.py
 	uv run python scripts/update_marketplace_hashes.py release/all extensions-v0.1.0a1
 	uv run python scripts/check_release_artifacts.py
