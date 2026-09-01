@@ -3,6 +3,13 @@ name: Publish extension packages
 on:
   workflow_dispatch:
     inputs:
+      family:
+        description: Independently versioned release family
+        required: true
+        type: choice
+        options:
+          - connectors
+          - extensions
       target:
         description: Package index target
         required: true
@@ -43,13 +50,13 @@ jobs:
           version: "0.11.21"
           python-version: "3.12"
           enable-cache: true
-      - run: uv run python scripts/check_release_tag.py "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE"
+      - run: uv run python scripts/check_release_tag.py "${{ inputs.family }}" "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE"
       - run: uv sync --frozen --all-packages
       - run: make check
       - run: make build-release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: connector-release-${{ github.ref_name }}
+          name: release-${{ github.ref_name }}
           path: release/
           if-no-files-found: error
           retention-days: 14
@@ -58,6 +65,7 @@ jobs:
     name: Publish SDK to TestPyPI
     if: >-
       vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
+      inputs.family == 'connectors' &&
       inputs.target == 'testpypi' &&
       inputs.confirmation == 'publish-testpypi'
     needs: build
@@ -68,7 +76,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: connector-release-${{ github.ref_name }}
+          name: release-${{ github.ref_name }}
           path: release/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
@@ -80,6 +88,7 @@ jobs:
     name: Publish providers to TestPyPI
     if: >-
       vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
+      inputs.family == 'connectors' &&
       inputs.target == 'testpypi' &&
       inputs.confirmation == 'publish-testpypi'
     needs: [build, publish-sdk-testpypi]
@@ -98,7 +107,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: connector-release-${{ github.ref_name }}
+          name: release-${{ github.ref_name }}
           path: release/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
@@ -110,6 +119,7 @@ jobs:
     name: Publish SDK to PyPI
     if: >-
       vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
+      inputs.family == 'connectors' &&
       inputs.target == 'pypi' &&
       inputs.confirmation == 'publish-pypi'
     needs: build
@@ -120,7 +130,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: connector-release-${{ github.ref_name }}
+          name: release-${{ github.ref_name }}
           path: release/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
@@ -131,6 +141,7 @@ jobs:
     name: Publish providers to PyPI
     if: >-
       vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
+      inputs.family == 'connectors' &&
       inputs.target == 'pypi' &&
       inputs.confirmation == 'publish-pypi'
     needs: [build, publish-sdk-pypi]
@@ -149,17 +160,132 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: connector-release-${{ github.ref_name }}
+          name: release-${{ github.ref_name }}
           path: release/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: release/packages/${{ matrix.package }}/
           print-hash: true
 
+  publish-extension-sdk-testpypi:
+    name: Publish extension SDK to TestPyPI
+    if: >-
+      vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
+      inputs.family == 'extensions' &&
+      inputs.target == 'testpypi' &&
+      inputs.confirmation == 'publish-testpypi'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ github.ref_name }}
+          path: release/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: release/packages/sanka-extension-sdk/
+          repository-url: https://test.pypi.org/legacy/
+          print-hash: true
+
+  publish-extension-testpypi:
+    name: Publish DRF-to-FastAPI extension to TestPyPI
+    if: >-
+      vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
+      inputs.family == 'extensions' &&
+      inputs.target == 'testpypi' &&
+      inputs.confirmation == 'publish-testpypi'
+    needs: [build, publish-extension-sdk-testpypi]
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ github.ref_name }}
+          path: release/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: release/packages/sanka-extension-drf-to-fastapi/
+          repository-url: https://test.pypi.org/legacy/
+          print-hash: true
+
+  publish-extension-sdk-pypi:
+    name: Publish extension SDK to PyPI
+    if: >-
+      vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
+      inputs.family == 'extensions' &&
+      inputs.target == 'pypi' &&
+      inputs.confirmation == 'publish-pypi'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ github.ref_name }}
+          path: release/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: release/packages/sanka-extension-sdk/
+          print-hash: true
+
+  publish-extension-pypi:
+    name: Publish DRF-to-FastAPI extension to PyPI
+    if: >-
+      vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
+      inputs.family == 'extensions' &&
+      inputs.target == 'pypi' &&
+      inputs.confirmation == 'publish-pypi'
+    needs: [build, publish-extension-sdk-pypi]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ github.ref_name }}
+          path: release/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: release/packages/sanka-extension-drf-to-fastapi/
+          print-hash: true
+
+  attach-extension-wheels:
+    name: Create GitHub release with exact extension wheels
+    if: >-
+      vars.SANKA_EXTENSIONS_PUBLISH_ENABLED == 'true' &&
+      inputs.family == 'extensions' &&
+      inputs.target == 'pypi' &&
+      inputs.confirmation == 'publish-pypi'
+    needs: [build, publish-extension-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ github.ref_name }}
+          path: release/
+      - run: >-
+          gh release create "$GITHUB_REF_NAME"
+          release/all/sanka_extension_sdk-0.1.0a1-py3-none-any.whl
+          release/all/sanka_extension_drf_to_fastapi-0.1.0a1-py3-none-any.whl
+          --verify-tag --prerelease --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   bootstrap-testpypi:
     name: Bootstrap ${{ inputs.package }} on TestPyPI
     if: >-
       inputs.target == 'bootstrap-testpypi' &&
+      inputs.family == 'connectors' &&
       vars.SANKA_EXTENSIONS_BOOTSTRAP_ENABLED == 'true' &&
       inputs.confirmation == format('bootstrap-testpypi-{0}', inputs.package)
     needs: build
@@ -170,7 +296,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: connector-release-${{ github.ref_name }}
+          name: release-${{ github.ref_name }}
           path: release/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
@@ -182,6 +308,7 @@ jobs:
     name: Bootstrap ${{ inputs.package }} on PyPI
     if: >-
       inputs.target == 'bootstrap-pypi' &&
+      inputs.family == 'connectors' &&
       vars.SANKA_EXTENSIONS_BOOTSTRAP_ENABLED == 'true' &&
       inputs.confirmation == format('bootstrap-pypi-{0}', inputs.package)
     needs: build
@@ -192,7 +319,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: connector-release-${{ github.ref_name }}
+          name: release-${{ github.ref_name }}
           path: release/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
