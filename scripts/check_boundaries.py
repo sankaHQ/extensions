@@ -12,6 +12,8 @@ from typing import Any, cast
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ROOT / "packages"
 SDK_NAME = "sanka-connector-sdk"
+EXTENSION_SDK_NAME = "sanka-extension-sdk"
+EXTENSION_NAME = "sanka-extension-drf-to-fastapi"
 HOSTED_SYSTEM_PROVIDERS = frozenset({"hubspot", "salesforce", "sendgrid"})
 
 
@@ -30,6 +32,10 @@ def _imports(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module)
     return imported
+
+
+def _is_module_or_submodule(module: str, allowed: tuple[str, ...]) -> bool:
+    return any(module == name or module.startswith(f"{name}.") for name in allowed)
 
 
 def main() -> int:
@@ -86,12 +92,48 @@ def main() -> int:
                         f"provider imports another provider in {source.relative_to(ROOT)}: {module}"
                     )
 
+    extension_sdk = PACKAGES / EXTENSION_SDK_NAME
+    extension_sdk_project = _project(extension_sdk)
+    if extension_sdk_project.get("dependencies") != []:
+        errors.append(f"{EXTENSION_SDK_NAME} must have zero runtime dependencies")
+    extension_version = str(extension_sdk_project["version"])
+    for package in (extension_sdk, PACKAGES / EXTENSION_NAME):
+        own_module = package.name.replace("-", "_")
+        allowed_modules: tuple[str, ...] = (own_module,)
+        project = _project(package)
+        if package.name == EXTENSION_NAME:
+            allowed_modules += ("sanka_extension_sdk",)
+            expected_dependency = f"{EXTENSION_SDK_NAME}=={extension_version}"
+            if project.get("dependencies") != [expected_dependency]:
+                errors.append(f"{EXTENSION_NAME} must depend exactly on {expected_dependency}")
+            if project.get("scripts") != {
+                EXTENSION_NAME: "sanka_extension_drf_to_fastapi.__main__:main"
+            }:
+                errors.append(f"{EXTENSION_NAME} must own its exact executable entry point")
+        for source in sorted((package / "src").rglob("*.py")):
+            if not source.read_text(encoding="utf-8").startswith(
+                "# SPDX-License-Identifier: Apache-2.0"
+            ):
+                errors.append(f"missing Apache-2.0 SPDX header: {source.relative_to(ROOT)}")
+            for module in _imports(source):
+                if module == "sanka" or module.startswith("sanka."):
+                    errors.append(
+                        f"extension imports the Sanka runtime in {source.relative_to(ROOT)}"
+                    )
+                if module.startswith("sanka_extension_") and not _is_module_or_submodule(
+                    module, allowed_modules
+                ):
+                    errors.append(
+                        f"extension imports another extension in "
+                        f"{source.relative_to(ROOT)}: {module}"
+                    )
+
     if errors:
         print("Connector boundary validation failed:", file=sys.stderr)
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print("Connector dependency boundaries: OK")
+    print("Connector and extension dependency boundaries: OK")
     return 0
 
 

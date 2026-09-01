@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -26,6 +27,11 @@ def main() -> None:
         shutil.rmtree(release_root)
     RELEASE.mkdir(parents=True)
     packages = sorted(path.name for path in (ROOT / "packages").iterdir() if path.is_dir())
+    extension_packages = ["sanka-extension-sdk", "sanka-extension-drf-to-fastapi"]
+    packages = [package for package in packages if package not in extension_packages]
+    packages.extend(extension_packages)
+    build_environment = os.environ.copy()
+    build_environment["SOURCE_DATE_EPOCH"] = "315532800"
     for package in packages:
         package_release = release_root / "packages" / package
         package_release.mkdir(parents=True)
@@ -40,6 +46,7 @@ def main() -> None:
                 "--no-create-gitignore",
             ],
             cwd=ROOT,
+            env=build_environment,
             check=True,
         )
         artifacts = _distribution_artifacts(package_release)
@@ -58,10 +65,11 @@ def main() -> None:
     (release_root / "SOURCE_COMMIT").write_text(source_commit + "\n", encoding="utf-8")
     hashes = []
     for artifact in _distribution_artifacts(RELEASE):
-        digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        with artifact.open("rb") as handle:
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
         hashes.append(f"{digest}  {artifact.name}")
     (release_root / "SHA256SUMS").write_text("\n".join(hashes) + "\n", encoding="utf-8")
-    print(f"Built {len(packages)} connector distributions in {RELEASE}")
+    print(f"Built {len(packages)} connector and extension distributions in {RELEASE}")
 
 
 if __name__ == "__main__":
