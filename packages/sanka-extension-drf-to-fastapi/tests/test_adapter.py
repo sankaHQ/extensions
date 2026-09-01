@@ -205,3 +205,78 @@ def test_adapter_rejects_verify_artifact_traversal(tmp_path: Path) -> None:
     assert response.error is not None
     assert response.error.code == "SANKA_EXTENSION_EXECUTION_FAILED"
     assert response.artifacts == ()
+
+
+def test_apply_allows_reviewed_default_output_when_request_omits_output(tmp_path: Path) -> None:
+    request = request_for(
+        tmp_path,
+        command="apply",
+        configuration={"extension_plan_hash": "sha256:reviewed"},
+        reviewed_plan_hash="sha256:core-plan",
+    )
+    output = Path(request.project_root).parent / "reviewed-output"
+    plan = SimpleNamespace(
+        plan_hash="sha256:reviewed",
+        default_output="../reviewed-output",
+        mode="compatibility",
+        database_required=False,
+        generation_mode="minimal",
+        sql_engine="django",
+        needs_adaptation_routes=0,
+    )
+    with (
+        patch.object(adapter, "load_fastapi_plan", return_value=plan),
+        patch.object(adapter, "apply_fastapi_plan", return_value=(output, 3)),
+    ):
+        response = adapter.handle(request)
+
+    assert response.outcome == "success"
+    assert response.artifacts == (str(output.resolve()),)
+
+
+def test_test_allows_reviewed_default_output_when_request_omits_output(tmp_path: Path) -> None:
+    request = request_for(tmp_path, command="test")
+    output = Path(request.project_root).parent / "reviewed-output"
+    test_file = output / "test_generated.py"
+    with (
+        patch.object(
+            adapter,
+            "load_fastapi_plan",
+            return_value=SimpleNamespace(default_output="../reviewed-output"),
+        ),
+        patch.object(
+            adapter,
+            "test_fastapi_app",
+            return_value={"ok": True, "file": str(test_file)},
+        ),
+    ):
+        response = adapter.handle(request)
+
+    assert response.outcome == "success"
+    assert response.artifacts == (str(test_file.resolve()),)
+
+
+def test_verify_allows_reviewed_default_output_when_request_omits_output(tmp_path: Path) -> None:
+    request = request_for(tmp_path, command="verify")
+    output = Path(request.project_root).parent / "reviewed-output"
+    manifest = output / "sanka-manifest.json"
+    with (
+        patch.object(
+            adapter,
+            "load_fastapi_plan",
+            return_value=SimpleNamespace(default_output="../reviewed-output"),
+        ),
+        patch.object(
+            adapter,
+            "verify_fastapi_migration",
+            return_value={
+                "ok": True,
+                "paths": {"generated": str(output), "manifest": str(manifest)},
+                "generated_files": [],
+            },
+        ),
+    ):
+        response = adapter.handle(request)
+
+    assert response.outcome == "success"
+    assert response.artifacts == (str(output.resolve()), str(manifest.resolve()))

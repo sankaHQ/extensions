@@ -66,16 +66,39 @@ def _artifact(request: ExtensionRequest, name: str) -> str:
 
 def _artifacts(request: ExtensionRequest, values: Iterable[str | Path]) -> tuple[str, ...]:
     roots = [Path(request.artifact_root).resolve()]
-    for name in ("output", "bench_candidate"):
-        value = request.configuration.get(name)
+    configured_output = request.configuration.get("output")
+    root_values = [configured_output, request.configuration.get("bench_candidate")]
+    for value in root_values:
         if not isinstance(value, str) or not value:
             continue
         root = Path(value)
         roots.append((root if root.is_absolute() else Path(request.project_root) / root).resolve())
     artifacts = tuple(str(Path(value).resolve()) for value in values)
-    for artifact in map(Path, artifacts):
-        if not any(artifact == root or artifact.is_relative_to(root) for root in roots):
-            raise ValueError(f"artifact path is outside allowed roots: {artifact}")
+    outside = [
+        artifact
+        for artifact in map(Path, artifacts)
+        if not any(artifact == root or artifact.is_relative_to(root) for root in roots)
+    ]
+    if (
+        outside
+        and not isinstance(configured_output, str)
+        and request.command
+        in {
+            "apply",
+            "test",
+            "verify",
+        }
+    ):
+        plan = load_fastapi_plan(request.project_root, artifact_dir=request.artifact_root)
+        root = Path(plan.default_output)
+        roots.append((root if root.is_absolute() else Path(request.project_root) / root).resolve())
+        outside = [
+            artifact
+            for artifact in outside
+            if not any(artifact == root or artifact.is_relative_to(root) for root in roots)
+        ]
+    if outside:
+        raise ValueError(f"artifact path is outside allowed roots: {outside[0]}")
     return artifacts
 
 
