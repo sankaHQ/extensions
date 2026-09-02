@@ -201,13 +201,12 @@ def test_replay_matches_the_generated_native_app_and_flags_a_regression(tmp_path
         python=Path(sys.executable),
     )
     assert report["summary"]["scenarios"] == len(CRUD_SCENARIOS)
-    # The generated native app does not yet answer OPTIONS the way DRF does (DRF returns
-    # 200 with metadata and a full Allow header); the replay must surface exactly that.
+    # The generated native app answers OPTIONS and 405 exactly like DRF, so a fresh
+    # candidate replays clean; the verifier must report no mismatch at all.
     baseline_failures = [item for item in report["scenarios"] if not item["match"]]
-    assert [item["id"] for item in baseline_failures] == ["options"], report["summary_lines"]
-    assert all(
-        item["native"]["compliant"] for item in report["scenarios"] if item["id"] != "options"
-    )
+    assert baseline_failures == [], report["summary_lines"]
+    assert report["ok"], report["summary_lines"]
+    assert all(item["native"]["compliant"] for item in report["scenarios"])
     # Regress one exact DRF error string in the candidate and replay again.
     # The generated app reads DRF's exact error strings from its manifest message table.
     carriers = [
@@ -236,7 +235,7 @@ def test_replay_matches_the_generated_native_app_and_flags_a_regression(tmp_path
     )
     assert not regressed["ok"]
     failing = {item["id"]: item for item in regressed["scenarios"] if not item["match"]}
-    assert set(failing) == {"options", "create-invalid"}
+    assert set(failing) == {"create-invalid"}
     assert failing["create-invalid"]["body_match"] is False
     assert "Blank!" in str(failing["create-invalid"]["body_difference"])
     assert any("create-invalid" in line for line in regressed["summary_lines"])
