@@ -137,6 +137,13 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
     },
 }
 MANIFESTS = {"sanka-extension-drf-to-fastapi": MIGRATION_MANIFEST, **CONNECTOR_MANIFESTS}
+CONNECTOR_ENTRY_POINTS = {
+    "sanka-connector-markdown": {"markdown": "sanka_connector_markdown:CONNECTOR"},
+    "sanka-connector-csv": {"csv": "sanka_connector_csv:CONNECTOR"},
+    "sanka-connector-sqlite": {"sqlite": "sanka_connector_sqlite:CONNECTOR"},
+    "sanka-connector-postgres": {"postgres": "sanka_connector_postgres:CONNECTOR"},
+    "sanka-connector-clickhouse": {"clickhouse": "sanka_connector_clickhouse:CONNECTOR"},
+}
 
 
 class _EntryPointParser(configparser.ConfigParser):
@@ -182,6 +189,15 @@ def _catalog_errors(root: Path, release: Path) -> list[str]:
         catalog = json.loads((root / "marketplace.json").read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as error:
         return [f"marketplace.json is invalid: {error}"]
+    extensions = catalog.get("extensions") if isinstance(catalog, dict) else None
+    if isinstance(extensions, list):
+        for entry in extensions:
+            if isinstance(entry, dict) and isinstance(entry.get("manifest"), str):
+                candidate = (root / entry["manifest"]).resolve()
+                if not candidate.is_relative_to(root.resolve()):
+                    return [
+                        f"catalog manifest path is outside the marketplace snapshot: {candidate}"
+                    ]
     if catalog != CATALOG:
         return ["marketplace.json does not match the official sanka-marketplace/v1 catalog"]
     errors: list[str] = []
@@ -249,12 +265,11 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
             if requirements or entries:
                 errors.append(f"{name} SDK wheel must have no dependencies or entry points")
         elif name.startswith("sanka-connector-"):
-            entry_point = MANIFESTS[name]["distribution"]["entry_point"]
             connector_entries = _entry_points(entries, "sanka.connectors")
             if f"sanka-connector-sdk=={version}" not in requirements:
                 errors.append(f"{name} wheel does not depend on its exact connector SDK")
-            if connector_entries is None or entry_point not in connector_entries:
-                errors.append(f"{name} wheel has no declared connector entry point")
+            if connector_entries != CONNECTOR_ENTRY_POINTS[name]:
+                errors.append(f"{name} wheel has no exact connector entry point")
         elif name == "sanka-extension-drf-to-fastapi":
             if requirements != ["sanka-extension-sdk==0.1.0a1"]:
                 errors.append(f"{name} must depend exactly on sanka-extension-sdk==0.1.0a1")

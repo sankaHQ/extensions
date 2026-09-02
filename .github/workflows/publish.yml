@@ -43,16 +43,20 @@ jobs:
         with:
           name: marketplace-${{ github.ref_name }}
           path: .
+      - name: Stage uniquely named marketplace manifests
+        run: |
+          mkdir release-assets
+          cp marketplace.json release-assets/marketplace.json
+          cp packages/sanka-extension-drf-to-fastapi/extension.json release-assets/sanka-extension-drf-to-fastapi.json
+          cp packages/sanka-connector-markdown/extension.json release-assets/sanka-connector-markdown.json
+          cp packages/sanka-connector-csv/extension.json release-assets/sanka-connector-csv.json
+          cp packages/sanka-connector-sqlite/extension.json release-assets/sanka-connector-sqlite.json
+          cp packages/sanka-connector-postgres/extension.json release-assets/sanka-connector-postgres.json
+          cp packages/sanka-connector-clickhouse/extension.json release-assets/sanka-connector-clickhouse.json
       - run: >-
           gh release create "$GITHUB_REF_NAME"
           dist/*.whl
-          marketplace.json
-          packages/sanka-extension-drf-to-fastapi/extension.json
-          packages/sanka-connector-markdown/extension.json
-          packages/sanka-connector-csv/extension.json
-          packages/sanka-connector-sqlite/extension.json
-          packages/sanka-connector-postgres/extension.json
-          packages/sanka-connector-clickhouse/extension.json
+          release-assets/*
           --verify-tag --prerelease --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
