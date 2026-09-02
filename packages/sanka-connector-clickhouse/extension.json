@@ -24,562 +24,562 @@
     {
       "name": "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
       "sha256": "7f4876b041363a733c2ba6ae247824ef137d9a9b5aaa1e7024e0736a1fe1adc3",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/sanka_connector_sdk-0.1.0a11-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/sanka_connector_sdk-0.1.0a11-py3-none-any.whl"
     },
     {
       "name": "sanka_connector_clickhouse-0.1.0a11-py3-none-any.whl",
       "sha256": "03f54118da9df05f62b7b55d6963adb4aad3b1b2bd155a5ccb548b66256cb10a",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/sanka_connector_clickhouse-0.1.0a11-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/sanka_connector_clickhouse-0.1.0a11-py3-none-any.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-macosx_10_13_x86_64.whl",
       "sha256": "b5548a857bb0fcc5449cc3687353547396c6b1ecd4bd882f1cd34fa8d29e70ca",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-macosx_10_13_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-macosx_10_13_x86_64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-macosx_11_0_arm64.whl",
       "sha256": "bab192b934fdf5a03df4752556d9c8af2d058163fdfbafd4a253cdfe25449a6f",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-macosx_11_0_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-macosx_11_0_arm64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-manylinux2010_i686.manylinux_2_12_i686.manylinux_2_28_i686.whl",
       "sha256": "8344260bed9842c415a93d9bfe23ea834e5f27758827d56933d8c0d06db507a2",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-manylinux2010_i686.manylinux_2_12_i686.manylinux_2_28_i686.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-manylinux2010_i686.manylinux_2_12_i686.manylinux_2_28_i686.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
       "sha256": "1c55e55e1e9dee312bc5e186386e6aa5207482a6d2242bd7c14709ded254f87f",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl",
       "sha256": "cf609af3735c7e697ccd13f6b0c88da57c201b6ea63c6afbfe81d6f9b50e298c",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
       "sha256": "676a37971f676830d4f90cee8fdf4e438781596fb2f2d1984ac76c9b3eb39a69",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
       "sha256": "470895d0bcddc850766e593d1b26764fb138c2feed149f515a2627ef9587d54c",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-manylinux_2_34_riscv64.manylinux_2_39_riscv64.whl",
       "sha256": "02f2f6649a342d0901ddb35596ddadb7c3bb1cf6bb54d691e5e0285f1fa0674f",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-manylinux_2_34_riscv64.manylinux_2_39_riscv64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-manylinux_2_34_riscv64.manylinux_2_39_riscv64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_aarch64.whl",
       "sha256": "132ba81fad59d44958b7d10da31545e7128c469cfbc2e268d0eaab96daa64175",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_aarch64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_i686.whl",
       "sha256": "a3e1c6ce0b232ee6703ed24ee126e8186107f5a4e56edbd21cd1aa5a8c6bfd12",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_i686.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_i686.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_ppc64le.whl",
       "sha256": "d7a7cb964eb8d1bb5d039970b16fe54802ea47dc935ae96d9874844a126bf8ff",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_ppc64le.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_ppc64le.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_riscv64.whl",
       "sha256": "12a9842a2ec2854cbec7f252ab29d44c2b772788a9bbafded743ca4bf73b115f",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_riscv64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_riscv64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_s390x.whl",
       "sha256": "138154eea8ced84394991bf0e819dba6b690306a178dd528c28eee724b7d4aec",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_s390x.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_s390x.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_x86_64.whl",
       "sha256": "468b636ed365627b364c94be1c35a52858e13b5bc1fa3f068bbc71b1af65f3d7",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-musllinux_1_2_x86_64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-win32.whl",
       "sha256": "f026fe2e89b7ff01ba6ebec6abaff34c6063919151a32afb68714cf139e17c50",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-win32.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-win32.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-win_amd64.whl",
       "sha256": "2ea62ba2f1a6e6c9e6dc108921f9ae881969ca72e073162fa488d0de3eb2713f",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-win_amd64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-win_amd64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp312-cp312-win_arm64.whl",
       "sha256": "cefb983345c55ccaa20423a4eb96434730e6d640ffa2db9b60e5bedb0fbef94e",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp312-cp312-win_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp312-cp312-win_arm64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-android_24_arm64_v8a.whl",
       "sha256": "a3fbcbf819bee2b06b8666b13742098d0f40663ee34e64a12bc360ec0f5e3d89",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-android_24_arm64_v8a.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-android_24_arm64_v8a.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-android_24_x86_64.whl",
       "sha256": "efee02f18e04c2e9e6d694c5cf9b7457c4bda3ea96f48b1ee69769e06bb9d89f",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-android_24_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-android_24_x86_64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-ios_13_0_arm64_iphoneos.whl",
       "sha256": "ecc95fa0e91d92951d74468e7789afdf91d9e702f40af2d0fcbf0ded4d0f650a",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-ios_13_0_arm64_iphoneos.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-ios_13_0_arm64_iphoneos.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-ios_13_0_arm64_iphonesimulator.whl",
       "sha256": "34154d82fc0246738159084d146401073f9ac9cfd755b66bb8853ca06037810c",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-ios_13_0_arm64_iphonesimulator.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-ios_13_0_arm64_iphonesimulator.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-ios_13_0_x86_64_iphonesimulator.whl",
       "sha256": "44b687b1c0be5cb279693d2682f91ff84c559d679b2ef2fbe501fe4b2db2c4bb",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-ios_13_0_x86_64_iphonesimulator.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-ios_13_0_x86_64_iphonesimulator.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-macosx_10_13_x86_64.whl",
       "sha256": "dcdbd368659f46b570114eeea36b75347716523870d71f6bc5d7801862aefd6e",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-macosx_10_13_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-macosx_10_13_x86_64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-macosx_11_0_arm64.whl",
       "sha256": "eda97fa535d4651a4ccdeed4ee7dde3978369046abc8a7456a7117d4271f9333",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-macosx_11_0_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-macosx_11_0_arm64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-manylinux2010_i686.manylinux_2_12_i686.manylinux_2_28_i686.whl",
       "sha256": "7e3999b5141d7f85171822d06112f70f7f317d162f0120530dd2c7a28dbf8add",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-manylinux2010_i686.manylinux_2_12_i686.manylinux_2_28_i686.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-manylinux2010_i686.manylinux_2_12_i686.manylinux_2_28_i686.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
       "sha256": "69367726f4075c2574746f5883b0dc045805c5b02a81fdf8c829c26d33969de3",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl",
       "sha256": "15e97edfd173ade365c01bac7d9d297fa906686015cdbcb5f32a0d410887826b",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
       "sha256": "32a94cdcf16b44395cd55086ea38877395ca6bf3362cb507b0eb86db2a45a6a4",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
       "sha256": "f3f4887a8a1fd1290017fe5a1d29a7d1dc5c57f9477fbd64f119316a7e3ae769",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-manylinux_2_34_riscv64.manylinux_2_39_riscv64.whl",
       "sha256": "e590313ce156f1d8986dff3107e8ed1651d6d106a56b3a95f965ff8d845ba979",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-manylinux_2_34_riscv64.manylinux_2_39_riscv64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-manylinux_2_34_riscv64.manylinux_2_39_riscv64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_aarch64.whl",
       "sha256": "565270b0d6497970fa97a0df59593ae0d225e4176678bbce851d39e5f8aa422b",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_aarch64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_i686.whl",
       "sha256": "37ef23c6c522fe935726c8fba6344350973c4a23b06d10194d90d0868b09ff7a",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_i686.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_i686.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_ppc64le.whl",
       "sha256": "b3975330159f1efdd1fba76afe1c7b84f66f26e2bf209b32630fb148d647e0d5",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_ppc64le.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_ppc64le.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_riscv64.whl",
       "sha256": "b40bc8cd0a86cbbe8263a9c3a2bf2e34897483516c6d799725412a19524c32e3",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_riscv64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_riscv64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_s390x.whl",
       "sha256": "f37e12ef10747f76901b1f20ef70d33221e861de177dba5ba08552242c6fd4bd",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_s390x.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_s390x.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_x86_64.whl",
       "sha256": "5992143b2a8b71b4d17afed20cce2df50f8718228e31d6e716493b1fe9201712",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-musllinux_1_2_x86_64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-win32.whl",
       "sha256": "31ae30d216ffae9243dfa607bcb995f94a70de5765bb8fae1e35ea1ad6497959",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-win32.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-win32.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-win_amd64.whl",
       "sha256": "8086b4a7443bb2863f7ef8edb317b715d5f3ccec6c5512619bd23d57661ba1b7",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-win_amd64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-win_amd64.whl"
     },
     {
       "name": "backports_zstd-1.7.0-cp313-cp313-win_arm64.whl",
       "sha256": "7eaceeec75e1dbdce40b81fb0ed1ffdb7ce492d970db7f8aabd6a95ccd6c3dd3",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/backports_zstd-1.7.0-cp313-cp313-win_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/backports_zstd-1.7.0-cp313-cp313-win_arm64.whl"
     },
     {
       "name": "certifi-2026.7.22-py3-none-any.whl",
       "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/certifi-2026.7.22-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/certifi-2026.7.22-py3-none-any.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp312-cp312-macosx_10_13_x86_64.whl",
       "sha256": "3bad1e4253a64bdfd842f7d096590af6d3791230bd941ed2b329d7d0a30b530e",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp312-cp312-macosx_10_13_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp312-cp312-macosx_10_13_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp312-cp312-macosx_11_0_arm64.whl",
       "sha256": "000bae1acbf69be8249112e9213a81a66f04db93b75671fc419115ea879051ac",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp312-cp312-macosx_11_0_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp312-cp312-macosx_11_0_arm64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
       "sha256": "be598f18e8d2d1565f7c870e053cef3f5b6d0a45f16bf3f5456bac622804bb65",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
       "sha256": "26728faddb7f881f064757d449f52b1d8f788b77d149d0dac6e036e6f1a3fcdb",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp312-cp312-musllinux_1_2_aarch64.whl",
       "sha256": "afcec295c8f1649b19dff087970f24f8673aee89382f323319a40085a366611e",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp312-cp312-musllinux_1_2_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp312-cp312-musllinux_1_2_aarch64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp312-cp312-musllinux_1_2_x86_64.whl",
       "sha256": "836c2e550d8fbb1f2b4e645e539366932e1ae66a1e32034394ed512326b6e9af",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp312-cp312-musllinux_1_2_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp312-cp312-musllinux_1_2_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp312-cp312-win32.whl",
       "sha256": "48a86ee12435452d00cb8339e340f0ca5c55ce76ff7d31a1c98a670e69744801",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp312-cp312-win32.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp312-cp312-win32.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp312-cp312-win_amd64.whl",
       "sha256": "e4f459ec259681fc958722ba66ccec398cc40d0b8bcbcc24566c3bc4a3ed636b",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp312-cp312-win_amd64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp312-cp312-win_amd64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp312-cp312-win_arm64.whl",
       "sha256": "7004792ef67e8fc6ce385bb42f9e420dd05702eba803d56b8b7557f1b18055de",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp312-cp312-win_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp312-cp312-win_arm64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp313-cp313-macosx_10_13_x86_64.whl",
       "sha256": "2235f3f6b84afd494efc85abc77d04b35360395de8683456a99b55fddd2e0c67",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp313-cp313-macosx_10_13_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp313-cp313-macosx_10_13_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp313-cp313-macosx_11_0_arm64.whl",
       "sha256": "493b4623330235f1da7396715976f81ded8f778ab966c3274cf3e190b393af78",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp313-cp313-macosx_11_0_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp313-cp313-macosx_11_0_arm64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
       "sha256": "07f35953fb55a816b32bb0e6509996979706fcdc3577837f5741fbb18aa1dd00",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
       "sha256": "d5bb5748e1dfc2adbd927bafe1305e040b87b668f7b5119482f8ec8bf4190c1d",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp313-cp313-musllinux_1_2_aarch64.whl",
       "sha256": "ca5f0a61b83c9e6b82e7fb4ff56dff9e9c11b48e39575d0bce46b388e8791195",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp313-cp313-musllinux_1_2_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp313-cp313-musllinux_1_2_aarch64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp313-cp313-musllinux_1_2_x86_64.whl",
       "sha256": "a5554004022b368daac2106f651811876dd35acc0ae5dda51fd2f30d9e66ce00",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp313-cp313-musllinux_1_2_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp313-cp313-musllinux_1_2_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp313-cp313-win32.whl",
       "sha256": "fe1aa1e90dcaa3db4f12f0e612746fb93f6edc32377cf2afa12af22dd7c33be8",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp313-cp313-win32.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp313-cp313-win32.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp313-cp313-win_amd64.whl",
       "sha256": "09e718e7ad2970b2de978f6da63320276b9a958a9a32f4b878e4dce09df169a9",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp313-cp313-win_amd64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp313-cp313-win_amd64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp313-cp313-win_arm64.whl",
       "sha256": "e270c55b6fb46e92abce1b0c3c27352b394cba077b8e2db53787b1de97e6ac62",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp313-cp313-win_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp313-cp313-win_arm64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314-macosx_10_15_x86_64.whl",
       "sha256": "10893d8d9b2c33c3d6babcb5c1df6332d59f4b988499875fd2fe7550719a90db",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314-macosx_10_15_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314-macosx_10_15_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314-macosx_11_0_arm64.whl",
       "sha256": "834ff327484e1af3b3ad6cbb5fe876221032c422c1eed16c88418a33cec984ac",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314-macosx_11_0_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314-macosx_11_0_arm64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
       "sha256": "30d2d70f69f0d0aa9e08e245cccc3c4f3b04965119b28ec35652ee18fd243f84",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
       "sha256": "61506cdb9a36da3b0f6dabb976c7b578056445077789eb367c7e64b464f59ca7",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314-musllinux_1_2_aarch64.whl",
       "sha256": "c784e7b37406398a584895300d2195fd629964276af23f47882f6550479a8bfa",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314-musllinux_1_2_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314-musllinux_1_2_aarch64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314-musllinux_1_2_x86_64.whl",
       "sha256": "b5a9559e8182c0b908261d66b5cdcf92108957d15759840222b33067d721664b",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314-musllinux_1_2_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314-musllinux_1_2_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314-win32.whl",
       "sha256": "66a3bda055bf660281dad22e1f7a81866b8bfc84ece01f41a6cb907d6f9e4f49",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314-win32.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314-win32.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314-win_amd64.whl",
       "sha256": "a5093bb882825334704da686c2ad7fb50712eacd76bf080aded4a230ed63635b",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314-win_amd64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314-win_amd64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314-win_arm64.whl",
       "sha256": "c0cd870ec3f5cf44e615af542e6a62e0b4d227c508d89f6423dc3dbcdf6f4a53",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314-win_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314-win_arm64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314t-macosx_10_15_x86_64.whl",
       "sha256": "588d23b63fc86f5a7ed746f5c6a0e13ef2e2b263ee4d9dd59e86f24c9c0247f2",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314t-macosx_10_15_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314t-macosx_10_15_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314t-macosx_11_0_arm64.whl",
       "sha256": "e6be512e3a9369ca989b3f9a00e5c49977954a9a503e69f0533cf970f96c0e3a",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314t-macosx_11_0_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314t-macosx_11_0_arm64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
       "sha256": "726a824e35dacff99862d6f0555d89377d84edf867d016ac8951aea2e031c6e8",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
       "sha256": "386351c6c055ef03bb1891112ec9152b141fcba6ad70f5a40f7ac70e399aa77f",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314t-musllinux_1_2_aarch64.whl",
       "sha256": "a1a1a6b6267157893a2a83ffcf32a45e98f2686404f9db43b6776cf651e122d5",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314t-musllinux_1_2_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314t-musllinux_1_2_aarch64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314t-musllinux_1_2_x86_64.whl",
       "sha256": "eb88dab22c84053650b5c12b2f5d64cf0f0f6393de7cac2df428ecd6973186cd",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314t-musllinux_1_2_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314t-musllinux_1_2_x86_64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314t-win32.whl",
       "sha256": "cff857370a7060ce0d9e5ec3f28629f2d5fad24e5f5bd0baeb68e50b10dda2fc",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314t-win32.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314t-win32.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314t-win_amd64.whl",
       "sha256": "1ba16b26174b3ce85efead262b69b1b0762692d8c8f161a74645b56a4d0dad1a",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314t-win_amd64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314t-win_amd64.whl"
     },
     {
       "name": "clickhouse_connect-1.7.2-cp314-cp314t-win_arm64.whl",
       "sha256": "8c116d6672e8bd76272250fda204b1d6ecc1a2f430ac1560271493e2af1ddd2b",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/clickhouse_connect-1.7.2-cp314-cp314t-win_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/clickhouse_connect-1.7.2-cp314-cp314t-win_arm64.whl"
     },
     {
       "name": "lz4-4.4.5-cp312-cp312-macosx_10_13_x86_64.whl",
       "sha256": "df5aa4cead2044bab83e0ebae56e0944cc7fcc1505c7787e9e1057d6d549897e",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp312-cp312-macosx_10_13_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp312-cp312-macosx_10_13_x86_64.whl"
     },
     {
       "name": "lz4-4.4.5-cp312-cp312-macosx_11_0_arm64.whl",
       "sha256": "6d0bf51e7745484d2092b3a51ae6eb58c3bd3ce0300cf2b2c14f76c536d5697a",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp312-cp312-macosx_11_0_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp312-cp312-macosx_11_0_arm64.whl"
     },
     {
       "name": "lz4-4.4.5-cp312-cp312-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl",
       "sha256": "7b62f94b523c251cf32aa4ab555f14d39bd1a9df385b72443fd76d7c7fb051f5",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp312-cp312-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp312-cp312-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl"
     },
     {
       "name": "lz4-4.4.5-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
       "sha256": "2c3ea562c3af274264444819ae9b14dbbf1ab070aff214a05e97db6896c7597e",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
     },
     {
       "name": "lz4-4.4.5-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
       "sha256": "24092635f47538b392c4eaeff14c7270d2c8e806bf4be2a6446a378591c5e69e",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
     },
     {
       "name": "lz4-4.4.5-cp312-cp312-win32.whl",
       "sha256": "214e37cfe270948ea7eb777229e211c601a3e0875541c1035ab408fbceaddf50",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp312-cp312-win32.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp312-cp312-win32.whl"
     },
     {
       "name": "lz4-4.4.5-cp312-cp312-win_amd64.whl",
       "sha256": "713a777de88a73425cf08eb11f742cd2c98628e79a8673d6a52e3c5f0c116f33",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp312-cp312-win_amd64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp312-cp312-win_amd64.whl"
     },
     {
       "name": "lz4-4.4.5-cp312-cp312-win_arm64.whl",
       "sha256": "a88cbb729cc333334ccfb52f070463c21560fca63afcf636a9f160a55fac3301",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp312-cp312-win_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp312-cp312-win_arm64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313-macosx_10_13_x86_64.whl",
       "sha256": "6bb05416444fafea170b07181bc70640975ecc2a8c92b3b658c554119519716c",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313-macosx_10_13_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313-macosx_10_13_x86_64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313-macosx_11_0_arm64.whl",
       "sha256": "b424df1076e40d4e884cfcc4c77d815368b7fb9ebcd7e634f937725cd9a8a72a",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313-macosx_11_0_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313-macosx_11_0_arm64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl",
       "sha256": "216ca0c6c90719731c64f41cfbd6f27a736d7e50a10b70fad2a9c9b262ec923d",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
       "sha256": "533298d208b58b651662dd972f52d807d48915176e5b032fb4f8c3b6f5fe535c",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
       "sha256": "451039b609b9a88a934800b5fc6ee401c89ad9c175abf2f4d9f8b2e4ef1afc64",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313-win32.whl",
       "sha256": "a5f197ffa6fc0e93207b0af71b302e0a2f6f29982e5de0fbda61606dd3a55832",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313-win32.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313-win32.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313-win_amd64.whl",
       "sha256": "da68497f78953017deb20edff0dba95641cc86e7423dfadf7c0264e1ac60dc22",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313-win_amd64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313-win_amd64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313-win_arm64.whl",
       "sha256": "c1cfa663468a189dab510ab231aad030970593f997746d7a324d40104db0d0a9",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313-win_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313-win_arm64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313t-macosx_10_13_x86_64.whl",
       "sha256": "67531da3b62f49c939e09d56492baf397175ff39926d0bd5bd2d191ac2bff95f",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313t-macosx_10_13_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313t-macosx_10_13_x86_64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313t-macosx_11_0_arm64.whl",
       "sha256": "a1acbbba9edbcbb982bc2cac5e7108f0f553aebac1040fbec67a011a45afa1ba",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313t-macosx_11_0_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313t-macosx_11_0_arm64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313t-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl",
       "sha256": "a482eecc0b7829c89b498fda883dbd50e98153a116de612ee7c111c8bcf82d1d",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313t-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313t-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
       "sha256": "e099ddfaa88f59dd8d36c8a3c66bd982b4984edf127eb18e30bb49bdba68ce67",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
       "sha256": "a2af2897333b421360fdcce895c6f6281dc3fab018d19d341cf64d043fc8d90d",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313t-win32.whl",
       "sha256": "66c5de72bf4988e1b284ebdd6524c4bead2c507a2d7f172201572bac6f593901",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313t-win32.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313t-win32.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313t-win_amd64.whl",
       "sha256": "cdd4bdcbaf35056086d910d219106f6a04e1ab0daa40ec0eeef1626c27d0fddb",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313t-win_amd64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313t-win_amd64.whl"
     },
     {
       "name": "lz4-4.4.5-cp313-cp313t-win_arm64.whl",
       "sha256": "28ccaeb7c5222454cd5f60fcd152564205bcb801bd80e125949d2dfbadc76bbd",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp313-cp313t-win_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp313-cp313t-win_arm64.whl"
     },
     {
       "name": "lz4-4.4.5-cp314-cp314-macosx_10_15_x86_64.whl",
       "sha256": "c216b6d5275fc060c6280936bb3bb0e0be6126afb08abccde27eed23dead135f",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp314-cp314-macosx_10_15_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp314-cp314-macosx_10_15_x86_64.whl"
     },
     {
       "name": "lz4-4.4.5-cp314-cp314-macosx_11_0_arm64.whl",
       "sha256": "c8e71b14938082ebaf78144f3b3917ac715f72d14c076f384a4c062df96f9df6",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp314-cp314-macosx_11_0_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp314-cp314-macosx_11_0_arm64.whl"
     },
     {
       "name": "lz4-4.4.5-cp314-cp314-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl",
       "sha256": "9b5e6abca8df9f9bdc5c3085f33ff32cdc86ed04c65e0355506d46a5ac19b6e9",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp314-cp314-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp314-cp314-manylinux1_i686.manylinux_2_28_i686.manylinux_2_5_i686.whl"
     },
     {
       "name": "lz4-4.4.5-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
       "sha256": "3b84a42da86e8ad8537aabef062e7f661f4a877d1c74d65606c49d835d36d668",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl"
     },
     {
       "name": "lz4-4.4.5-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
       "sha256": "0bba042ec5a61fa77c7e380351a61cb768277801240249841defd2ff0a10742f",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
     },
     {
       "name": "lz4-4.4.5-cp314-cp314-win32.whl",
       "sha256": "bd85d118316b53ed73956435bee1997bd06cc66dd2fa74073e3b1322bd520a67",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp314-cp314-win32.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp314-cp314-win32.whl"
     },
     {
       "name": "lz4-4.4.5-cp314-cp314-win_amd64.whl",
       "sha256": "92159782a4502858a21e0079d77cdcaade23e8a5d252ddf46b0652604300d7be",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp314-cp314-win_amd64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp314-cp314-win_amd64.whl"
     },
     {
       "name": "lz4-4.4.5-cp314-cp314-win_arm64.whl",
       "sha256": "d994b87abaa7a88ceb7a37c90f547b8284ff9da694e6afcfaa8568d739faf3f7",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/lz4-4.4.5-cp314-cp314-win_arm64.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/lz4-4.4.5-cp314-cp314-win_arm64.whl"
     },
     {
       "name": "tzdata-2026.3-py2.py3-none-any.whl",
       "sha256": "dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/tzdata-2026.3-py2.py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/tzdata-2026.3-py2.py3-none-any.whl"
     },
     {
       "name": "urllib3-2.7.0-py3-none-any.whl",
       "sha256": "9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/urllib3-2.7.0-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/urllib3-2.7.0-py3-none-any.whl"
     }
   ]
 }

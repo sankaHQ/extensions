@@ -188,19 +188,23 @@ def test_replay_matches_the_generated_native_app_and_flags_a_regression(tmp_path
     shutil.copytree(FIXTURES / "drf_crud_project", project)
     output = _generate_native_candidate(project)
     manifest = json.loads((output / "sanka-manifest.json").read_text(encoding="utf-8"))
+    scan_payload = json.loads((project / ".sanka" / "scan.json").read_text(encoding="utf-8"))
+    edge_probes = replay_module.edge_probes_from_scan(scan_payload)
+    assert any(probe["id"].startswith("edge:slash-variant:") for probe in edge_probes)
     report = replay(
         project,
         [
             replay_module._validated_request(item, item["id"], require_id=True)
             for item in CRUD_SCENARIOS
-        ],
+        ]
+        + edge_probes,
         settings_module="crud_config.settings",
         candidate_root=output,
         entrypoint=str(manifest["entrypoint"]),
         db_env="SANKA_TEST_DB",
         python=Path(sys.executable),
     )
-    assert report["summary"]["scenarios"] == len(CRUD_SCENARIOS)
+    assert report["summary"]["scenarios"] == len(CRUD_SCENARIOS) + len(edge_probes)
     # The generated native app answers OPTIONS and 405 exactly like DRF, so a fresh
     # candidate replays clean; the verifier must report no mismatch at all.
     baseline_failures = [item for item in report["scenarios"] if not item["match"]]

@@ -79,6 +79,11 @@ SCENARIOS: list[dict[str, Any]] = [
     {"method": "PUT", "path": "/api/gadgets/"},
     {"method": "POST", "path": "/api/gadgets/1/"},
     {"method": "DELETE", "path": "/api/"},
+    # slash-less variants: Django without CommonMiddleware answers its default 404 page;
+    # FastAPI's own redirect_slashes 307 must never appear
+    {"method": "GET", "path": "/api/gadgets"},
+    {"method": "GET", "path": "/api/gadgets/2"},
+    {"method": "POST", "path": "/api/gadgets", "body": {"name": "NoSlash", "quantity": 1}},
 ]
 
 
@@ -769,3 +774,36 @@ def test_apply_sqlalchemy_and_rejects_psycopg_on_sqlite(crud_project: Path) -> N
     )
     assert refused.returncode == 1, refused.stdout
     assert "PostgreSQL" in refused.stderr
+
+
+def test_native_app_redirects_slash_less_paths_only_with_append_slash(
+    crud_project: Path, tmp_path: Path
+) -> None:
+    """CommonMiddleware + APPEND_SLASH: 301 to the slashed route, like Django; nothing else."""
+    _set_middleware(
+        crud_project / "crud_config" / "settings.py",
+        ["django.middleware.common.CommonMiddleware"],
+    )
+    scan = _run_cli(["scan", str(crud_project)], crud_project)
+    assert scan.returncode == 0, scan.stderr
+    plan = _run_cli(["plan", str(crud_project), "--to", "fastapi"], crud_project)
+    assert plan.returncode == 0, plan.stderr
+    output = crud_project / ".sanka" / "output" / "fastapi"
+    applied = _run_cli(
+        ["apply", "--root", str(crud_project), "--plan-hash", _plan_hash(crud_project)],
+        crud_project,
+    )
+    assert applied.returncode == 0, applied.stderr
+    scenarios = [
+        {"method": "GET", "path": "/api/gadgets"},
+        {"method": "GET", "path": "/api/gadgets?ordering=name"},
+        {"method": "GET", "path": "/api/gadgets/2"},
+        {"method": "GET", "path": "/api/nothing-here"},
+        {"method": "POST", "path": "/api/gadgets", "body": {"name": "NoSlash", "quantity": 1}},
+    ]
+    source = _run_probe("source", crud_project, tmp_path / "source.sqlite3", scenarios=scenarios)
+    native = _run_probe(
+        "native", crud_project, tmp_path / "native.sqlite3", output=output, scenarios=scenarios
+    )
+    assert [item["status"] for item in source["results"]] == [301, 301, 301, 404, 301]
+    assert native["results"] == source["results"]

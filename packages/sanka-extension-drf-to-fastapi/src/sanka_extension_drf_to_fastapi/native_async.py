@@ -1014,7 +1014,7 @@ from urllib import parse as _urlparse
 
 import anyio
 from fastapi import HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 import sanka_store as store
 
@@ -2097,6 +2097,60 @@ def _allow_for_path(path: str) -> str | None:
         if re.match(regex, path):
             return allow
     return None
+
+
+def _route_match(request: Request, path: str) -> str:
+    """How the app's real routes see ``path`` for this method: full, partial, or none.
+
+    Starlette compiles each route's path with its convertors, so a lookup value that the
+    generated regex convertor rejects is a miss here even though a loose pattern would
+    accept it. The catch-all route itself is skipped.
+    """
+    from starlette.routing import Match
+
+    scope = dict(request.scope)
+    scope["path"] = path
+    scope["root_path"] = ""
+    outcome = "none"
+    for route in request.app.router.routes:
+        if getattr(route, "path", None) == "/{path:path}":
+            continue
+        match, _child = route.matches(scope)
+        if match == Match.FULL:
+            return "full"
+        if match == Match.PARTIAL:
+            outcome = "partial"
+    return outcome
+
+
+def not_found_response(request: Request, page: str) -> Response:
+    """Django's answer to an unmatched path: APPEND_SLASH 301 or the default 404 page.
+
+    CommonMiddleware redirects a slash-less request whose slashed form resolves, keeping
+    the query string and answering 301 with an empty text/html body; every other miss is
+    Django's default "Not Found" page. FastAPI's own 307 redirect never appears because
+    the generated app is built with redirect_slashes=False.
+    """
+    security = MANIFEST.get("http_security", {})
+    path = request.url.path
+    if (
+        security.get("append_slash")
+        and not path.endswith("/")
+        and _route_match(request, path + "/") != "none"
+    ):
+        target = path + "/" + (f"?{request.url.query}" if request.url.query else "")
+        return Response(
+            status_code=301,
+            headers={"Location": target, "Content-Type": "text/html; charset=utf-8"},
+        )
+    return HTMLResponse(page, status_code=404)
+
+
+def fallback_response(request: Request, page: str) -> Response:
+    """Catch-all APIRoute body: DRF's 405 for a known path, Django's 404/301 otherwise."""
+    if _route_match(request, request.url.path) == "partial":
+        return method_not_allowed(request)
+    return not_found_response(request, page)
 
 
 def method_not_allowed(request: Request) -> Response:

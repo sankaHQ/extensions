@@ -1,6 +1,6 @@
 [project]
 name = "sanka-extension-drf-to-fastapi"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Isolated DRF-to-FastAPI migration extension for Sanka"
 readme = "README.md"
 requires-python = ">=3.12"

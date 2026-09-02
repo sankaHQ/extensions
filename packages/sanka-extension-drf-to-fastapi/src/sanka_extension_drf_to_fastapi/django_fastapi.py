@@ -124,6 +124,9 @@ def _capture_http_security(settings: Any, middleware: tuple[str, ...]) -> dict[s
         # Django itself never sets Content-Length; CommonMiddleware adds it. The generated
         # app mirrors whichever the source did so header-level parity holds.
         "content_length": common_middleware,
+        # CommonMiddleware redirects slash-less requests to the slashed route (301) when
+        # APPEND_SLASH holds; without it Django answers its default 404 page instead.
+        "append_slash": bool(common_middleware and getattr(settings, "APPEND_SLASH", True)),
         "ssl_redirect": bool(security_middleware and settings.SECURE_SSL_REDIRECT),
         "content_type_nosniff": bool(security_middleware and settings.SECURE_CONTENT_TYPE_NOSNIFF),
         "referrer_policy": (
@@ -3991,9 +3994,14 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
             "</body>\n</html>\n"
         ),
         "",
+        "# FastAPI would answer a slash-less path with 307; Django never does. Without",
+        "# CommonMiddleware it serves its default 404 page, with APPEND_SLASH a 301 to the",
+        "# slashed route. redirect_slashes is off above so these handlers decide. The",
+        "# catch-all route below keeps every unmatched path and disallowed method inside a",
+        "# workspace-owned APIRoute, which is what native-serving evidence requires.",
         "@app.exception_handler(404)",
-        "async def django_default_404(_request: Request, _error: Exception) -> HTMLResponse:",
-        "    return HTMLResponse(_DJANGO_DEFAULT_404, status_code=404)",
+        "async def django_default_404(request: Request, _error: Exception) -> Response:",
+        "    return native.not_found_response(request, _DJANGO_DEFAULT_404)",
         "",
         "# DRF answers an unsupported method with its own detail string and the Allow",
         "# header in http_method_names order; FastAPI's default differs on both.",
@@ -4034,14 +4042,18 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
             "        await store.close_db()",
             "",
             "",
-            'app = FastAPI(title="Sanka native FastAPI application", lifespan=lifespan)',
+            "app = FastAPI(",
+            '    title="Sanka native FastAPI application",',
+            "    lifespan=lifespan,",
+            "    redirect_slashes=False,",
+            ")",
             "",
         ]
     else:
         lines[10:10] = [
             "",
             "",
-            'app = FastAPI(title="Sanka native FastAPI application")',
+            'app = FastAPI(title="Sanka native FastAPI application", redirect_slashes=False)',
             "",
         ]
     used_vars: set[str] = set()
@@ -4211,6 +4223,23 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
             "",
         ]
     )
+    lines.extend(
+        [
+            "",
+            "",
+            "# Django resolves the path before the method: an unknown path is a 404 (or an",
+            "# APPEND_SLASH 301), a known path with a disallowed method is DRF's 405. Both",
+            "# are served here by an APIRoute that lives in this file.",
+            "_FALLBACK_METHODS = "
+            '["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"]',
+            "",
+            "",
+            '@app.api_route("/{path:path}", methods=_FALLBACK_METHODS, include_in_schema=False)',
+            "async def django_fallback(request: Request, path: str) -> Response:",
+            "    return native.fallback_response(request, _DJANGO_DEFAULT_404)",
+        ]
+    )
+
     return "\n".join(lines)
 
 
