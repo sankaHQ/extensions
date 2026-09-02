@@ -51,7 +51,7 @@
     },
     {
       "name": "sanka_extension_drf_to_fastapi-0.1.0a1-py3-none-any.whl",
-      "sha256": "c1fe7cb44fe52b94b09a52d5369533208b9161fbdab766e625d911dadc032a47",
+      "sha256": "8bcf71b52946c6ed220f4032c1e973c203df53970a069954ec425e3ff16f8aed",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a1/sanka_extension_drf_to_fastapi-0.1.0a1-py3-none-any.whl"
     }
   ]
