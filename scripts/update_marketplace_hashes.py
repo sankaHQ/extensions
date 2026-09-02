@@ -7,13 +7,19 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+if __package__ in {None, ""}:  # Direct script execution keeps only scripts/ on sys.path.
+    sys.path.insert(0, str(ROOT))
+
+from scripts.build_release import LOCKED_DEPENDENCY_WHEELS  # noqa: E402
+
 RELEASE_TAG = "extensions-v0.1.0a11"
-MANIFEST_WHEELS = {
+LOCAL_MANIFEST_WHEELS = {
     "sanka-extension-drf-to-fastapi": (
         "sanka_extension_sdk-0.1.0a1-py3-none-any.whl",
         "sanka_extension_drf_to_fastapi-0.1.0a1-py3-none-any.whl",
@@ -38,6 +44,35 @@ MANIFEST_WHEELS = {
         "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
         "sanka_connector_clickhouse-0.1.0a11-py3-none-any.whl",
     ),
+}
+MANIFEST_DEPENDENCIES = {
+    "sanka-extension-drf-to-fastapi": (),
+    "sanka-connector-markdown": ("pyyaml",),
+    "sanka-connector-csv": (),
+    "sanka-connector-sqlite": (),
+    "sanka-connector-postgres": (
+        "psycopg",
+        "psycopg-binary",
+        "typing-extensions",
+        "tzdata",
+    ),
+    "sanka-connector-clickhouse": (
+        "backports-zstd",
+        "certifi",
+        "clickhouse-connect",
+        "lz4",
+        "tzdata",
+        "urllib3",
+    ),
+}
+MANIFEST_WHEELS = {
+    package: local
+    + tuple(
+        wheel.name
+        for wheel in LOCKED_DEPENDENCY_WHEELS
+        if wheel.distribution in MANIFEST_DEPENDENCIES[package]
+    )
+    for package, local in LOCAL_MANIFEST_WHEELS.items()
 }
 MANIFESTS = {package: ROOT / "packages" / package / "extension.json" for package in MANIFEST_WHEELS}
 
