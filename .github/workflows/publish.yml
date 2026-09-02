@@ -57,6 +57,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME"
           dist/*.whl
           release-assets/*
+          --repo "$GITHUB_REPOSITORY"
           --verify-tag --prerelease --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

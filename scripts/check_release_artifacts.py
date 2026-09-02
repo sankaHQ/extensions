@@ -18,10 +18,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if __package__ in {None, ""}:  # Direct script execution keeps only scripts/ on sys.path.
     sys.path.insert(0, str(ROOT))
 
-from scripts.build_release import MARKETPLACE_PACKAGES  # noqa: E402
+from scripts.build_release import (  # noqa: E402
+    LOCKED_DEPENDENCY_WHEELS,
+    MARKETPLACE_WHEELS,
+)
 from scripts.update_marketplace_hashes import MANIFEST_WHEELS, RELEASE_TAG  # noqa: E402
 
 RELEASE = ROOT / "release" / "all"
+LOCKED_DEPENDENCY_HASHES = {wheel.name: wheel.sha256 for wheel in LOCKED_DEPENDENCY_WHEELS}
 CATALOG: dict[str, Any] = {
     "schema_version": "sanka-marketplace/v1",
     "extensions": [
@@ -240,7 +244,7 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
     if not release.is_dir():
         return [f"release directory is missing: {release}"]
     versions = _project_versions(root)
-    expected_names = {name for wheels in MANIFEST_WHEELS.values() for name in wheels}
+    expected_names = set(MARKETPLACE_WHEELS)
     wheels = {path.name: path for path in release.glob("*.whl")}
     errors: list[str] = []
     if set(wheels) != expected_names:
@@ -250,6 +254,10 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
     if extras := sorted(path.name for path in release.iterdir() if path.suffix != ".whl"):
         errors.append(f"release directory contains non-wheel artifacts: {extras}")
     for wheel in wheels.values():
+        if expected_hash := LOCKED_DEPENDENCY_HASHES.get(wheel.name):
+            if _hash(wheel) != expected_hash:
+                errors.append(f"locked dependency hash does not match uv.lock: {wheel.name}")
+            continue
         try:
             metadata, entries = _wheel_metadata(wheel)
         except (KeyError, StopIteration, zipfile.BadZipFile) as error:
@@ -289,7 +297,7 @@ def main(root: Path = ROOT, release: Path = RELEASE) -> int:
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print(f"Release artifacts: OK ({len(MARKETPLACE_PACKAGES)} marketplace wheels; hashes match)")
+    print(f"Release artifacts: OK ({len(MARKETPLACE_WHEELS)} marketplace wheels; hashes match)")
     return 0
 
 
