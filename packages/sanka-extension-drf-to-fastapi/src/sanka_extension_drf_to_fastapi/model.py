@@ -36,6 +36,32 @@ class RouteAdaptationReason:
 
 
 @dataclass(frozen=True, slots=True)
+class ParityNote:
+    """One source-derived fact about exact behavior a port must reproduce.
+
+    Notes are facts about the scanned application (auth ordering, exact error
+    strings, pagination envelopes, file rules, unique-conflict wording), derived from
+    the live installation. They accompany every route so a migration can be checked
+    against them; they never widen or narrow the native envelope.
+    """
+
+    family: str
+    code: str
+    message: str
+    source: str | None = None
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ParityNote:
+        source = payload.get("source")
+        return cls(
+            family=str(payload["family"]),
+            code=str(payload["code"]),
+            message=str(payload["message"]),
+            source=str(source) if source is not None else None,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RouteIR:
     method: str
     path: str
@@ -51,6 +77,7 @@ class RouteIR:
     supported: bool = True
     native: bool = False
     adaptation_reasons: tuple[RouteAdaptationReason, ...] = ()
+    parity_notes: tuple[ParityNote, ...] = ()
 
     @property
     def key(self) -> str:
@@ -63,6 +90,9 @@ class RouteIR:
         data["permissions"] = tuple(payload.get("permissions", ()))
         data["adaptation_reasons"] = tuple(
             RouteAdaptationReason.from_dict(item) for item in payload.get("adaptation_reasons", ())
+        )
+        data["parity_notes"] = tuple(
+            ParityNote.from_dict(item) for item in payload.get("parity_notes", ())
         )
         return cls(**data)
 
@@ -285,6 +315,9 @@ class FrameworkScan:
                 route.pop("adaptation_reasons", None)
         if self.schema_version < 4:
             payload.pop("skipped_routes", None)
+        if self.schema_version < 5:
+            for route in payload["routes"]:
+                route.pop("parity_notes", None)
         return payload
 
     def with_hash(self) -> FrameworkScan:
@@ -339,6 +372,7 @@ class PlannedRoute:
     strategy: str
     automatic: bool
     adaptation_reasons: tuple[RouteAdaptationReason, ...] = ()
+    parity_notes: tuple[ParityNote, ...] = ()
 
     @property
     def key(self) -> str:
@@ -349,6 +383,9 @@ class PlannedRoute:
         data = dict(payload)
         data["adaptation_reasons"] = tuple(
             RouteAdaptationReason.from_dict(item) for item in payload.get("adaptation_reasons", ())
+        )
+        data["parity_notes"] = tuple(
+            ParityNote.from_dict(item) for item in payload.get("parity_notes", ())
         )
         return cls(**data)
 
@@ -452,6 +489,9 @@ class FrameworkPlan:
                 "omissions",
             ):
                 payload.pop(key, None)
+        if self.schema_version < 4:
+            for route in payload["routes"]:
+                route.pop("parity_notes", None)
         return payload
 
     def with_hash(self) -> FrameworkPlan:
