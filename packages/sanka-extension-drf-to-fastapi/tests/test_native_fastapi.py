@@ -683,6 +683,7 @@ def test_native_plan_explains_middleware_in_legacy_scan(crud_project: Path) -> N
     payload.pop("skipped_routes", None)
     for route in payload["routes"]:
         route.pop("adaptation_reasons", None)
+        route.pop("parity_notes", None)
     hash_payload = dict(payload)
     hash_payload.pop("scan_hash", None)
     payload["scan_hash"] = content_hash(hash_payload)

@@ -53,6 +53,7 @@ from sanka_extension_drf_to_fastapi.model import (
     FrameworkPlan,
     FrameworkRisk,
     FrameworkScan,
+    ParityNote,
     PlannedRoute,
     RouteAdaptationReason,
     RouteIR,
@@ -68,6 +69,7 @@ from sanka_extension_drf_to_fastapi.native_async import (
     render_generated_pyproject,
     resolve_sql_engine,
 )
+from sanka_extension_drf_to_fastapi.parity import route_parity_notes
 
 DEFAULT_ARTIFACT_DIR = ".sanka"
 DEFAULT_FASTAPI_OUTPUT = ".sanka/output/fastapi"
@@ -164,7 +166,7 @@ def scan_django(
     permissions = sorted({value for route in routes for value in route.permissions})
     authentication = sorted({value for route in routes for value in route.authentication})
     scan = FrameworkScan(
-        schema_version=4,
+        schema_version=5,
         source=".",
         language="python",
         framework="django-rest-framework",
@@ -453,6 +455,7 @@ def plan_fastapi(
                 source_view=route.view,
                 strategy=ROUTE_STRATEGY_BRIDGE,
                 automatic=route.supported,
+                parity_notes=route.parity_notes,
             )
             for route in scan.routes
         )
@@ -527,7 +530,7 @@ def plan_fastapi(
     if any(not route.automatic for route in routes):
         omissions.append("manual-route-adaptations")
     plan = FrameworkPlan(
-        schema_version=3,
+        schema_version=4,
         source_framework=scan.framework,
         target_framework="fastapi",
         mode=strategy,
@@ -586,6 +589,7 @@ def _plan_native_route(route: RouteIR, *, middleware: tuple[str, ...] = ()) -> P
         strategy=strategy,
         automatic=automatic,
         adaptation_reasons=adaptation_reasons,
+        parity_notes=route.parity_notes,
     )
 
 
@@ -1238,6 +1242,7 @@ def _render_native_output(
                     {"code": reason.code, "feature": reason.feature, "message": reason.message}
                     for reason in route.adaptation_reasons
                 ],
+                "parity_notes": [_parity_note_payload(note) for note in route.parity_notes],
                 "stubbed": _stub_safe_path(route.path),
             }
             for route in manual
@@ -1750,6 +1755,16 @@ def _walk_patterns(
             transactional = (
                 "transaction.atomic" in operation_source or "@atomic" in operation_source
             )
+            parity_notes = route_parity_notes(
+                view_class=view_class,
+                callback=callback,
+                actions=actions,
+                method=method,
+                operation=operation,
+                path=path,
+                middleware=middleware,
+                root_path=root_path,
+            )
             result.routes.append(
                 RouteIR(
                     method=method,
@@ -1766,6 +1781,7 @@ def _walk_patterns(
                     supported=supported,
                     native=native,
                     adaptation_reasons=adaptation_reasons,
+                    parity_notes=parity_notes,
                 )
             )
     result.routes = list({route.key: route for route in result.routes}.values())
@@ -1793,6 +1809,15 @@ def _stub_safe_path(path: str) -> bool:
 
 def _adaptation_reason(code: str, feature: str, message: str) -> RouteAdaptationReason:
     return RouteAdaptationReason(code=code, feature=feature, message=message)
+
+
+def _parity_note_payload(note: ParityNote) -> dict[str, Any]:
+    return {
+        "family": note.family,
+        "code": note.code,
+        "message": note.message,
+        "source": note.source,
+    }
 
 
 def _middleware_adaptation_reason(
@@ -3674,6 +3699,7 @@ def _gap_report_payload(plan: FrameworkPlan, scan: FrameworkScan) -> dict[str, A
                     {"code": reason.code, "feature": reason.feature, "message": reason.message}
                     for reason in route.adaptation_reasons
                 ],
+                "parity_notes": [_parity_note_payload(note) for note in route.parity_notes],
             }
             for route in manual
         ],
@@ -3718,6 +3744,9 @@ def _render_gap_report(plan: FrameworkPlan, scan: FrameworkScan) -> str:
             lines.append(f"- `{route.method} {route.path}` — {mounted}")
             for reason in route.adaptation_reasons:
                 lines.append(f"  - `{reason.code}`: {reason.message}")
+            for note in route.parity_notes:
+                where = f" ({note.source})" if note.source else ""
+                lines.append(f"  - parity/{note.family} `{note.code}`: {note.message}{where}")
         lines.append("")
     else:
         lines.extend(
