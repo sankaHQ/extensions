@@ -36,6 +36,32 @@ class RouteAdaptationReason:
 
 
 @dataclass(frozen=True, slots=True)
+class ParityNote:
+    """One source-derived fact about exact behavior a port must reproduce.
+
+    Notes are facts about the scanned application (auth ordering, exact error
+    strings, pagination envelopes, file rules, unique-conflict wording), derived from
+    the live installation. They accompany every route so a migration can be checked
+    against them; they never widen or narrow the native envelope.
+    """
+
+    family: str
+    code: str
+    message: str
+    source: str | None = None
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ParityNote:
+        source = payload.get("source")
+        return cls(
+            family=str(payload["family"]),
+            code=str(payload["code"]),
+            message=str(payload["message"]),
+            source=str(source) if source is not None else None,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RouteIR:
     method: str
     path: str
@@ -51,6 +77,8 @@ class RouteIR:
     supported: bool = True
     native: bool = False
     adaptation_reasons: tuple[RouteAdaptationReason, ...] = ()
+    parity_notes: tuple[ParityNote, ...] = ()
+    options: dict[str, Any] = field(default_factory=dict)
 
     @property
     def key(self) -> str:
@@ -64,6 +92,10 @@ class RouteIR:
         data["adaptation_reasons"] = tuple(
             RouteAdaptationReason.from_dict(item) for item in payload.get("adaptation_reasons", ())
         )
+        data["parity_notes"] = tuple(
+            ParityNote.from_dict(item) for item in payload.get("parity_notes", ())
+        )
+        data["options"] = dict(payload.get("options") or {})
         return cls(**data)
 
 
@@ -138,6 +170,7 @@ class SerializerFieldIR:
     child: SerializerIR | None = None
     messages: tuple[tuple[str, str], ...] = ()
     supported: bool = True
+    timezone: str | None = None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> SerializerFieldIR:
@@ -223,6 +256,8 @@ class ViewIR:
     name: str
     auth: ViewAuthIR | None = None
     lookup_regex: str | None = None
+    listing: dict[str, Any] = field(default_factory=dict)
+    carryover: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> ViewIR:
@@ -233,6 +268,8 @@ class ViewIR:
             lookup_regex=(
                 str(payload["lookup_regex"]) if payload.get("lookup_regex") is not None else None
             ),
+            listing=dict(payload.get("listing") or {}),
+            carryover=dict(payload.get("carryover") or {}),
         )
 
 
@@ -247,6 +284,16 @@ class ApiRootIR:
             path=str(payload["path"]),
             links=tuple((str(key), str(value)) for key, value in payload.get("links", ())),
         )
+
+
+def _strip_field_keys(fields: list[dict[str, Any]], keys: tuple[str, ...]) -> None:
+    """Drop keys older schemas never wrote so their stored hashes still verify."""
+    for item in fields:
+        for key in keys:
+            item.pop(key, None)
+        child = item.get("child")
+        if isinstance(child, dict):
+            _strip_field_keys(child.get("fields", []), keys)
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,6 +322,7 @@ class FrameworkScan:
     generic_messages: tuple[tuple[str, str], ...] = ()
     database: DatabaseIR = field(default_factory=lambda: DatabaseIR(vendor="other", name=""))
     skipped_routes: tuple[SkippedRoute, ...] = ()
+    status_codes: dict[str, int] = field(default_factory=dict)
     scan_hash: str = field(default="")
 
     def hash_payload(self) -> dict[str, Any]:
@@ -285,6 +333,19 @@ class FrameworkScan:
                 route.pop("adaptation_reasons", None)
         if self.schema_version < 4:
             payload.pop("skipped_routes", None)
+        if self.schema_version < 5:
+            for route in payload["routes"]:
+                route.pop("parity_notes", None)
+        if self.schema_version < 6:
+            for route in payload["routes"]:
+                route.pop("options", None)
+        if self.schema_version < 7:
+            payload.pop("status_codes", None)
+            for view in payload.get("view_details", []):
+                view.pop("listing", None)
+                view.pop("carryover", None)
+            for serializer in payload.get("serializer_details", []):
+                _strip_field_keys(serializer.get("fields", []), ("timezone",))
         return payload
 
     def with_hash(self) -> FrameworkScan:
@@ -326,6 +387,9 @@ class FrameworkScan:
             skipped_routes=tuple(
                 SkippedRoute.from_dict(item) for item in payload.get("skipped_routes", [])
             ),
+            status_codes={
+                str(key): int(value) for key, value in (payload.get("status_codes") or {}).items()
+            },
             scan_hash=str(payload.get("scan_hash", "")),
         )
 
@@ -339,6 +403,7 @@ class PlannedRoute:
     strategy: str
     automatic: bool
     adaptation_reasons: tuple[RouteAdaptationReason, ...] = ()
+    parity_notes: tuple[ParityNote, ...] = ()
 
     @property
     def key(self) -> str:
@@ -349,6 +414,9 @@ class PlannedRoute:
         data = dict(payload)
         data["adaptation_reasons"] = tuple(
             RouteAdaptationReason.from_dict(item) for item in payload.get("adaptation_reasons", ())
+        )
+        data["parity_notes"] = tuple(
+            ParityNote.from_dict(item) for item in payload.get("parity_notes", ())
         )
         return cls(**data)
 
@@ -452,6 +520,9 @@ class FrameworkPlan:
                 "omissions",
             ):
                 payload.pop(key, None)
+        if self.schema_version < 4:
+            for route in payload["routes"]:
+                route.pop("parity_notes", None)
         return payload
 
     def with_hash(self) -> FrameworkPlan:

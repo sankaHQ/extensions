@@ -314,7 +314,7 @@ def test_scan_discloses_skipped_non_drf_routes(
     assert "Not scanned (non-DRF views" in scan_output
     assert "legacy/redirect/" in scan_output
     scan = load_framework_scan(drf_project)
-    assert scan.schema_version == 4
+    assert scan.schema_version == 7
     assert [(item.pattern, item.reason) for item in scan.skipped_routes] == [
         ("legacy/redirect/", "non-drf-view")
     ]

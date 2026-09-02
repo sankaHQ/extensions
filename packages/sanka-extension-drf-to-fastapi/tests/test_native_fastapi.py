@@ -70,6 +70,15 @@ SCENARIOS: list[dict[str, Any]] = [
     {"method": "POST", "path": "/api/gadgets/", "raw_body": "{"},
     {"method": "POST", "path": "/api/gadgets/", "body": {"name": "Padded ", "quantity": 0}},
     {"method": "GET", "path": "/api/gadgets/"},
+    # OPTIONS metadata (SimpleMetadata body; PUT actions only for a reachable object)
+    {"method": "OPTIONS", "path": "/api/"},
+    {"method": "OPTIONS", "path": "/api/gadgets/"},
+    {"method": "OPTIONS", "path": "/api/gadgets/1/"},
+    {"method": "OPTIONS", "path": "/api/gadgets/999/"},
+    # 405 detail wording for methods the path does not serve
+    {"method": "PUT", "path": "/api/gadgets/"},
+    {"method": "POST", "path": "/api/gadgets/1/"},
+    {"method": "DELETE", "path": "/api/"},
 ]
 
 
@@ -590,8 +599,10 @@ def test_native_plan_continues_past_unsupported_middleware(tmp_path: Path) -> No
         "SANKA_DRF_MIDDLEWARE_UNSUPPORTED",
         "SANKA_DRF_VIEW_KIND_UNSUPPORTED",
     ]
+    # the list action is overridden: the route carries the view-level gaps and its own
     assert reason_codes("/api/projects/") == [
         "SANKA_DRF_MIDDLEWARE_UNSUPPORTED",
+        "SANKA_DRF_AUTH_PERMISSIONS_UNSUPPORTED",
         "SANKA_DRF_VIEWSET_OVERRIDES_UNSUPPORTED",
     ]
     assert reason_codes("/api/projects/featured/") == [
@@ -681,8 +692,24 @@ def test_native_plan_explains_middleware_in_legacy_scan(crud_project: Path) -> N
     payload = json.loads(scan_path.read_text(encoding="utf-8"))
     payload["schema_version"] = 2
     payload.pop("skipped_routes", None)
+    payload.pop("status_codes", None)
     for route in payload["routes"]:
         route.pop("adaptation_reasons", None)
+        route.pop("parity_notes", None)
+        route.pop("options", None)
+    for view in payload.get("view_details", []):
+        view.pop("listing", None)
+        view.pop("carryover", None)
+
+    def strip_timezone(fields: list[dict[str, object]]) -> None:
+        for item in fields:
+            item.pop("timezone", None)
+            child = item.get("child")
+            if isinstance(child, dict):
+                strip_timezone(child.get("fields", []))  # type: ignore[arg-type]
+
+    for serializer in payload.get("serializer_details", []):
+        strip_timezone(serializer.get("fields", []))
     hash_payload = dict(payload)
     hash_payload.pop("scan_hash", None)
     payload["scan_hash"] = content_hash(hash_payload)

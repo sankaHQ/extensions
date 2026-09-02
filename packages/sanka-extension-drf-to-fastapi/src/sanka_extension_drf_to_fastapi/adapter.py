@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
@@ -11,6 +12,8 @@ from typing import cast
 
 from sanka_extension_drf_to_fastapi.django_fastapi import (
     NATIVE_STRATEGY,
+    SCAN_FILE,
+    _infer_settings_module,
     apply_fastapi_plan,
     load_fastapi_plan,
     plan_fastapi,
@@ -20,6 +23,15 @@ from sanka_extension_drf_to_fastapi.django_fastapi import (
     write_gap_report,
 )
 from sanka_extension_drf_to_fastapi.fastapi_tests import test_fastapi_app
+from sanka_extension_drf_to_fastapi.replay import (
+    DEFAULT_DB_ENV,
+    DEFAULT_ENTRYPOINT,
+    DEFAULT_IGNORED_TABLES,
+    ReplayError,
+    edge_probes_from_scan,
+    load_scenarios,
+    replay,
+)
 from sanka_extension_sdk import (
     ExtensionRequest,
     ExtensionResponse,
@@ -296,6 +308,103 @@ def _handle_test(request: ExtensionRequest) -> ExtensionResponse:
     )
 
 
+def _string_list(configuration: dict[str, JsonValue], name: str) -> list[str] | None:
+    value = configuration.get(name)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"configuration.{name} must be an array of strings")
+    return [str(item) for item in value]
+
+
+def _project_path(request: ExtensionRequest, value: str) -> Path:
+    path = Path(value)
+    return (path if path.is_absolute() else Path(request.project_root) / path).resolve()
+
+
+def _replay_settings_module(request: ExtensionRequest) -> str:
+    explicit = _optional_string(request.configuration, "settings_module")
+    if explicit:
+        return explicit
+    scan_path = Path(request.artifact_root) / SCAN_FILE
+    if scan_path.is_file():
+        try:
+            payload = json.loads(scan_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = None
+        if isinstance(payload, dict) and isinstance(payload.get("settings_module"), str):
+            return str(payload["settings_module"])
+    return _infer_settings_module(Path(request.project_root))
+
+
+def _handle_replay(request: ExtensionRequest) -> ExtensionResponse:
+    """Differential scenario replay; independent of any plan or generated manifest."""
+    configuration = request.configuration
+    scenarios_path = _project_path(request, _string(configuration, "scenarios"))
+    candidate_value = _optional_string(configuration, "candidate")
+    candidate_root = (
+        _project_path(request, candidate_value) if candidate_value else Path(request.project_root)
+    )
+    seed_value = _optional_string(configuration, "seed")
+    ignored = _string_list(configuration, "ignore_tables")
+    try:
+        scenarios = load_scenarios(scenarios_path)
+        if _boolean(configuration, "edge_probes"):
+            scan_path = Path(request.artifact_root) / SCAN_FILE
+            if not scan_path.is_file():
+                raise ReplayError(
+                    "--edge-probes needs a scan artifact; run `sanka scan` first or omit the flag"
+                )
+            scan_payload = json.loads(scan_path.read_text(encoding="utf-8"))
+            scenarios = [*scenarios, *edge_probes_from_scan(scan_payload)]
+        report = replay(
+            Path(request.project_root),
+            scenarios,
+            settings_module=_replay_settings_module(request),
+            candidate_root=candidate_root,
+            entrypoint=_optional_string(configuration, "entrypoint") or DEFAULT_ENTRYPOINT,
+            db_env=_optional_string(configuration, "db_env") or DEFAULT_DB_ENV,
+            seed=_project_path(request, seed_value) if seed_value else None,
+            ignored_tables=tuple(ignored) if ignored is not None else DEFAULT_IGNORED_TABLES,
+            all_headers=_boolean(configuration, "all_headers"),
+            python=(
+                Path(_string(configuration, "python"))
+                if configuration.get("python") is not None
+                else None
+            ),
+            candidate_python=(
+                Path(_string(configuration, "candidate_python"))
+                if configuration.get("candidate_python") is not None
+                else None
+            ),
+        )
+    except ReplayError as error:
+        return failure_response(
+            request,
+            code="SANKA_EXTENSION_REPLAY_INVALID",
+            message=str(error),
+        )
+    data = _data(report)
+    if not report["ok"]:
+        return replace(
+            failure_response(
+                request,
+                code="SANKA_EXTENSION_REPLAY_MISMATCH",
+                message="scenario replay found differences between the source and the candidate",
+                details=data,
+            ),
+            data=data,
+            limitations=tuple(str(line) for line in report["summary_lines"]),
+        )
+    return success_response(
+        request,
+        data=data,
+        limitations=tuple(str(line) for line in report["summary_lines"][1:]),
+    )
+
+
 def _handle_verify(request: ExtensionRequest) -> ExtensionResponse:
     result = verify_fastapi_migration(
         request.project_root,
@@ -359,6 +468,8 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
         if request.command == "test":
             return _handle_test(request)
         if request.command == "verify":
+            if request.configuration.get("scenarios") is not None:
+                return _handle_replay(request)
             return _handle_verify(request)
         return failure_response(
             request,

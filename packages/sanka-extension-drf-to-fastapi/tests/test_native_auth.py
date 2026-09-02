@@ -30,6 +30,14 @@ SCENARIOS: list[dict[str, Any]] = [
     {"method": "GET", "path": "/api/bulletins/", "headers": INACTIVE},
     {"method": "GET", "path": "/api/bulletins/", "headers": ALICE},
     {"method": "GET", "path": "/api/"},
+    # OPTIONS follows the same authentication gate; PUT metadata only for the caller's object
+    {"method": "OPTIONS", "path": "/api/bulletins/"},
+    {"method": "OPTIONS", "path": "/api/bulletins/", "headers": INACTIVE},
+    {"method": "OPTIONS", "path": "/api/bulletins/", "headers": ALICE},
+    {"method": "OPTIONS", "path": "/api/bulletins/1/", "headers": ALICE},
+    {"method": "OPTIONS", "path": "/api/bulletins/2/", "headers": ALICE},
+    {"method": "OPTIONS", "path": "/api/bulletins/999/", "headers": ALICE},
+    {"method": "PUT", "path": "/api/bulletins/", "headers": ALICE, "body": {"title": "x"}},
     {
         "method": "POST",
         "path": "/api/bulletins/",
