@@ -4,6 +4,26 @@
     {
       "id": "sanka/drf-to-fastapi",
       "manifest": "packages/sanka-extension-drf-to-fastapi/extension.json"
+    },
+    {
+      "id": "sanka/markdown",
+      "manifest": "packages/sanka-connector-markdown/extension.json"
+    },
+    {
+      "id": "sanka/csv",
+      "manifest": "packages/sanka-connector-csv/extension.json"
+    },
+    {
+      "id": "sanka/sqlite",
+      "manifest": "packages/sanka-connector-sqlite/extension.json"
+    },
+    {
+      "id": "sanka/postgres",
+      "manifest": "packages/sanka-connector-postgres/extension.json"
+    },
+    {
+      "id": "sanka/clickhouse",
+      "manifest": "packages/sanka-connector-clickhouse/extension.json"
     }
   ]
 }
