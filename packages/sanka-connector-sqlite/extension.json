@@ -1,0 +1,36 @@
+{
+  "distribution": {
+    "entry_point": "sqlite",
+    "name": "sanka-connector-sqlite",
+    "version": "0.1.0a11"
+  },
+  "id": "sanka/sqlite",
+  "kind": "connector",
+  "protocol_version": "sanka-connector/v1",
+  "providers": [
+    {
+      "name": "sqlite",
+      "roles": [
+        "source",
+        "destination"
+      ]
+    }
+  ],
+  "runtime": {
+    "sanka_cli": ">=0.2.0,<0.3"
+  },
+  "schema_version": "sanka-extension-manifest/v2",
+  "version": "0.1.0a11",
+  "wheels": [
+    {
+      "name": "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
+      "sha256": "7f4876b041363a733c2ba6ae247824ef137d9a9b5aaa1e7024e0736a1fe1adc3",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a11/sanka_connector_sdk-0.1.0a11-py3-none-any.whl"
+    },
+    {
+      "name": "sanka_connector_sqlite-0.1.0a11-py3-none-any.whl",
+      "sha256": "a663fecffe36e0c5e9861857aa0c6987efdb0cb9706146e0ca724eb00a3b516e",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a11/sanka_connector_sqlite-0.1.0a11-py3-none-any.whl"
+    }
+  ]
+}
