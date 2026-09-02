@@ -18,11 +18,11 @@ if __package__ in {None, ""}:  # Direct script execution keeps only scripts/ on 
 
 from scripts.build_release import LOCKED_DEPENDENCY_WHEELS  # noqa: E402
 
-RELEASE_TAG = "extensions-v0.1.0a12"
+RELEASE_TAG = "extensions-v0.1.0a13"
 LOCAL_MANIFEST_WHEELS = {
     "sanka-extension-drf-to-fastapi": (
         "sanka_extension_sdk-0.1.0a1-py3-none-any.whl",
-        "sanka_extension_drf_to_fastapi-0.1.0a2-py3-none-any.whl",
+        "sanka_extension_drf_to_fastapi-0.1.0a3-py3-none-any.whl",
     ),
     "sanka-connector-markdown": (
         "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",

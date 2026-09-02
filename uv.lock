@@ -1035,7 +1035,7 @@ requires-dist = [{ name = "sanka-connector-sdk", editable = "packages/sanka-conn
 
 [[package]]
 name = "sanka-extension-drf-to-fastapi"
-version = "0.1.0a2"
+version = "0.1.0a3"
 source = { editable = "packages/sanka-extension-drf-to-fastapi" }
 dependencies = [
     { name = "sanka-extension-sdk" },
