@@ -35,7 +35,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import replace as replace_dataclass
 from pathlib import Path
 from types import ModuleType
@@ -167,7 +167,7 @@ def scan_django(
     permissions = sorted({value for route in routes for value in route.permissions})
     authentication = sorted({value for route in routes for value in route.authentication})
     scan = FrameworkScan(
-        schema_version=6,
+        schema_version=7,
         source=".",
         language="python",
         framework="django-rest-framework",
@@ -881,10 +881,23 @@ def write_gap_report(
     return destination_path
 
 
+def _field_timezone_name(field: Any) -> str | None:
+    """The zone DRF would apply to this field: an explicit default or the current one."""
+    explicit = getattr(field, "timezone", None)
+    if explicit is not None:
+        return str(getattr(explicit, "key", None) or explicit)
+    django_conf = importlib.import_module("django.conf")
+    if not django_conf.settings.USE_TZ:
+        return None
+    timezone_module = importlib.import_module("django.utils.timezone")
+    return str(timezone_module.get_current_timezone_name())
+
+
 def _field_payload(field: SerializerFieldIR) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "name": field.name,
         "kind": field.kind,
+        "timezone": field.timezone,
         "required": field.required,
         "read_only": field.read_only,
         "allow_null": field.allow_null,
@@ -1171,6 +1184,7 @@ def _render_native_output(
                 "ordering": list(ir.ordering),
                 "lookup": ir.lookup,
                 "lookup_regex": view_ir.lookup_regex if view_ir is not None else None,
+                "listing": dict(view_ir.listing) if view_ir is not None else {},
                 "fields": [_field_payload(field) for field in ir.fields],
                 "create": _create_payload(ir, preserve_carryover=preserve_carryover),
                 "update_drops": None if ir.update_drops is None else list(ir.update_drops),
@@ -1207,7 +1221,9 @@ def _render_native_output(
             "user": scan.database.user,
         },
         "entrypoint": entrypoint,
-        "allow": _allow_headers(generated),
+        "allow": _allow_headers(
+            [*generated, *(route for route in manual if _stub_safe_path(route.path))]
+        ),
         "options": options_by_path,
         "generic_messages": dict(scan.generic_messages),
         "http_security": dict(scan.http_security),
@@ -1726,7 +1742,7 @@ def _walk_patterns(
                     line=source_line,
                 )
             )
-        native, adaptation_reasons = _native_route_support(
+        native, adaptation_reasons, manual_operations = _native_route_support(
             result,
             view_class=view_class,
             callback=callback,
@@ -1775,6 +1791,8 @@ def _walk_patterns(
                 middleware=middleware,
                 root_path=root_path,
             )
+            route_native = native and operation not in manual_operations
+            route_reasons = (*adaptation_reasons, *manual_operations.get(operation, ()))
             result.routes.append(
                 RouteIR(
                     method=method,
@@ -1789,8 +1807,8 @@ def _walk_patterns(
                     source_file=source_file,
                     source_line=source_line,
                     supported=supported,
-                    native=native,
-                    adaptation_reasons=adaptation_reasons,
+                    native=route_native,
+                    adaptation_reasons=route_reasons,
                     parity_notes=parity_notes,
                     options=options_metadata,
                 )
@@ -1854,8 +1872,8 @@ def _qualified_items(values: Iterable[Any]) -> str:
 
 def _not_native(
     code: str, feature: str, message: str
-) -> tuple[bool, tuple[RouteAdaptationReason, ...]]:
-    return False, (_adaptation_reason(code, feature, message),)
+) -> tuple[bool, tuple[RouteAdaptationReason, ...], dict[str, tuple[RouteAdaptationReason, ...]]]:
+    return False, (_adaptation_reason(code, feature, message),), {}
 
 
 def _native_route_support(
@@ -1868,7 +1886,7 @@ def _native_route_support(
     supported: bool,
     serializer_name: str | None,
     middleware: tuple[str, ...],
-) -> tuple[bool, tuple[RouteAdaptationReason, ...]]:
+) -> tuple[bool, tuple[RouteAdaptationReason, ...], dict[str, tuple[RouteAdaptationReason, ...]]]:
     """Decide whether a route sits inside the native-generation envelope.
 
     The envelope is deliberately narrow and checked against the live classes,
@@ -1877,7 +1895,7 @@ def _native_route_support(
     a human, never silently bridged in a native plan.
     """
     if _is_format_alias_path(path):
-        return False, ()
+        return False, (), {}
     if not supported:
         return _not_native(
             "SANKA_DRF_ROUTE_PATTERN_UNSUPPORTED",
@@ -1889,10 +1907,20 @@ def _native_route_support(
         (_middleware_adaptation_reason(unsupported_middleware),) if unsupported_middleware else ()
     )
 
+    # Per-operation override reasons ride along with every verdict, so a route whose
+    # action is overridden explains both the view-level and the action-level gap.
+    manual_operations: dict[str, tuple[RouteAdaptationReason, ...]] = {}
+
     def disqualify(
         code: str, feature: str, message: str
-    ) -> tuple[bool, tuple[RouteAdaptationReason, ...]]:
-        return False, (*middleware_reasons, _adaptation_reason(code, feature, message))
+    ) -> tuple[
+        bool, tuple[RouteAdaptationReason, ...], dict[str, tuple[RouteAdaptationReason, ...]]
+    ]:
+        return (
+            False,
+            (*middleware_reasons, _adaptation_reason(code, feature, message)),
+            manual_operations,
+        )
 
     routers = importlib.import_module("rest_framework.routers")
     if inspect.isclass(view_class) and issubclass(view_class, routers.APIRootView):
@@ -1913,10 +1941,10 @@ def _native_route_support(
                 "Router API root links could not be resolved from the registered routes.",
             )
         if middleware_reasons:
-            return False, middleware_reasons
+            return False, middleware_reasons, {}
         if all(root.path != path for root in result.api_roots):
             result.api_roots.append(ApiRootIR(path=path, links=links))
-        return True, ()
+        return True, (), {}
     if actions is None:
         return disqualify(
             "SANKA_DRF_VIEW_KIND_UNSUPPORTED",
@@ -1939,12 +1967,28 @@ def _native_route_support(
             f"{view_class.__module__}.{view_class.__qualname__} is not a ModelViewSet.",
         )
     overrides = _viewset_overrides(view_class)
-    if overrides:
+    operation_overrides = [name for name in overrides if name in _OPERATION_OVERRIDES]
+    if "update" in operation_overrides and "partial_update" not in operation_overrides:
+        operation_overrides.append("partial_update")
+    structural_overrides = [name for name in overrides if name not in _OPERATION_OVERRIDES]
+    if structural_overrides:
         return disqualify(
             "SANKA_DRF_VIEWSET_OVERRIDES_UNSUPPORTED",
             "viewset-overrides",
-            "Viewset overrides require manual carryover: " + ", ".join(overrides),
+            "Viewset overrides require manual carryover: " + ", ".join(structural_overrides),
         )
+    # An overridden action keeps only that route manual; the rest of the viewset stays
+    # native, which is what makes partially customised viewsets worth generating.
+    manual_operations = {
+        name: (
+            _adaptation_reason(
+                "SANKA_DRF_VIEWSET_OVERRIDES_UNSUPPORTED",
+                "viewset-overrides",
+                f"Viewset override requires manual carryover: {name}",
+            ),
+        )
+        for name in operation_overrides
+    }
     view_name = f"{view_class.__module__}.{view_class.__qualname__}"
     if view_name not in result.view_details:
         queryset = getattr(view_class, "queryset", None)
@@ -1960,20 +2004,6 @@ def _native_route_support(
             + _qualified_items(getattr(view_class, "authentication_classes", ()))
             + "; permissions: "
             + _qualified_items(getattr(view_class, "permission_classes", ())),
-        )
-    if getattr(view_class, "pagination_class", None) is not None:
-        return disqualify(
-            "SANKA_DRF_PAGINATION_UNSUPPORTED",
-            "pagination",
-            "Pagination class requires manual adaptation: "
-            + _qualified_items((view_class.pagination_class,)),
-        )
-    filter_backends = tuple(getattr(view_class, "filter_backends", ()))
-    if filter_backends:
-        return disqualify(
-            "SANKA_DRF_FILTER_BACKENDS_UNSUPPORTED",
-            "filter-backends",
-            "Filter backends require manual adaptation: " + _qualified_items(filter_backends),
         )
     throttle_classes = tuple(getattr(view_class, "throttle_classes", ()))
     if throttle_classes:
@@ -2012,6 +2042,12 @@ def _native_route_support(
             f"Serializer fields, validation, queryset, or write overrides require manual "
             f"adaptation: {serializer_name}",
         )
+    listing, listing_reason = _listing_support(view_class, ir)
+    if listing_reason is not None:
+        return False, (*middleware_reasons, listing_reason), {}
+    result.view_details[view_name] = replace_dataclass(
+        result.view_details[view_name], listing=listing
+    )
     lookup_reason = _custom_lookup_adaptation_reason(
         view_class,
         actions=actions,
@@ -2019,10 +2055,10 @@ def _native_route_support(
         serializer=ir,
     )
     if lookup_reason is not None:
-        return False, (*middleware_reasons, lookup_reason)
+        return False, (*middleware_reasons, lookup_reason), {}
     if middleware_reasons:
-        return False, middleware_reasons
-    return True, ()
+        return False, middleware_reasons, {}
+    return True, (), manual_operations
 
 
 def _custom_lookup_adaptation_reason(
@@ -2129,6 +2165,204 @@ def _viewset_overrides(view_class: type[Any]) -> tuple[str, ...]:
     return tuple(
         name for name, func in expected.items() if getattr(view_class, name, None) is not func
     )
+
+
+_OPERATION_OVERRIDES = ("list", "create", "retrieve", "update", "partial_update", "destroy")
+_SEARCH_LOOKUPS = {"^": "istartswith", "=": "iexact"}
+_UNSUPPORTED_SEARCH_PREFIXES = ("@", "$")
+
+
+def _defines_methods(cls: type[Any], base: type[Any]) -> bool:
+    """True when ``cls`` (below ``base`` in its MRO) overrides any method."""
+    for klass in inspect.getmro(cls):
+        if klass is base or klass is object:
+            break
+        if any(inspect.isfunction(member) for member in vars(klass).values()):
+            return True
+    return False
+
+
+def _listing_support(
+    view_class: type[Any], ir: SerializerIR
+) -> tuple[dict[str, Any], RouteAdaptationReason | None]:
+    """Capture list semantics the native runtime reproduces, or the reason it cannot.
+
+    Cursor pagination, SearchFilter, and OrderingFilter are DRF-generic: their exact
+    behaviour follows from class attributes, so the runtime ports them. A custom
+    OrderingFilter is accepted only when probing its ``get_ordering`` against the stock
+    filter identifies one of the known tie-break idioms.
+    """
+    pagination_module = importlib.import_module("rest_framework.pagination")
+    filters_module = importlib.import_module("rest_framework.filters")
+    field_names = {field.name for field in ir.fields}
+    text_fields = {field.name for field in ir.fields if field.kind in {"char", "choice"}}
+    orderable = field_names | {"pk", ir.pk_attname}
+    listing: dict[str, Any] = {}
+    paginator_class: Any = getattr(view_class, "pagination_class", None)
+    if paginator_class is not None:
+        cursor_base = pagination_module.CursorPagination
+        if not (
+            inspect.isclass(paginator_class) and issubclass(paginator_class, cursor_base)
+        ) or _defines_methods(paginator_class, cursor_base):
+            return {}, _adaptation_reason(
+                "SANKA_DRF_PAGINATION_UNSUPPORTED",
+                "pagination",
+                "Pagination class requires manual adaptation: "
+                + _qualified_items((paginator_class,)),
+            )
+        paginator: Any = paginator_class()
+        ordering = paginator.ordering
+        terms = (ordering,) if isinstance(ordering, str) else tuple(ordering or ())
+        if not terms or any(str(term).lstrip("-") not in orderable for term in terms):
+            return {}, _adaptation_reason(
+                "SANKA_DRF_PAGINATION_UNSUPPORTED",
+                "pagination",
+                f"Cursor ordering must name serializer fields: {[str(t) for t in terms]!r}",
+            )
+        listing["pagination"] = {
+            "kind": "cursor",
+            "page_size": paginator.page_size,
+            "ordering": [str(term) for term in terms],
+            "cursor_param": str(paginator.cursor_query_param),
+            "page_size_param": paginator.page_size_query_param,
+            "max_page_size": paginator.max_page_size,
+            "offset_cutoff": int(paginator.offset_cutoff),
+            "invalid_cursor_message": str(paginator.invalid_cursor_message),
+        }
+    backends: list[Any] = list(getattr(view_class, "filter_backends", ()))
+    for backend in backends:
+        if inspect.isclass(backend) and issubclass(backend, filters_module.SearchFilter):
+            if _defines_methods(backend, filters_module.SearchFilter):
+                return {}, _adaptation_reason(
+                    "SANKA_DRF_FILTER_BACKENDS_UNSUPPORTED",
+                    "filter-backends",
+                    "Search filter subclass requires manual adaptation: "
+                    + _qualified_items((backend,)),
+                )
+            specs: list[dict[str, str]] = []
+            for raw in getattr(view_class, "search_fields", None) or ():
+                text = str(raw)
+                lookup = _SEARCH_LOOKUPS.get(text[:1], "icontains")
+                name = text[1:] if text[:1] in _SEARCH_LOOKUPS else text
+                if (
+                    text[:1] in _UNSUPPORTED_SEARCH_PREFIXES
+                    or "__" in name
+                    or name not in text_fields
+                ):
+                    return {}, _adaptation_reason(
+                        "SANKA_DRF_SEARCH_FIELDS_UNSUPPORTED",
+                        "filter-backends",
+                        f"Search field requires manual adaptation: {text}",
+                    )
+                specs.append({"name": name, "lookup": lookup})
+            search_backend: Any = backend
+            listing["search"] = {"param": str(search_backend.search_param), "fields": specs}
+        elif inspect.isclass(backend) and issubclass(backend, filters_module.OrderingFilter):
+            declared = getattr(view_class, "ordering_fields", None)
+            if declared is None:
+                declared = getattr(backend, "ordering_fields", None)
+            if declared == "__all__":
+                return {}, _adaptation_reason(
+                    "SANKA_DRF_ORDERING_FILTER_UNSUPPORTED",
+                    "filter-backends",
+                    "ordering_fields = '__all__' requires manual adaptation.",
+                )
+            names = (
+                [str(item) if isinstance(item, str) else str(item[0]) for item in declared]
+                if declared
+                else [field.name for field in ir.fields]
+            )
+            default = getattr(view_class, "ordering", None)
+            default_terms = (
+                (str(default),)
+                if isinstance(default, str)
+                else tuple(str(item) for item in default or ())
+            )
+            if any(name not in orderable for name in names) or any(
+                term.lstrip("-") not in orderable for term in default_terms
+            ):
+                return {}, _adaptation_reason(
+                    "SANKA_DRF_ORDERING_FILTER_UNSUPPORTED",
+                    "filter-backends",
+                    "Ordering fields must name serializer fields: "
+                    f"{names!r} (default {list(default_terms)!r})",
+                )
+            pk = str(ir.pk_attname or "id")
+            rule: str | None = "drf"
+            if _defines_methods(backend, filters_module.OrderingFilter):
+                rule = _probe_ordering_rule(backend, view_class, names, pk)
+            if rule is None:
+                return {}, _adaptation_reason(
+                    "SANKA_DRF_ORDERING_FILTER_UNSUPPORTED",
+                    "filter-backends",
+                    "Ordering filter subclass has no recognised tie-break idiom: "
+                    + _qualified_items((backend,)),
+                )
+            ordering_backend: Any = backend
+            listing["ordering"] = {
+                "param": str(ordering_backend.ordering_param),
+                "fields": names,
+                "default": list(default_terms) or None,
+                "rule": rule,
+                "pk": pk,
+            }
+        else:
+            return {}, _adaptation_reason(
+                "SANKA_DRF_FILTER_BACKENDS_UNSUPPORTED",
+                "filter-backends",
+                "Filter backends require manual adaptation: " + _qualified_items((backend,)),
+            )
+    return listing, None
+
+
+def _probe_ordering_rule(
+    backend: type[Any], view_class: type[Any], names: list[str], pk: str
+) -> str | None:
+    """Identify a custom OrderingFilter's behaviour by probing it against the stock one."""
+    filters_module = importlib.import_module("rest_framework.filters")
+    test_module = importlib.import_module("rest_framework.test")
+    request_module = importlib.import_module("rest_framework.request")
+    factory = test_module.APIRequestFactory()
+    queryset = getattr(view_class, "queryset", None)
+    param = str(backend.ordering_param)
+    probes: list[dict[str, str]] = [{}, {param: "nope"}]
+    probes += [{param: name} for name in names] + [{param: "-" + name} for name in names]
+    probes += [{param: f"{a},-{b}"} for a in names for b in names if a != b][:6]
+
+    def run(instance: Any, params: dict[str, str]) -> list[str] | None:
+        request = request_module.Request(factory.get("/", params))
+        result = instance.get_ordering(request, queryset, view_class())
+        return [str(term) for term in result] if result else None
+
+    def follow_last(base: list[str] | None) -> list[str] | None:
+        if not base:
+            return base
+        if {term.lstrip("-") for term in base} & {pk, "pk"}:
+            return list(base)
+        return [*base, "-" + pk if base[-1].startswith("-") else pk]
+
+    def ascending(base: list[str] | None) -> list[str] | None:
+        if not base:
+            return base
+        if {term.lstrip("-") for term in base} & {pk, "pk"}:
+            return list(base)
+        return [*base, pk]
+
+    reference = filters_module.OrderingFilter()
+    try:
+        observed = [run(backend(), probe) for probe in probes]
+        baseline = [run(reference, probe) for probe in probes]
+    except Exception:  # an unprobeable filter is simply unsupported
+        return None
+    hypotheses: tuple[tuple[str, Callable[[list[str] | None], list[str] | None]], ...] = (
+        ("drf", lambda base: base),
+        ("append-pk-follow-last", follow_last),
+        ("append-pk-asc", ascending),
+    )
+    for name, hypothesis in hypotheses:
+        if all(seen == hypothesis(base) for seen, base in zip(observed, baseline, strict=True)):
+            return name
+    return None
 
 
 def _view_auth_support(view_class: type[Any], model: Any) -> ViewAuthIR | None:
@@ -2757,6 +2991,16 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
         values = tuple(field.choices)
         if not all(isinstance(value, str | int) for value in values):
             return SerializerFieldIR(name=name, kind="unsupported", supported=False)
+    elif type(field) is fields_module.DateTimeField:
+        kind = "datetime"
+        api_settings = importlib.import_module("rest_framework.settings").api_settings
+        output_format = getattr(field, "format", api_settings.DATETIME_FORMAT)
+        input_formats = getattr(field, "input_formats", api_settings.DATETIME_INPUT_FORMATS)
+        iso = str(fields_module.ISO_8601).lower()
+        if str(output_format).lower() != iso or [str(item).lower() for item in input_formats] != [
+            iso
+        ]:
+            return SerializerFieldIR(name=name, kind="unsupported", supported=False)
     if kind is None:
         return SerializerFieldIR(name=name, kind="unsupported", supported=False)
     drf_validators = importlib.import_module("rest_framework.validators")
@@ -2807,6 +3051,7 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
         unique_message=unique_message,
         messages=_field_messages(field, kind),
         supported=supported,
+        timezone=_field_timezone_name(field) if kind == "datetime" else None,
     )
 
 
@@ -2853,6 +3098,7 @@ _MESSAGE_KEYS = {
         "max_string_length",
     ),
     "choice": ("required", "null", "invalid_choice"),
+    "datetime": ("required", "null", "invalid", "date", "make_aware", "overflow"),
     "char": (
         "required",
         "null",
@@ -2878,6 +3124,11 @@ def _field_messages(field: Any, kind: str) -> tuple[tuple[str, str], ...]:
         params["max_decimal_places"] = field.decimal_places
         if getattr(field, "max_digits", None) is not None:
             params["max_whole_digits"] = field.max_digits - field.decimal_places
+    if kind == "datetime":
+        humanize = importlib.import_module("rest_framework.utils.humanize_datetime")
+        api_settings = importlib.import_module("rest_framework.settings").api_settings
+        input_formats = getattr(field, "input_formats", api_settings.DATETIME_INPUT_FORMATS)
+        params["format"] = humanize.datetime_formats(input_formats)
     rendered: dict[str, str] = {}
     for key in _MESSAGE_KEYS[kind]:
         template = str(field.error_messages.get(key, ""))

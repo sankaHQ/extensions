@@ -170,6 +170,7 @@ class SerializerFieldIR:
     child: SerializerIR | None = None
     messages: tuple[tuple[str, str], ...] = ()
     supported: bool = True
+    timezone: str | None = None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> SerializerFieldIR:
@@ -255,6 +256,7 @@ class ViewIR:
     name: str
     auth: ViewAuthIR | None = None
     lookup_regex: str | None = None
+    listing: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> ViewIR:
@@ -265,6 +267,7 @@ class ViewIR:
             lookup_regex=(
                 str(payload["lookup_regex"]) if payload.get("lookup_regex") is not None else None
             ),
+            listing=dict(payload.get("listing") or {}),
         )
 
 
@@ -279,6 +282,16 @@ class ApiRootIR:
             path=str(payload["path"]),
             links=tuple((str(key), str(value)) for key, value in payload.get("links", ())),
         )
+
+
+def _strip_field_keys(fields: list[dict[str, Any]], keys: tuple[str, ...]) -> None:
+    """Drop keys older schemas never wrote so their stored hashes still verify."""
+    for item in fields:
+        for key in keys:
+            item.pop(key, None)
+        child = item.get("child")
+        if isinstance(child, dict):
+            _strip_field_keys(child.get("fields", []), keys)
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,6 +336,11 @@ class FrameworkScan:
         if self.schema_version < 6:
             for route in payload["routes"]:
                 route.pop("options", None)
+        if self.schema_version < 7:
+            for view in payload.get("view_details", []):
+                view.pop("listing", None)
+            for serializer in payload.get("serializer_details", []):
+                _strip_field_keys(serializer.get("fields", []), ("timezone",))
         return payload
 
     def with_hash(self) -> FrameworkScan:
