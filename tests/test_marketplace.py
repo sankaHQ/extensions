@@ -6,14 +6,14 @@ from pathlib import Path
 
 import yaml
 
-RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a11/"
+RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a12/"
 EXPECTED = {
     "sanka/drf-to-fastapi": {
         "kind": "migration",
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-fastapi",
-            "version": "0.1.0a1",
+            "version": "0.1.0a2",
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },
