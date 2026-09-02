@@ -1,0 +1,35 @@
+{
+  "distribution": {
+    "entry_point": "markdown",
+    "name": "sanka-connector-markdown",
+    "version": "0.1.0a11"
+  },
+  "id": "sanka/markdown",
+  "kind": "connector",
+  "protocol_version": "sanka-connector/v1",
+  "providers": [
+    {
+      "name": "markdown",
+      "roles": [
+        "source"
+      ]
+    }
+  ],
+  "runtime": {
+    "sanka_cli": ">=0.2.0,<0.3"
+  },
+  "schema_version": "sanka-extension-manifest/v2",
+  "version": "0.1.0a11",
+  "wheels": [
+    {
+      "name": "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
+      "sha256": "7f4876b041363a733c2ba6ae247824ef137d9a9b5aaa1e7024e0736a1fe1adc3",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a11/sanka_connector_sdk-0.1.0a11-py3-none-any.whl"
+    },
+    {
+      "name": "sanka_connector_markdown-0.1.0a11-py3-none-any.whl",
+      "sha256": "427dcb6438fceb81582cd215215c0a638c8cc4579df8cbb76e79d50e53fbfad3",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a11/sanka_connector_markdown-0.1.0a11-py3-none-any.whl"
+    }
+  ]
+}
