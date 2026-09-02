@@ -78,6 +78,7 @@ class RouteIR:
     native: bool = False
     adaptation_reasons: tuple[RouteAdaptationReason, ...] = ()
     parity_notes: tuple[ParityNote, ...] = ()
+    options: dict[str, Any] = field(default_factory=dict)
 
     @property
     def key(self) -> str:
@@ -94,6 +95,7 @@ class RouteIR:
         data["parity_notes"] = tuple(
             ParityNote.from_dict(item) for item in payload.get("parity_notes", ())
         )
+        data["options"] = dict(payload.get("options") or {})
         return cls(**data)
 
 
@@ -318,6 +320,9 @@ class FrameworkScan:
         if self.schema_version < 5:
             for route in payload["routes"]:
                 route.pop("parity_notes", None)
+        if self.schema_version < 6:
+            for route in payload["routes"]:
+                route.pop("options", None)
         return payload
 
     def with_hash(self) -> FrameworkScan:

@@ -19,3 +19,13 @@ ordering, exact token/session/basic failure details, CSRF), `conditional` (ETag 
 strings they emit). Notes appear in `.sanka/scan.json` (schema 5), `plan-*.json`
 (schema 4), the gap report, and the generated manifest's `unsupported_routes`. A family
 that cannot be derived reports `SANKA_DRF_PARITY_UNAVAILABLE` instead of failing the scan.
+
+## OPTIONS and 405 parity
+
+Generated native apps answer `OPTIONS` with the exact `SimpleMetadata` body DRF would
+send — view name, description, renderer and parser media types, and the `actions`
+field map for POST/PUT when the caller passes the permission checks (PUT only when the
+object exists and, for owner-restricted views, belongs to the caller). The scan captures
+the anonymous and the authorized variants from the installed DRF; the runtime chooses
+between them per request. Unsupported methods answer DRF's `405 {"detail": "Method
+\"X\" not allowed."}` with the `Allow` header in `http_method_names` order.

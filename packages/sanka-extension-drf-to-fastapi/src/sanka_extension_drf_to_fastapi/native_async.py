@@ -1456,4 +1456,63 @@ async def api_root(request: Request, path: str) -> Any:
     else:
         payload = {key: link for key, link in root["links"]}
     return JSONResponse(payload, headers={"Allow": allow})
+
+
+def _allow_for_path(path: str) -> str | None:
+    for pattern, allow in MANIFEST["allow"].items():
+        regex = "^" + re.sub(r"\\\{[^}\\\\]*\\\}", "[^/]+", re.escape(pattern)) + "$"
+        if re.match(regex, path):
+            return allow
+    return None
+
+
+def method_not_allowed(request: Request) -> Response:
+    """DRF's 405: its detail template and the Allow header in http_method_names order."""
+    template = MANIFEST.get("generic_messages", {}).get("method_not_allowed") or (
+        'Method "{method}" not allowed.'
+    )
+    allow = _allow_for_path(request.url.path)
+    headers = {"Allow": allow} if allow else {}
+    return JSONResponse(
+        {"detail": template.format(method=request.method)}, status_code=405, headers=headers
+    )
+
+
+async def options_response(request: Request, path: str) -> Any:
+    """DRF's OPTIONS metadata: the variant the caller earns, PUT only for a reachable object."""
+    spec = MANIFEST["options"][path]
+    allow = MANIFEST["allow"][path]
+    resource_spec = next(
+        (
+            item
+            for item in MANIFEST["resources"]
+            if any(route["path"] == path for route in item["routes"])
+        ),
+        None,
+    )
+    auth = resource_spec.get("auth") if resource_spec is not None else None
+    user_id = None
+    variant = spec["anonymous"]
+    if auth is not None:
+        user_id, gate_error = await _require_user(request, auth, allow)
+        if gate_error is not None:
+            return gate_error
+        variant = spec["authorized"]
+    body = json.loads(json.dumps(variant))
+    actions = body.get("actions")
+    if isinstance(actions, dict) and "PUT" in actions:
+        keep = False
+        if resource_spec is not None:
+            instance, _miss = await store.fetch_one(
+                resource_spec, request.path_params.get(resource_spec["lookup"])
+            )
+            keep = instance is not None
+            owner_attname = auth.get("owner_attname") if auth is not None else None
+            if keep and owner_attname and _attr(instance, owner_attname) != user_id:
+                keep = False
+        if not keep:
+            actions.pop("PUT")
+        if not actions:
+            body.pop("actions")
+    return JSONResponse(body, headers={"Allow": allow})
 '''

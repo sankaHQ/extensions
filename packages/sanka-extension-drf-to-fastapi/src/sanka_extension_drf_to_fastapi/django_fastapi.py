@@ -46,6 +46,7 @@ from sanka_extension_drf_to_fastapi.generated_environment import (
     ensure_generated_environment,
 )
 from sanka_extension_drf_to_fastapi.hashing import content_hash
+from sanka_extension_drf_to_fastapi.metadata import route_options_metadata
 from sanka_extension_drf_to_fastapi.model import (
     ApiRootIR,
     DatabaseIR,
@@ -166,7 +167,7 @@ def scan_django(
     permissions = sorted({value for route in routes for value in route.permissions})
     authentication = sorted({value for route in routes for value in route.authentication})
     scan = FrameworkScan(
-        schema_version=5,
+        schema_version=6,
         source=".",
         language="python",
         framework="django-rest-framework",
@@ -1179,6 +1180,11 @@ def _render_native_output(
         resource["routes"].append(
             {"method": planned.method, "path": planned.path, "operation": planned.operation}
         )
+    options_by_path: dict[str, Any] = {}
+    for planned in generated:
+        scanned = scan_routes.get(planned.key)
+        if scanned is not None and scanned.options and planned.path not in options_by_path:
+            options_by_path[planned.path] = dict(scanned.options)
     full = layout == "full"
     runtime_dir = output_path / "app" / "generated" if full else output_path
     module_prefix = "app.generated" if full else ""
@@ -1202,6 +1208,7 @@ def _render_native_output(
         },
         "entrypoint": entrypoint,
         "allow": _allow_headers(generated),
+        "options": options_by_path,
         "generic_messages": dict(scan.generic_messages),
         "http_security": dict(scan.http_security),
         "generated_files": [entrypoint],
@@ -1750,6 +1757,9 @@ def _walk_patterns(
                 result.view_details[view_name] = replace_dataclass(
                     detail, lookup_regex=lookup_regex
                 )
+        options_metadata = route_options_metadata(
+            view_class=view_class, callback=callback, actions=actions, path=path
+        )
         for method, operation in methods:
             operation_source = _safe_source(getattr(view_class, operation, None))
             transactional = (
@@ -1782,6 +1792,7 @@ def _walk_patterns(
                     native=native,
                     adaptation_reasons=adaptation_reasons,
                     parity_notes=parity_notes,
+                    options=options_metadata,
                 )
             )
     result.routes = list({route.key: route for route in result.routes}.values())
@@ -2700,7 +2711,10 @@ def _nested_many_field_ir(name: str, field: Any, parent_model: Any) -> Serialize
 def _generic_messages() -> tuple[tuple[str, str], ...]:
     """Capture framework-level error strings from the live DRF installation."""
     exceptions_module = importlib.import_module("rest_framework.exceptions")
-    return (("not_found", str(exceptions_module.NotFound.default_detail)),)
+    return (
+        ("method_not_allowed", str(exceptions_module.MethodNotAllowed.default_detail)),
+        ("not_found", str(exceptions_module.NotFound.default_detail)),
+    )
 
 
 def _defines_custom_validation(cls: type[Any]) -> bool:
@@ -3467,6 +3481,12 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
         "async def django_default_404(_request: Request, _error: Exception) -> HTMLResponse:",
         "    return HTMLResponse(_DJANGO_DEFAULT_404, status_code=404)",
         "",
+        "# DRF answers an unsupported method with its own detail string and the Allow",
+        "# header in http_method_names order; FastAPI's default differs on both.",
+        "@app.exception_handler(405)",
+        "async def django_rest_405(request: Request, _error: Exception) -> Response:",
+        "    return native.method_not_allowed(request)",
+        "",
         '_HTTP_SECURITY = native.MANIFEST.get("http_security", {})',
         '_ALLOWED_HOSTS = _HTTP_SECURITY.get("allowed_hosts", [])',
         'if _HTTP_SECURITY.get("ssl_redirect"):',
@@ -3591,6 +3611,39 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
                 "",
             ]
         )
+    options_paths = manifest.get("options") or {}
+    if options_paths:
+        lines.extend(
+            [
+                "# OPTIONS answers DRF's SimpleMetadata body captured at scan time; the",
+                "# runtime picks the anonymous or authorized variant the caller earns.",
+                "",
+            ]
+        )
+        path_views = {
+            str(route["path"]): str(route.get("source_view") or "") for route in manifest["routes"]
+        }
+        for path in sorted(options_paths):
+            view = path_views.get(path, "")
+            runtime_path = path
+            if view in converter_by_view:
+                lookup = lookup_by_view[view]
+                runtime_path = runtime_path.replace(
+                    f"{{{lookup}}}", f"{{{lookup}:{converter_by_view[view]}}}"
+                )
+            func = _unique_ident("sanka_options", used_funcs)
+            path_parameters = re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", path)
+            signature = ", ".join(
+                ["request: Request", *(f"{name}: str" for name in path_parameters)]
+            )
+            lines.extend(
+                [
+                    f"@app.options({_py_str(runtime_path)})",
+                    f"async def {func}({signature}) -> Response:",
+                    f"    return await native.options_response(request, {_py_str(path)})",
+                    "",
+                ]
+            )
     stubbed = [entry for entry in manifest.get("unsupported_routes", []) if entry.get("stubbed")]
     if stubbed:
         lines.extend(
