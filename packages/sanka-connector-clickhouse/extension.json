@@ -1,0 +1,35 @@
+{
+  "distribution": {
+    "entry_point": "clickhouse",
+    "name": "sanka-connector-clickhouse",
+    "version": "0.1.0a11"
+  },
+  "id": "sanka/clickhouse",
+  "kind": "connector",
+  "protocol_version": "sanka-connector/v1",
+  "providers": [
+    {
+      "name": "clickhouse",
+      "roles": [
+        "destination"
+      ]
+    }
+  ],
+  "runtime": {
+    "sanka_cli": ">=0.2.0,<0.3"
+  },
+  "schema_version": "sanka-extension-manifest/v2",
+  "version": "0.1.0a11",
+  "wheels": [
+    {
+      "name": "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
+      "sha256": "7f4876b041363a733c2ba6ae247824ef137d9a9b5aaa1e7024e0736a1fe1adc3",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a11/sanka_connector_sdk-0.1.0a11-py3-none-any.whl"
+    },
+    {
+      "name": "sanka_connector_clickhouse-0.1.0a11-py3-none-any.whl",
+      "sha256": "03f54118da9df05f62b7b55d6963adb4aad3b1b2bd155a5ccb548b66256cb10a",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a11/sanka_connector_clickhouse-0.1.0a11-py3-none-any.whl"
+    }
+  ]
+}

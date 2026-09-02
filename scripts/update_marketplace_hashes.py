@@ -1,45 +1,76 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Record the exact official extension wheels in the marketplace manifest."""
+"""Record immutable GitHub wheel hashes in every marketplace manifest."""
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "packages" / "sanka-extension-drf-to-fastapi" / "extension.json"
-RELEASE_TAG = "extensions-v0.1.0a1"
-WHEEL_NAMES = (
-    "sanka_extension_sdk-0.1.0a1-py3-none-any.whl",
-    "sanka_extension_drf_to_fastapi-0.1.0a1-py3-none-any.whl",
-)
+RELEASE_TAG = "extensions-v0.1.0a11"
+MANIFEST_WHEELS = {
+    "sanka-extension-drf-to-fastapi": (
+        "sanka_extension_sdk-0.1.0a1-py3-none-any.whl",
+        "sanka_extension_drf_to_fastapi-0.1.0a1-py3-none-any.whl",
+    ),
+    "sanka-connector-markdown": (
+        "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
+        "sanka_connector_markdown-0.1.0a11-py3-none-any.whl",
+    ),
+    "sanka-connector-csv": (
+        "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
+        "sanka_connector_csv-0.1.0a11-py3-none-any.whl",
+    ),
+    "sanka-connector-sqlite": (
+        "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
+        "sanka_connector_sqlite-0.1.0a11-py3-none-any.whl",
+    ),
+    "sanka-connector-postgres": (
+        "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
+        "sanka_connector_postgres-0.1.0a11-py3-none-any.whl",
+    ),
+    "sanka-connector-clickhouse": (
+        "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
+        "sanka_connector_clickhouse-0.1.0a11-py3-none-any.whl",
+    ),
+}
+MANIFESTS = {package: ROOT / "packages" / package / "extension.json" for package in MANIFEST_WHEELS}
 
 
-def update_manifest(release: Path, *, release_tag: str) -> dict[str, Any]:
-    found = {path.name for path in release.glob("sanka_extension_*.whl")}
-    if release_tag != RELEASE_TAG or found != set(WHEEL_NAMES):
+def _wheel_hash(path: Path) -> str:
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
+def update_manifests(release: Path, *, release_tag: str) -> dict[str, dict[str, Any]]:
+    expected = {name for names in MANIFEST_WHEELS.values() for name in names}
+    found = {path.name for path in release.glob("*.whl")}
+    if release_tag != RELEASE_TAG or found != expected:
         raise RuntimeError(
-            f"expected complete extension wheel set {list(WHEEL_NAMES)} for {RELEASE_TAG}; "
+            f"expected complete marketplace wheel set {sorted(expected)} for {RELEASE_TAG}; "
             f"found {sorted(found)} for {release_tag}"
         )
-    wheels: list[dict[str, str]] = []
-    for name in WHEEL_NAMES:
-        path = release / name
-        with path.open("rb") as handle:
-            digest = hashlib.file_digest(handle, "sha256").hexdigest()
-        wheels.append(
-            {
-                "name": name,
-                "url": f"https://github.com/sankaHQ/extensions/releases/download/{release_tag}/{name}",
-                "sha256": digest,
-            }
-        )
-    return {"wheels": wheels}
+    return {
+        package: {
+            "wheels": [
+                {
+                    "name": name,
+                    "url": (
+                        "https://github.com/sankaHQ/extensions/releases/download/"
+                        f"{release_tag}/{name}"
+                    ),
+                    "sha256": _wheel_hash(release / name),
+                }
+                for name in names
+            ]
+        }
+        for package, names in MANIFEST_WHEELS.items()
+    }
 
 
 def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
@@ -59,19 +90,18 @@ def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) != 3:
-        print(
-            "usage: update_marketplace_hashes.py <release-directory> <release-tag>",
-            file=sys.stderr,
-        )
-        return 2
-    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    manifest.update(update_manifest(Path(argv[1]), release_tag=argv[2]))
-    _atomic_write(MANIFEST, manifest)
-    print(f"Updated {MANIFEST.relative_to(ROOT)} for {argv[2]}")
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dist", type=Path, required=True)
+    parser.add_argument("--release-tag", required=True)
+    args = parser.parse_args()
+    for package, update in update_manifests(args.dist, release_tag=args.release_tag).items():
+        manifest = json.loads(MANIFESTS[package].read_text(encoding="utf-8"))
+        manifest.update(update)
+        _atomic_write(MANIFESTS[package], manifest)
+    print(f"Updated {len(MANIFESTS)} marketplace manifests for {args.release_tag}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    raise SystemExit(main())
