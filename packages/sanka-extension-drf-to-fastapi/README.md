@@ -42,3 +42,16 @@ identifies a known tie-break idiom (appending the primary key). `DateTimeField` 
 in and out, timezone-aware per the project's `TIME_ZONE`) is a native field kind. An
 overridden viewset action now keeps only that route manual; the rest of the viewset stays
 native.
+
+## Verbatim carryover of overridden actions
+
+An overridden viewset action (`list`, `create`, `retrieve`, `update`, `partial_update`,
+`destroy`) and the helpers it calls on `self` are carried into the generated app unchanged
+when they touch nothing but the standard library, DRF's `Response`/`status`/`Request`
+names, and `super().<action>()`. They are emitted as a subclass of the runtime's
+`CarryoverView` in `sanka_user_views.py`: `super()` reaches the generated handler (run on
+the event loop while the carried code runs in a worker thread), DRF names resolve to shims,
+and an error answered by the native handler surfaces as an exception exactly where DRF's
+mixins would have raised. Actions that reach the ORM, `self.request`, `get_object`, or
+other imports stay manual with their reasons. Generated apps also mirror Django's
+Content-Length behaviour: the header is sent only when the source ran CommonMiddleware.

@@ -999,16 +999,20 @@ Django is not imported.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import datetime as _dt
 import json
 import os
 import re
+import types
 import zoneinfo
 from decimal import Decimal, InvalidOperation
+from importlib import import_module
 from typing import Any
 from urllib import parse as _urlparse
 
+import anyio
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
@@ -1016,6 +1020,167 @@ import sanka_store as store
 
 HERE_MANIFEST = __import__("pathlib").Path(__file__).resolve().parent
 MANIFEST = json.loads((HERE_MANIFEST / "sanka-manifest.json").read_text(encoding="utf-8"))
+
+
+class CarryResponse:
+    """DRF ``Response`` shim for carried view code: data, status, and header access."""
+
+    def __init__(
+        self,
+        data: Any = None,
+        status: Any = None,
+        template_name: Any = None,
+        headers: Any = None,
+        exception: bool = False,
+        content_type: Any = None,
+    ) -> None:
+        self.data = data
+        self.status_code = 200 if status is None else int(status)
+        self.headers: dict[str, str] = {}
+        for key, value in dict(headers or {}).items():
+            self[key] = value
+
+    def _key(self, name: Any) -> str:
+        for existing in self.headers:
+            if existing.lower() == str(name).lower():
+                return existing
+        return str(name)
+
+    def __setitem__(self, name: Any, value: Any) -> None:
+        self.headers[self._key(name)] = str(value)
+
+    def __getitem__(self, name: Any) -> str:
+        return self.headers[self._key(name)]
+
+    def __delitem__(self, name: Any) -> None:
+        del self.headers[self._key(name)]
+
+    def get(self, name: Any, default: Any = None) -> Any:
+        return self.headers.get(self._key(name), default)
+
+    def has_header(self, name: Any) -> bool:
+        return self._key(name) in self.headers
+
+
+class CarryRequest:
+    """DRF ``Request`` shim: headers, query params, method, path, and the parsed body."""
+
+    def __init__(self, native: Request, data: Any) -> None:
+        self._request = native
+        self.data = data
+        self.headers = native.headers
+        self.query_params = native.query_params
+        self.method = native.method
+        self.path = native.url.path
+
+
+def _status_namespace() -> Any:
+    codes = {str(name): int(code) for name, code in MANIFEST.get("status_codes", {}).items()}
+    return types.SimpleNamespace(
+        **codes,
+        is_informational=lambda code: 100 <= code <= 199,
+        is_success=lambda code: 200 <= code <= 299,
+        is_redirect=lambda code: 300 <= code <= 399,
+        is_client_error=lambda code: 400 <= code <= 499,
+        is_server_error=lambda code: 500 <= code <= 599,
+    )
+
+
+carry_status = _status_namespace()
+
+
+class CarryAPIException(Exception):
+    """Raised inside carried code when the native handler answered with an error.
+
+    DRF's mixins raise (NotFound, ValidationError, PermissionDenied) before the author's
+    code after ``super()`` runs, so the error response must leave the action untouched.
+    """
+
+    def __init__(self, rendered: Any) -> None:
+        super().__init__(rendered.status_code)
+        self.rendered = rendered
+
+
+class CarryoverView:
+    """Base for verbatim view carryover: ``super().<action>()`` reaches the native handler.
+
+    Carried DRF code is synchronous; it runs in a worker thread and each ``super()`` call
+    schedules the async native handler on the event loop and waits for its result.
+    """
+
+    def __init__(self, spec: dict[str, Any], native: Request, raw_body: bytes, loop: Any) -> None:
+        self._spec = spec
+        self._native = native
+        self._raw_body = raw_body
+        self._loop = loop
+
+    def _run(self, operation: str) -> CarryResponse:
+        future = asyncio.run_coroutine_threadsafe(
+            handle(self._spec, operation, self._native, raw_body=self._raw_body, carry=False),
+            self._loop,
+        )
+        rendered = future.result()
+        if rendered.status_code >= 400:
+            raise CarryAPIException(rendered)
+        body = getattr(rendered, "body", b"") or b""
+        data = json.loads(body) if body else None
+        headers = {
+            key: value
+            for key, value in rendered.headers.items()
+            if key.lower() not in {"content-length", "content-type", "allow"}
+        }
+        return CarryResponse(data, status=rendered.status_code, headers=headers)
+
+    def list(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
+        return self._run("list")
+
+    def create(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
+        return self._run("create")
+
+    def retrieve(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
+        return self._run("retrieve")
+
+    def update(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
+        partial = kwargs.pop("partial", False)
+        return self._run("partial_update" if partial else "update")
+
+    def partial_update(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
+        return self._run("destroy")
+
+
+_USER_VIEWS = import_module("sanka_user_views") if MANIFEST.get("has_user_views") else None
+
+
+async def _carried(spec: dict[str, Any], operation: str, request: Request, allow: str) -> Any:
+    """Run the author's overridden action verbatim against the native handlers."""
+    carry = spec["view_carryover"]
+    view_class = getattr(_USER_VIEWS, str(carry["class"]))
+    raw_body = await read_raw_body(request) if request.method in {"POST", "PUT", "PATCH"} else b""
+    try:
+        data = json.loads(raw_body) if raw_body else None
+    except json.JSONDecodeError:
+        data = None
+    view = view_class(spec, request, raw_body, asyncio.get_running_loop())
+    shim = CarryRequest(request, data)
+    action = getattr(view, operation)
+    kwargs = dict(request.path_params)
+    try:
+        result = await anyio.to_thread.run_sync(lambda: action(shim, **kwargs))
+    except CarryAPIException as error:
+        return error.rendered
+    headers = {
+        key: value
+        for key, value in result.headers.items()
+        if key.lower() not in {"allow", "content-length", "content-type"}
+    }
+    headers["Allow"] = allow
+    if result.data is None:
+        return Response(status_code=result.status_code, headers=headers)
+    return JSONResponse(result.data, status_code=result.status_code, headers=headers)
 
 _DECIMAL_TAIL = re.compile(r"\.0*\s*$")
 _MAX_STRING_LENGTH = 1000
@@ -1071,6 +1236,9 @@ async def read_raw_body(request: Request) -> bytes:
 
 
 def apply_security_headers(response: Response, request: Request, security: dict[str, Any]) -> None:
+    if not security.get("content_length") and "content-length" in response.headers:
+        # Django without CommonMiddleware sends no Content-Length; match it.
+        del response.headers["content-length"]
     if security.get("content_type_nosniff"):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
     if security.get("referrer_policy"):
@@ -1803,9 +1971,15 @@ async def handle(
     spec: dict[str, Any],
     operation: str,
     request: Request,
+    *,
+    raw_body: bytes | None = None,
+    carry: bool = True,
 ) -> Any:
     path = next(route["path"] for route in spec["routes"] if route["operation"] == operation)
     allow = MANIFEST["allow"][path]
+    carryover = spec.get("view_carryover")
+    if carry and carryover and operation in carryover.get("operations", ()):
+        return await _carried(spec, operation, request, allow)
     auth = spec.get("auth")
     user_id = None
     if auth is not None:
@@ -1855,7 +2029,8 @@ async def handle(
                     await store.delete_row(field["child"], child)
         await store.delete_row(spec, instance)
         return Response(status_code=204, headers={"Allow": allow})
-    raw_body = await read_raw_body(request)
+    if raw_body is None:
+        raw_body = await read_raw_body(request)
     payload, parse_error = _parse_json(raw_body)
     if parse_error is not None:
         parse_error.headers["Allow"] = allow

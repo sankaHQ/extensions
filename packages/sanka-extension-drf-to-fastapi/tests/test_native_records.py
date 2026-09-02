@@ -11,6 +11,7 @@ status, body (including ``next``/``previous`` cursor URLs) and the Allow header.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import shutil
 import subprocess
@@ -36,6 +37,23 @@ PAGE_TWO = _cursor(p="2026-01-01 02:00:00+00:00")
 PAGE_THREE = _cursor(o="1", p="2026-01-01 01:00:00+00:00")
 BACK_TO_ONE = _cursor(r="1", p="2026-01-01 01:00:00+00:00")
 BY_AMOUNT_AFTER_TEN = _cursor(p="10.00")
+CONDITIONAL = ["ETag", "Cache-Control", "Vary", "Content-Length"]
+
+
+def _etag(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return '"' + hashlib.sha256(canonical.encode("utf-8")).hexdigest() + '"'
+
+
+RECORD_ONE_ETAG = _etag(
+    {
+        "id": 1,
+        "label": "Alpha opening",
+        "category": "retail",
+        "amount": "10.00",
+        "posted_at": "2026-01-01T09:00:00+09:00",
+    }
+)
 
 SCENARIOS: list[dict[str, Any]] = [
     {"method": "GET", "path": "/api/records/"},
@@ -102,7 +120,67 @@ SCENARIOS: list[dict[str, Any]] = [
         },
     },
     {"method": "GET", "path": "/api/records/?ordering=-posted_at"},
+    # carried ETag logic: retrieve/update/partial_update run the author's code verbatim
+    {"method": "GET", "path": "/api/records/1/", "capture": CONDITIONAL},
+    {"method": "GET", "path": "/api/records/5/", "capture": CONDITIONAL},
+    {
+        "method": "GET",
+        "path": "/api/records/1/",
+        "headers": {"If-None-Match": RECORD_ONE_ETAG},
+        "capture": CONDITIONAL,
+    },
+    {
+        "method": "GET",
+        "path": "/api/records/1/",
+        "headers": {"If-None-Match": '"stale"'},
+        "capture": CONDITIONAL,
+    },
+    {
+        "method": "GET",
+        "path": "/api/records/1/",
+        "headers": {"If-None-Match": "*"},
+        "capture": CONDITIONAL,
+    },
+    {
+        "method": "GET",
+        "path": "/api/records/1/",
+        "headers": {"If-None-Match": '"stale", ' + RECORD_ONE_ETAG},
+        "capture": CONDITIONAL,
+    },
+    {"method": "GET", "path": "/api/records/999/", "capture": CONDITIONAL},
+    {
+        "method": "PUT",
+        "path": "/api/records/3/",
+        "body": {
+            "label": "Updated fee",
+            "category": "ops",
+            "amount": 10,
+            "posted_at": "2026-01-01T01:30:00-05:00",
+        },
+        "capture": CONDITIONAL,
+    },
+    {
+        "method": "PATCH",
+        "path": "/api/records/2/",
+        "body": {"posted_at": "2026-02-03T23:45:00-08:00"},
+        "capture": CONDITIONAL,
+    },
+    {
+        "method": "PATCH",
+        "path": "/api/records/2/",
+        "body": {"amount": "abc"},
+        "capture": CONDITIONAL,
+    },
+    {
+        "method": "GET",
+        "path": "/api/records/1/",
+        "headers": {"If-None-Match": RECORD_ONE_ETAG},
+        "capture": CONDITIONAL,
+    },
+    {"method": "OPTIONS", "path": "/api/records/1/"},
+    {"method": "POST", "path": "/api/records/1/", "body": {}},
     {"method": "DELETE", "path": "/api/records/1/"},
+    {"method": "GET", "path": "/api/records/1/", "capture": CONDITIONAL},
     {"method": "GET", "path": "/api/records/?search=alpha"},
 ]
 
@@ -174,17 +252,30 @@ def test_plan_keeps_list_create_destroy_native_and_overridden_actions_manual(
     assert strategies[("POST", "/api/records/")] == "native-fastapi-crud"
     assert strategies[("DELETE", "/api/records/{pk}/")] == "native-fastapi-crud"
     assert strategies[("GET", "/api/")] == "native-fastapi-api-root"
+    # the overridden retrieve/update are carried over verbatim, so they stay native
     for method in ("GET", "PUT", "PATCH"):
-        assert strategies[(method, "/api/records/{pk}/")] == "needs-manual-adaptation"
-    manual = [r for r in planned["routes"] if r["strategy"] == "needs-manual-adaptation"]
-    assert {r["operation"] for r in manual} == {"retrieve", "update", "partial_update"}
-    assert all(
-        r["adaptation_reasons"][0]["code"] == "SANKA_DRF_VIEWSET_OVERRIDES_UNSUPPORTED"
-        for r in manual
-    )
-    assert planned["readiness"] == pytest.approx(4 / 7)
+        assert strategies[(method, "/api/records/{pk}/")] == "native-fastapi-crud"
+    assert planned["readiness"] == pytest.approx(1.0)
     scanned = json.loads((records_project / ".sanka" / "scan.json").read_text(encoding="utf-8"))
     view = next(v for v in scanned["view_details"] if v["name"].endswith("RecordViewSet"))
+    assert view["carryover"]["class_name"] == "RecordViewSetCarryover"
+    assert view["carryover"]["operations"] == ["retrieve", "update", "partial_update"]
+    assert [m["name"] for m in view["carryover"]["methods"]] == [
+        "retrieve",
+        "update",
+        "_conditional_response",
+        "_etag",
+        "_etag_matches",
+    ]
+    assert sorted(alias for alias, _module, _attr in view["carryover"]["imports"]) == [
+        "Any",
+        "Request",
+        "Response",
+        "hashlib",
+        "json",
+        "status",
+    ]
+    assert scanned["status_codes"]["HTTP_304_NOT_MODIFIED"] == 304
     assert view["listing"]["pagination"]["kind"] == "cursor"
     assert view["listing"]["pagination"]["page_size"] == 2
     assert view["listing"]["pagination"]["ordering"] == ["-posted_at", "-id"]
@@ -213,7 +304,7 @@ def test_native_list_semantics_match_drf(records_project: Path, tmp_path: Path) 
     assert scan.returncode == 0, scan.stderr
     plan = run_cli(["plan", str(records_project), "--to", "fastapi"], records_project)
     assert plan.returncode == 0, plan.stderr
-    assert "Native migration readiness: 57%" in plan.stdout
+    assert "Native migration readiness: 100%" in plan.stdout
     plan_hash = json.loads(
         (records_project / ".sanka" / "plan-fastapi.json").read_text(encoding="utf-8")
     )["plan_hash"]
@@ -226,7 +317,15 @@ def test_native_list_semantics_match_drf(records_project: Path, tmp_path: Path) 
     manifest = json.loads((output / "sanka-manifest.json").read_text(encoding="utf-8"))
     resource = manifest["resources"][0]
     assert resource["listing"]["pagination"]["cursor_param"] == "cursor"
+    assert resource["view_carryover"] == {
+        "class": "RecordViewSetCarryover",
+        "operations": ["retrieve", "update", "partial_update"],
+    }
     assert manifest["allow"]["/api/records/{pk}/"] == "GET, PUT, PATCH, DELETE, HEAD, OPTIONS"
+    user_views = (output / "sanka_user_views.py").read_text(encoding="utf-8")
+    assert "class RecordViewSetCarryover(CarryoverView):" in user_views
+    assert "def _conditional_response(self, request: Request, response: Response)" in user_views
+    assert "status.HTTP_304_NOT_MODIFIED" in user_views
 
     source = _run_probe("source", records_project, tmp_path / "source.sqlite3")
     native = _run_probe("native", records_project, tmp_path / "native.sqlite3", output=output)
@@ -249,3 +348,19 @@ def test_native_list_semantics_match_drf(records_project: Path, tmp_path: Path) 
     assert source["results"][18]["status"] == 201
     assert source["results"][18]["body"]["posted_at"] == "2026-03-01T19:00:00+09:00"
     assert source["results"][21]["status"] == 400
+    by_path: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for scenario, result in zip(SCENARIOS, source["results"], strict=True):
+        key = (
+            scenario["method"],
+            scenario["path"],
+            json.dumps(scenario.get("headers", {}), sort_keys=True),
+        )
+        by_path.setdefault(key, result)  # first occurrence: before the DELETE at the end
+    detail = by_path[("GET", "/api/records/1/", "{}")]
+    assert detail["status"] == 200
+    assert detail["captured"]["ETag"] == RECORD_ONE_ETAG
+    assert detail["captured"]["Cache-Control"] == "private, max-age=0"
+    matched = by_path[("GET", "/api/records/1/", json.dumps({"If-None-Match": RECORD_ONE_ETAG}))]
+    assert matched["status"] == 304
+    assert matched["body"] is None
+    assert matched["captured"]["ETag"] == RECORD_ONE_ETAG

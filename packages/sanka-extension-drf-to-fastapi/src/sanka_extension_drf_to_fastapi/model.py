@@ -257,6 +257,7 @@ class ViewIR:
     auth: ViewAuthIR | None = None
     lookup_regex: str | None = None
     listing: dict[str, Any] = field(default_factory=dict)
+    carryover: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> ViewIR:
@@ -268,6 +269,7 @@ class ViewIR:
                 str(payload["lookup_regex"]) if payload.get("lookup_regex") is not None else None
             ),
             listing=dict(payload.get("listing") or {}),
+            carryover=dict(payload.get("carryover") or {}),
         )
 
 
@@ -320,6 +322,7 @@ class FrameworkScan:
     generic_messages: tuple[tuple[str, str], ...] = ()
     database: DatabaseIR = field(default_factory=lambda: DatabaseIR(vendor="other", name=""))
     skipped_routes: tuple[SkippedRoute, ...] = ()
+    status_codes: dict[str, int] = field(default_factory=dict)
     scan_hash: str = field(default="")
 
     def hash_payload(self) -> dict[str, Any]:
@@ -337,8 +340,10 @@ class FrameworkScan:
             for route in payload["routes"]:
                 route.pop("options", None)
         if self.schema_version < 7:
+            payload.pop("status_codes", None)
             for view in payload.get("view_details", []):
                 view.pop("listing", None)
+                view.pop("carryover", None)
             for serializer in payload.get("serializer_details", []):
                 _strip_field_keys(serializer.get("fields", []), ("timezone",))
         return payload
@@ -382,6 +387,9 @@ class FrameworkScan:
             skipped_routes=tuple(
                 SkippedRoute.from_dict(item) for item in payload.get("skipped_routes", [])
             ),
+            status_codes={
+                str(key): int(value) for key, value in (payload.get("status_codes") or {}).items()
+            },
             scan_hash=str(payload.get("scan_hash", "")),
         )
 

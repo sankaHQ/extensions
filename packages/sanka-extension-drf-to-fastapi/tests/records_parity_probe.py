@@ -93,6 +93,9 @@ def _run_source(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "status": response.status_code,
                 "body": _body(bytes(response.content)),
                 "allow": response.headers.get("Allow"),
+                "captured": {
+                    name: response.headers.get(name) for name in scenario.get("capture", [])
+                },
             }
         )
     return results
@@ -119,6 +122,9 @@ def _run_native(output: Path, scenarios: list[dict[str, Any]]) -> list[dict[str,
                     "status": response.status_code,
                     "body": _body(response.content),
                     "allow": response.headers.get("Allow"),
+                    "captured": {
+                        name: response.headers.get(name) for name in scenario.get("capture", [])
+                    },
                 }
             )
         return results

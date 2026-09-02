@@ -692,12 +692,14 @@ def test_native_plan_explains_middleware_in_legacy_scan(crud_project: Path) -> N
     payload = json.loads(scan_path.read_text(encoding="utf-8"))
     payload["schema_version"] = 2
     payload.pop("skipped_routes", None)
+    payload.pop("status_codes", None)
     for route in payload["routes"]:
         route.pop("adaptation_reasons", None)
         route.pop("parity_notes", None)
         route.pop("options", None)
     for view in payload.get("view_details", []):
         view.pop("listing", None)
+        view.pop("carryover", None)
 
     def strip_timezone(fields: list[dict[str, object]]) -> None:
         for item in fields:
