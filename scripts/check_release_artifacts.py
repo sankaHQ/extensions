@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Validate wheel ownership, dependencies, entry points, and catalog closure."""
+"""Validate the complete immutable GitHub marketplace release set."""
 
 from __future__ import annotations
 
+import argparse
 import configparser
 import email
 import hashlib
@@ -14,33 +15,40 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+if __package__ in {None, ""}:  # Direct script execution keeps only scripts/ on sys.path.
+    sys.path.insert(0, str(ROOT))
+
+from scripts.build_release import MARKETPLACE_PACKAGES  # noqa: E402
+from scripts.update_marketplace_hashes import MANIFEST_WHEELS, RELEASE_TAG  # noqa: E402
+
 RELEASE = ROOT / "release" / "all"
-CONNECTOR_SDK = "sanka-connector-sdk"
-EXTENSION_SDK = "sanka-extension-sdk"
-EXTENSION = "sanka-extension-drf-to-fastapi"
-EXTENSION_RELEASE_TAG = "extensions-v0.1.0a1"
-EXTENSION_WHEELS = (
-    "sanka_extension_sdk-0.1.0a1-py3-none-any.whl",
-    "sanka_extension_drf_to_fastapi-0.1.0a1-py3-none-any.whl",
-)
 CATALOG: dict[str, Any] = {
     "schema_version": "sanka-marketplace/v1",
     "extensions": [
         {
             "id": "sanka/drf-to-fastapi",
             "manifest": "packages/sanka-extension-drf-to-fastapi/extension.json",
-        }
+        },
+        {"id": "sanka/markdown", "manifest": "packages/sanka-connector-markdown/extension.json"},
+        {"id": "sanka/csv", "manifest": "packages/sanka-connector-csv/extension.json"},
+        {"id": "sanka/sqlite", "manifest": "packages/sanka-connector-sqlite/extension.json"},
+        {"id": "sanka/postgres", "manifest": "packages/sanka-connector-postgres/extension.json"},
+        {
+            "id": "sanka/clickhouse",
+            "manifest": "packages/sanka-connector-clickhouse/extension.json",
+        },
     ],
 }
-MANIFEST: dict[str, Any] = {
-    "schema_version": "sanka-extension-manifest/v1",
+MIGRATION_MANIFEST: dict[str, Any] = {
+    "schema_version": "sanka-extension-manifest/v2",
+    "kind": "migration",
     "id": "sanka/drf-to-fastapi",
     "version": "0.1.0a1",
     "protocol_version": "sanka-extension/v1",
     "distribution": {
-        "name": EXTENSION,
+        "name": "sanka-extension-drf-to-fastapi",
         "version": "0.1.0a1",
-        "executable": EXTENSION,
+        "executable": "sanka-extension-drf-to-fastapi",
     },
     "commands": ["apply", "plan", "scan", "test", "verify"],
     "match": {
@@ -54,17 +62,93 @@ MANIFEST: dict[str, Any] = {
         ],
     },
     "targets": ["fastapi"],
-    "runtime": {"sanka_migrate": ">=0.1.0a11,<0.2"},
+    "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+}
+CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
+    "sanka-connector-markdown": {
+        "schema_version": "sanka-extension-manifest/v2",
+        "kind": "connector",
+        "id": "sanka/markdown",
+        "version": "0.1.0a11",
+        "distribution": {
+            "name": "sanka-connector-markdown",
+            "version": "0.1.0a11",
+            "entry_point": "markdown",
+        },
+        "protocol_version": "sanka-connector/v1",
+        "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+        "providers": [{"name": "markdown", "roles": ["source"]}],
+    },
+    "sanka-connector-csv": {
+        "schema_version": "sanka-extension-manifest/v2",
+        "kind": "connector",
+        "id": "sanka/csv",
+        "version": "0.1.0a11",
+        "distribution": {
+            "name": "sanka-connector-csv",
+            "version": "0.1.0a11",
+            "entry_point": "csv",
+        },
+        "protocol_version": "sanka-connector/v1",
+        "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+        "providers": [{"name": "csv", "roles": ["source"]}],
+    },
+    "sanka-connector-sqlite": {
+        "schema_version": "sanka-extension-manifest/v2",
+        "kind": "connector",
+        "id": "sanka/sqlite",
+        "version": "0.1.0a11",
+        "distribution": {
+            "name": "sanka-connector-sqlite",
+            "version": "0.1.0a11",
+            "entry_point": "sqlite",
+        },
+        "protocol_version": "sanka-connector/v1",
+        "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+        "providers": [{"name": "sqlite", "roles": ["source", "destination"]}],
+    },
+    "sanka-connector-postgres": {
+        "schema_version": "sanka-extension-manifest/v2",
+        "kind": "connector",
+        "id": "sanka/postgres",
+        "version": "0.1.0a11",
+        "distribution": {
+            "name": "sanka-connector-postgres",
+            "version": "0.1.0a11",
+            "entry_point": "postgres",
+        },
+        "protocol_version": "sanka-connector/v1",
+        "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+        "providers": [{"name": "postgres", "roles": ["source", "destination"]}],
+    },
+    "sanka-connector-clickhouse": {
+        "schema_version": "sanka-extension-manifest/v2",
+        "kind": "connector",
+        "id": "sanka/clickhouse",
+        "version": "0.1.0a11",
+        "distribution": {
+            "name": "sanka-connector-clickhouse",
+            "version": "0.1.0a11",
+            "entry_point": "clickhouse",
+        },
+        "protocol_version": "sanka-connector/v1",
+        "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+        "providers": [{"name": "clickhouse", "roles": ["destination"]}],
+    },
+}
+MANIFESTS = {"sanka-extension-drf-to-fastapi": MIGRATION_MANIFEST, **CONNECTOR_MANIFESTS}
+CONNECTOR_ENTRY_POINTS = {
+    "sanka-connector-markdown": {"markdown": "sanka_connector_markdown:CONNECTOR"},
+    "sanka-connector-csv": {"csv": "sanka_connector_csv:CONNECTOR"},
+    "sanka-connector-sqlite": {"sqlite": "sanka_connector_sqlite:CONNECTOR"},
+    "sanka-connector-postgres": {"postgres": "sanka_connector_postgres:CONNECTOR"},
+    "sanka-connector-clickhouse": {"clickhouse": "sanka_connector_clickhouse:CONNECTOR"},
 }
 
 
 class _EntryPointParser(configparser.ConfigParser):
     def optionxform(self, optionstr: str) -> str:
         return optionstr
-
-
-def _is_distribution(path: Path) -> bool:
-    return path.suffix == ".whl" or path.name.endswith(".tar.gz")
 
 
 def _wheel_metadata(wheel: Path) -> tuple[email.message.Message, str]:
@@ -78,168 +162,124 @@ def _wheel_metadata(wheel: Path) -> tuple[email.message.Message, str]:
     return metadata, entries
 
 
-def _console_scripts(entries: str) -> dict[str, str] | None:
+def _entry_points(entries: str, group: str) -> dict[str, str] | None:
     parser = _EntryPointParser(interpolation=None)
     try:
         parser.read_string(entries)
     except configparser.Error:
         return None
-    return dict(parser["console_scripts"]) if parser.has_section("console_scripts") else {}
+    return dict(parser[group]) if parser.has_section(group) else {}
 
 
 def _project_versions(root: Path) -> dict[str, str]:
-    versions: dict[str, str] = {}
-    for pyproject in sorted((root / "packages").glob("*/pyproject.toml")):
-        with pyproject.open("rb") as handle:
-            project = tomllib.load(handle)["project"]
-        versions[str(project["name"])] = str(project["version"])
-    return versions
+    return {
+        str(project["name"]): str(project["version"])
+        for pyproject in (root / "packages").glob("*/pyproject.toml")
+        for project in [tomllib.loads(pyproject.read_text())["project"]]
+    }
+
+
+def _hash(path: Path) -> str:
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
 def _catalog_errors(root: Path, release: Path) -> list[str]:
-    catalog_path = root / "marketplace.json"
-    if not catalog_path.is_file():
-        return ["marketplace.json is missing"]
     try:
-        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        catalog = json.loads((root / "marketplace.json").read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as error:
         return [f"marketplace.json is invalid: {error}"]
-    if catalog != CATALOG:
-        extensions = catalog.get("extensions") if isinstance(catalog, dict) else None
-        if isinstance(extensions, list) and len(extensions) == 1:
-            entry = extensions[0]
+    extensions = catalog.get("extensions") if isinstance(catalog, dict) else None
+    if isinstance(extensions, list):
+        for entry in extensions:
             if isinstance(entry, dict) and isinstance(entry.get("manifest"), str):
                 candidate = (root / entry["manifest"]).resolve()
                 if not candidate.is_relative_to(root.resolve()):
                     return [
                         f"catalog manifest path is outside the marketplace snapshot: {candidate}"
                     ]
+    if catalog != CATALOG:
         return ["marketplace.json does not match the official sanka-marketplace/v1 catalog"]
-
-    manifest_path = (root / CATALOG["extensions"][0]["manifest"]).resolve()
-    if not manifest_path.is_relative_to(root.resolve()):
-        return [f"catalog manifest path is outside the marketplace snapshot: {manifest_path}"]
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as error:
-        return [f"extension manifest is invalid: {error}"]
     errors: list[str] = []
-    base = dict(manifest) if isinstance(manifest, dict) else {}
-    wheels = base.pop("wheels", None)
-    if base != MANIFEST:
-        errors.append("extension.json does not match the official sanka-extension-manifest/v1")
-    if not isinstance(wheels, list) or [item.get("name") for item in wheels] != list(
-        EXTENSION_WHEELS
-    ):
-        errors.append(f"catalog must contain exactly the extension wheels {list(EXTENSION_WHEELS)}")
-        return errors
-    for item in wheels:
-        if not isinstance(item, dict) or set(item) != {"name", "url", "sha256"}:
-            errors.append("catalog wheel entries must contain exactly name, url, and sha256")
+    for package, expected in MANIFESTS.items():
+        manifest_path = root / "packages" / package / "extension.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as error:
+            errors.append(f"{package} extension.json is invalid: {error}")
             continue
-        name = item["name"]
-        expected_url = (
-            "https://github.com/sankaHQ/extensions/releases/download/"
-            f"{EXTENSION_RELEASE_TAG}/{name}"
-        )
-        if item["url"] != expected_url:
-            errors.append(f"catalog URL does not match the official GitHub release URL: {name}")
-        artifact = release / name
-        if not artifact.is_file():
-            errors.append(f"catalog wheel is missing from release artifacts: {name}")
+        wheels = manifest.pop("wheels", None)
+        if manifest != expected:
+            errors.append(f"{package} extension.json does not match its v2 marketplace manifest")
             continue
-        with artifact.open("rb") as handle:
-            digest = hashlib.file_digest(handle, "sha256").hexdigest()
-        if item["sha256"] != digest:
-            errors.append(f"catalog hash does not match release artifact: {name}")
+        if not isinstance(wheels, list) or [wheel.get("name") for wheel in wheels] != list(
+            MANIFEST_WHEELS[package]
+        ):
+            errors.append(
+                f"{package} manifest does not contain its complete wheel dependency closure"
+            )
+            continue
+        for wheel in wheels:
+            name = wheel.get("name") if isinstance(wheel, dict) else None
+            if not isinstance(wheel, dict) or set(wheel) != {"name", "url", "sha256"}:
+                errors.append(f"{package} manifest has an invalid wheel entry")
+                continue
+            if wheel["url"] != (
+                f"https://github.com/sankaHQ/extensions/releases/download/{RELEASE_TAG}/{name}"
+            ):
+                errors.append(f"{package} manifest has a non-immutable GitHub URL: {name}")
+            artifact = release / str(name)
+            if not artifact.is_file():
+                errors.append(f"{package} manifest wheel is absent from the release: {name}")
+            elif wheel["sha256"] != _hash(artifact):
+                errors.append(f"{package} manifest hash does not match release artifact: {name}")
     return errors
 
 
 def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
-    errors: list[str] = []
-    versions = _project_versions(root)
-    expected_packages = sorted(versions)
     if not release.is_dir():
-        return [f"combined release directory is missing: {release}"]
-    unexpected = sorted(path.name for path in release.iterdir() if not _is_distribution(path))
-    if unexpected:
-        errors.append(f"combined release directory contains non-distributions: {unexpected}")
-
-    package_root = release.parent / "packages"
-    package_directories = (
-        sorted(path for path in package_root.iterdir() if path.is_dir())
-        if package_root.is_dir()
-        else []
-    )
-    released_packages = [path.name for path in package_directories]
-    if released_packages != expected_packages:
+        return [f"release directory is missing: {release}"]
+    versions = _project_versions(root)
+    expected_names = {name for wheels in MANIFEST_WHEELS.values() for name in wheels}
+    wheels = {path.name: path for path in release.glob("*.whl")}
+    errors: list[str] = []
+    if set(wheels) != expected_names:
         errors.append(
-            f"expected package release directories {expected_packages}, found {released_packages}"
+            f"expected marketplace wheels {sorted(expected_names)}, found {sorted(wheels)}"
         )
-    for package_directory in package_directories:
-        package_files = sorted(path for path in package_directory.iterdir() if path.is_file())
-        package_unexpected = [path.name for path in package_files if not _is_distribution(path)]
-        if package_unexpected:
-            errors.append(
-                f"{package_directory.name} publish directory contains non-distributions: "
-                f"{package_unexpected}"
-            )
-        package_artifacts = [path for path in package_files if _is_distribution(path)]
-        if len(package_artifacts) != 2:
-            errors.append(
-                f"{package_directory.name} publish directory expected 2 distributions, "
-                f"found {len(package_artifacts)}"
-            )
-
-    wheels = sorted(release.glob("*.whl"))
-    sdists = sorted(release.glob("*.tar.gz"))
-    if len(wheels) != len(expected_packages):
-        errors.append(f"expected {len(expected_packages)} wheels, found {len(wheels)}")
-    if len(sdists) != len(expected_packages):
-        errors.append(f"expected {len(expected_packages)} sdists, found {len(sdists)}")
-
-    for wheel in wheels:
+    if extras := sorted(path.name for path in release.iterdir() if path.suffix != ".whl"):
+        errors.append(f"release directory contains non-wheel artifacts: {extras}")
+    for wheel in wheels.values():
         try:
             metadata, entries = _wheel_metadata(wheel)
         except (KeyError, StopIteration, zipfile.BadZipFile) as error:
             errors.append(f"invalid wheel metadata in {wheel.name}: {error}")
             continue
-        name = str(metadata["Name"])
-        version = str(metadata["Version"])
-        requirements = [str(item) for item in metadata.get_all("Requires-Dist", [])]
-        normalized = [item.replace(" ", "").lower() for item in requirements]
+        name, version = str(metadata["Name"]), str(metadata["Version"])
+        requirements = [
+            item.replace(" ", "").lower() for item in metadata.get_all("Requires-Dist", [])
+        ]
         if versions.get(name) != version:
-            errors.append(
-                f"{name} wheel version {version} does not match package version "
-                f"{versions.get(name)}"
-            )
-        if name == CONNECTOR_SDK:
-            if requirements:
-                errors.append(f"connector SDK wheel has runtime dependencies: {requirements}")
-            if entries:
-                errors.append("connector SDK wheel must not register an entry point")
+            errors.append(f"{name} wheel version {version} does not match package version")
+        if name == "sanka-connector-sdk" or name == "sanka-extension-sdk":
+            if requirements or entries:
+                errors.append(f"{name} SDK wheel must have no dependencies or entry points")
         elif name.startswith("sanka-connector-"):
-            if not any(item.startswith(f"{CONNECTOR_SDK}==") for item in normalized):
-                errors.append(f"{name} wheel does not depend on {CONNECTOR_SDK}")
-            if "[sanka.connectors]" not in entries:
-                errors.append(f"{name} wheel has no sanka.connectors entry point")
-        elif name == EXTENSION_SDK:
-            if requirements:
-                errors.append(f"extension SDK wheel has runtime dependencies: {requirements}")
-            if entries:
-                errors.append("extension SDK wheel must not register an entry point")
-        elif name == EXTENSION:
-            if normalized != [f"{EXTENSION_SDK}==0.1.0a1"]:
-                errors.append(f"{name} must depend exactly on {EXTENSION_SDK}==0.1.0a1")
-            if _console_scripts(entries) != {
-                EXTENSION: "sanka_extension_drf_to_fastapi.__main__:main"
+            connector_entries = _entry_points(entries, "sanka.connectors")
+            if f"sanka-connector-sdk=={version}" not in requirements:
+                errors.append(f"{name} wheel does not depend on its exact connector SDK")
+            if connector_entries != CONNECTOR_ENTRY_POINTS[name]:
+                errors.append(f"{name} wheel has no exact connector entry point")
+        elif name == "sanka-extension-drf-to-fastapi":
+            if requirements != ["sanka-extension-sdk==0.1.0a1"]:
+                errors.append(f"{name} must depend exactly on sanka-extension-sdk==0.1.0a1")
+            if _entry_points(entries, "console_scripts") != {
+                name: "sanka_extension_drf_to_fastapi.__main__:main"
             }:
                 errors.append(f"{name} wheel has no exact executable entry point")
         else:
             errors.append(f"unexpected release distribution: {name}")
-
-    errors.extend(_catalog_errors(root, release))
-    return errors
+    return errors + _catalog_errors(root, release)
 
 
 def main(root: Path = ROOT, release: Path = RELEASE) -> int:
@@ -249,14 +289,11 @@ def main(root: Path = ROOT, release: Path = RELEASE) -> int:
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    connector_count = len(list(release.glob("sanka_connector_*.whl")))
-    extension_count = len(list(release.glob("sanka_extension_*.whl")))
-    print(
-        f"Release artifacts: OK ({connector_count} connector wheels, "
-        f"{extension_count} extension wheels; catalog hashes match)"
-    )
+    print(f"Release artifacts: OK ({len(MARKETPLACE_PACKAGES)} marketplace wheels; hashes match)")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("dist", nargs="?", type=Path, default=RELEASE)
+    raise SystemExit(main(release=parser.parse_args().dist))
