@@ -4,16 +4,23 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import shutil
+import tomllib
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from scripts import build_release
 from scripts.build_release import _prepare_output
 from scripts.check_release_artifacts import validate_release
-from scripts.update_marketplace_hashes import MANIFEST_WHEELS, update_manifests
+from scripts.update_marketplace_hashes import (
+    MANIFEST_DEPENDENCIES,
+    MANIFEST_WHEELS,
+    update_manifests,
+)
 
 
 def _wheel(directory: Path, name: str) -> None:
@@ -37,6 +44,89 @@ def test_hash_updater_records_each_manifest_dependency_closure(tmp_path: Path) -
             and len(wheel["sha256"]) == 64
             for wheel in payload["wheels"]
         )
+
+
+def test_connector_manifests_include_locked_third_party_wheel_variants() -> None:
+    assert any(name.startswith("pyyaml-") for name in MANIFEST_WHEELS["sanka-connector-markdown"])
+    assert any(
+        name.startswith("psycopg_binary-") for name in MANIFEST_WHEELS["sanka-connector-postgres"]
+    )
+
+
+def _locked_dependency_closure(package_name: str) -> set[str]:
+    packages = {
+        package["name"]: package
+        for package in tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))["package"]
+    }
+    requested_extras: dict[str, set[str]] = {package_name: set()}
+    pending = [package_name]
+    processed: set[tuple[str, tuple[str, ...]]] = set()
+    closure: set[str] = set()
+    while pending:
+        name = pending.pop()
+        state = name, tuple(sorted(requested_extras[name]))
+        if state in processed:
+            continue
+        processed.add(state)
+        package = packages[name]
+        dependencies = list(package.get("dependencies", ()))
+        for extra in requested_extras[name]:
+            dependencies.extend(package.get("optional-dependencies", {}).get(extra, ()))
+        for dependency in dependencies:
+            child = dependency["name"]
+            assert child in packages
+            closure.add(child)
+            extras = set(dependency.get("extra", ()))
+            first_request = child not in requested_extras
+            prior = requested_extras.setdefault(child, set())
+            updated = prior | extras
+            if first_request or updated != prior:
+                requested_extras[child] = updated
+                pending.append(child)
+    return {name for name in closure if not name.startswith("sanka-")}
+
+
+def test_manifest_dependency_sets_cover_every_locked_platform_marker() -> None:
+    for package, dependencies in MANIFEST_DEPENDENCIES.items():
+        assert set(dependencies) == _locked_dependency_closure(package)
+    assert any(
+        name.startswith("clickhouse_connect-")
+        for name in MANIFEST_WHEELS["sanka-connector-clickhouse"]
+    )
+    assert all(
+        any(name.startswith("tzdata-") for name in MANIFEST_WHEELS[package])
+        for package in ("sanka-connector-clickhouse", "sanka-connector-postgres")
+    )
+
+
+def test_locked_dependency_wheels_are_loaded_with_immutable_hashes() -> None:
+    wheels = build_release.locked_dependency_wheels()
+
+    assert {wheel.distribution for wheel in wheels} == set(build_release.DEPENDENCIES)
+    assert len({wheel.name for wheel in wheels}) == len(wheels)
+    assert all(wheel.url.startswith("https://files.pythonhosted.org/") for wheel in wheels)
+    assert all(len(wheel.sha256) == 64 for wheel in wheels)
+    assert all(0 < wheel.size <= build_release.MAX_DEPENDENCY_WHEEL_BYTES for wheel in wheels)
+
+
+def test_dependency_download_rejects_hash_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wheel = build_release.LockedWheel(
+        distribution="example",
+        name="example-1.0-py3-none-any.whl",
+        url="https://files.pythonhosted.org/example.whl",
+        sha256="0" * 64,
+        size=7,
+    )
+    response = io.BytesIO(b"changed")
+    response.headers = {"Content-Length": "7"}  # type: ignore[attr-defined]
+    monkeypatch.setattr(build_release, "urlopen", lambda _url, timeout: response)
+
+    with pytest.raises(RuntimeError, match="SHA-256"):
+        build_release.download_locked_wheel(tmp_path, wheel)
+
+    assert not (tmp_path / wheel.name).exists()
 
 
 def test_hash_updater_rejects_an_incomplete_or_wrongly_tagged_wheel_set(tmp_path: Path) -> None:
@@ -161,6 +251,8 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
             requirements=requirements,
             entry_points=entry_points,
         )
+    for wheel in build_release.LOCKED_DEPENDENCY_WHEELS:
+        _wheel(release, wheel.name)
     for package in MANIFEST_WHEELS:
         source = Path("packages") / package / "extension.json"
         destination = root / source
