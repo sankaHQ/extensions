@@ -57,3 +57,9 @@ matching variable set to `true`.
 The bootstrap targets publish one package for first-project creation. Bootstrap
 the SDK before any provider and use the exact confirmation string shown by the
 workflow input.
+
+## Converter changes
+
+Before releasing `sanka-extension-drf-to-fastapi`, complete the exact-commit
+[converter regression check](converter-regression.md) in the private benchmark
+repository and link its successful private run in the release review.
