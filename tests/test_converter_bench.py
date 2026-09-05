@@ -2,15 +2,21 @@
 from __future__ import annotations
 
 import json
+import runpy
 import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from sanka_extension_sdk import ExtensionRequest, encode_response, success_response
-from scripts import run_converter_bench as gate
+
+# The pytest executable need not add the repository root to sys.path.
+gate = SimpleNamespace(
+    **runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/run_converter_bench.py"))
+)
 
 
 def test_route_floor_rejects_downgrades_and_fixture_drift() -> None:
