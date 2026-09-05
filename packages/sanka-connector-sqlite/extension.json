@@ -25,12 +25,12 @@
     {
       "name": "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
       "sha256": "7f4876b041363a733c2ba6ae247824ef137d9a9b5aaa1e7024e0736a1fe1adc3",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/sanka_connector_sdk-0.1.0a11-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a14/sanka_connector_sdk-0.1.0a11-py3-none-any.whl"
     },
     {
       "name": "sanka_connector_sqlite-0.1.0a11-py3-none-any.whl",
       "sha256": "a663fecffe36e0c5e9861857aa0c6987efdb0cb9706146e0ca724eb00a3b516e",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/sanka_connector_sqlite-0.1.0a11-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a14/sanka_connector_sqlite-0.1.0a11-py3-none-any.whl"
     }
   ]
 }
