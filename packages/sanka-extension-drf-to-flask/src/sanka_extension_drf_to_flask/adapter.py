@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Conservative native Flask generation, without importing another extension.
 
-ponytail: this first release converts stateless JSON APIView handlers; serializers,
+ponytail: JSON APIView handlers and isolated ORM models only; serializers,
 authentication, middleware, and custom dispatch remain explicit manual gaps.
 Extend the recognizer only with differential evidence for the additional behavior.
 """
@@ -95,7 +95,31 @@ def _flask_path(raw: str) -> str | None:
     return "/" + raw.lstrip("/")
 
 
+def _model_import(name: str, value: Any) -> str | None:
+    """Reuse an ORM module only when its imports have no serving dependencies."""
+    from django.db.models import Model  # type: ignore[import-untyped]
+
+    if not inspect.isclass(value) or not issubclass(value, Model):
+        return None
+    module = inspect.getmodule(value)
+    if module is None:
+        return None
+    tree = ast.parse(inspect.getsource(module))
+    allowed = {"django.db", "django.db.models", "decimal", "datetime", "uuid"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(n.name not in allowed for n in node.names):
+            return None
+        if isinstance(node, ast.ImportFrom) and (node.level or node.module not in allowed):
+            return None
+        if isinstance(node, ast.Name) and node.id in {"__import__", "exec", "eval"}:
+            return None
+    return f"from {value.__module__} import {value.__name__} as {name}"
+
+
 def _handler(view: Any, method: str) -> tuple[str | None, str]:
+    from django.conf import settings  # type: ignore[import-untyped]
+    from django.db import transaction  # type: ignore[import-untyped]
+    from rest_framework.parsers import JSONParser  # type: ignore[import-untyped]
     from rest_framework.permissions import AllowAny  # type: ignore[import-untyped]
     from rest_framework.renderers import JSONRenderer  # type: ignore[import-untyped]
     from rest_framework.response import Response  # type: ignore[import-untyped]
@@ -118,6 +142,7 @@ def _handler(view: Any, method: str) -> tuple[str | None, str]:
         "permission_classes",
         "authentication_classes",
         "renderer_classes",
+        "parser_classes",
     }
     if any(not name.startswith("__") and name not in allowed for name in vars(view)):
         return None, "custom view attributes or lifecycle hooks require manual migration"
@@ -155,14 +180,24 @@ def _handler(view: Any, method: str) -> tuple[str | None, str]:
         "enumerate",
         "ValueError",
         "TypeError",
+        "isinstance",
     }
     if function.__globals__.get("Response") is not Response:
         return None, "Response must be the DRF response constructor"
     if any(name in function.__globals__ for name in builtins):
         return None, "shadowed builtins require manual migration"
     used = {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
-    if used - bound - builtins - {"request", "Response"}:
-        return None, "handler depends on source globals, serializers or services"
+    imports = []
+    for name in sorted(used - bound - builtins - {"request", "Response"}):
+        value = function.__globals__.get(name)
+        statement = (
+            f"from django.db import transaction as {name}"
+            if value is transaction
+            else _model_import(name, value)
+        )
+        if statement is None:
+            return None, "handler depends on unsupported source globals, serializers or services"
+        imports.extend(ast.parse(statement).body)
     parents = {child: parent for parent in ast.walk(node) for child in ast.iter_child_nodes(parent)}
     for item in list(ast.walk(node)):
         if isinstance(item, ast.Name) and item.id == "request":
@@ -176,8 +211,19 @@ def _handler(view: Any, method: str) -> tuple[str | None, str]:
             and isinstance(item.value, ast.Name)
             and item.value.id == "request"
         ):
-            if item.attr not in {"query_params", "method"}:
+            if item.attr not in {"query_params", "method", "data"}:
                 return None, f"request.{item.attr} semantics require manual migration"
+            if item.attr == "data":
+                if (
+                    list(view.parser_classes) != [JSONParser]
+                    or not JSONParser.strict
+                    or settings.DEFAULT_CHARSET.lower() != "utf-8"
+                ):
+                    return None, "request.data requires the unmodified JSONParser alone"
+                parent = parents.get(item)
+                if not isinstance(item.ctx, ast.Load):
+                    return None, "rebinding request.data requires manual migration"
+                # NodeTransformer below replaces the complete attribute with a call.
             if item.attr == "query_params":
                 parent = parents.get(item)
                 call = parents.get(parent) if parent is not None else None
@@ -198,7 +244,22 @@ def _handler(view: Any, method: str) -> tuple[str | None, str]:
             )
         ):
             return None, "unsupported Response arguments"
-    return ast.unparse(node), ""
+
+    class JsonBody(ast.NodeTransformer):
+        def visit_Attribute(self, item: ast.Attribute) -> ast.AST:
+            if (
+                isinstance(item.value, ast.Name)
+                and item.value.id == "request"
+                and item.attr == "data"
+            ):
+                return ast.Call(
+                    func=ast.Name(id="_json_data", ctx=ast.Load()), args=[], keywords=[]
+                )
+            return self.generic_visit(item)
+
+    node = cast(ast.FunctionDef, JsonBody().visit(node))
+    node.body = imports + node.body
+    return ast.unparse(ast.fix_missing_locations(node)), ""
 
 
 def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
@@ -208,7 +269,7 @@ def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
     import django  # type: ignore[import-untyped]
 
     django.setup()
-    from django.conf import settings  # type: ignore[import-untyped]
+    from django.conf import settings
     from django.urls import URLResolver, get_resolver  # type: ignore[import-untyped]
     from django.urls.converters import IntConverter, StringConverter  # type: ignore[import-untyped]
     from django.urls.resolvers import RoutePattern  # type: ignore[import-untyped]
@@ -272,12 +333,67 @@ def _render(scan: dict[str, Any]) -> dict[str, str]:
     pieces = [
         """# Generated by Sanka DRF-to-Flask. Repair the gaps listed in migration-gaps.json.
 import os
+import json
+import datetime
+import decimal
+import uuid
 os.environ["DJANGO_SETTINGS_MODULE"] = "sanka_flask_settings"
 import django
 django.setup()
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
+from flask.json.provider import DefaultJSONProvider
+from django.db.models.query import QuerySet
+
+class _OrmJSON(DefaultJSONProvider):
+    @staticmethod
+    def default(value):
+        if isinstance(value, decimal.Decimal):
+            return float(value)
+        if isinstance(value, datetime.datetime):
+            text = value.isoformat()
+            return text[:-6] + "Z" if text.endswith("+00:00") else text
+        if isinstance(value, datetime.time) and value.utcoffset() is not None:
+            raise ValueError("JSON can't represent timezone-aware times.")
+        if isinstance(value, (datetime.date, datetime.time)):
+            return value.isoformat()
+        if isinstance(value, datetime.timedelta):
+            return str(value.total_seconds())
+        if isinstance(value, uuid.UUID):
+            return str(value)
+        if isinstance(value, QuerySet):
+            return list(value)
+        return DefaultJSONProvider.default(value)
+
 app = Flask(__name__)
+app.json = _OrmJSON(app)
 app.json.sort_keys = False
+
+class _RequestError(Exception):
+    def __init__(self, detail, status):
+        self.detail, self.status = detail, status
+
+@app.errorhandler(_RequestError)
+def _request_error(error):
+    return Response({"detail": error.detail}, status=error.status)
+
+def _json_data():
+    if hasattr(g, "_sanka_json_data"):
+        return g._sanka_json_data
+    raw = request.get_data()
+    if not raw:
+        g._sanka_json_data = {}
+        return g._sanka_json_data
+    if request.mimetype != "application/json":
+        detail = 'Unsupported media type "' + (request.content_type or '') + '" in request.'
+        raise _RequestError(detail, 415)
+    def reject_constant(value):
+        raise ValueError("Out of range float values are not JSON compliant: " + repr(value))
+    try:
+        decoded = raw.decode(request.mimetype_params.get("charset", "utf-8"))
+        g._sanka_json_data = json.loads(decoded, parse_constant=reject_constant)
+        return g._sanka_json_data
+    except (ValueError, UnicodeError) as error:
+        raise _RequestError("JSON parse error - " + str(error), 400) from error
 
 def _query_get(key, default=None):
     values = request.args.getlist(key)
@@ -451,7 +567,8 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             data=cast(dict[str, JsonValue], data),
             artifacts=[str(artifact.resolve())],
             limitations=[
-                "Only stateless JSON APIView handlers are converted. "
+                "Only recognized JSON APIView handlers and isolated ORM dependencies "
+                "are converted. "
                 "Review migration-gaps.json and independently verify all behavior."
             ],
         )
