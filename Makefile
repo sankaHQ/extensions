@@ -18,7 +18,7 @@ build-release:
 
 update-marketplace-hashes:
 	uv run python scripts/build_release.py --output-dir dist
-	uv run python scripts/update_marketplace_hashes.py --dist dist --release-tag extensions-v0.1.0a13
+	uv run python scripts/update_marketplace_hashes.py --dist dist --release-tag extensions-v0.1.0a14
 	uv run python scripts/check_release_artifacts.py dist
 
 .PHONY: converter-bench

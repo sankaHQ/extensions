@@ -17,7 +17,7 @@ jobs:
           version: "0.11.21"
           python-version: "3.12"
           enable-cache: true
-      - run: test "$GITHUB_REF_TYPE" = tag && test "$GITHUB_REF_NAME" = extensions-v0.1.0a13
+      - run: test "$GITHUB_REF_TYPE" = tag && test "$GITHUB_REF_NAME" = extensions-v0.1.0a14
       - run: uv sync --frozen --all-packages
       - run: make check
       - run: uv run python scripts/build_release.py --output-dir dist
@@ -48,6 +48,7 @@ jobs:
           mkdir release-assets
           cp marketplace.json release-assets/marketplace.json
           cp packages/sanka-extension-drf-to-fastapi/extension.json release-assets/sanka-extension-drf-to-fastapi.json
+          cp packages/sanka-extension-drf-to-flask/extension.json release-assets/sanka-extension-drf-to-flask.json
           cp packages/sanka-connector-markdown/extension.json release-assets/sanka-connector-markdown.json
           cp packages/sanka-connector-csv/extension.json release-assets/sanka-connector-csv.json
           cp packages/sanka-connector-sqlite/extension.json release-assets/sanka-connector-sqlite.json

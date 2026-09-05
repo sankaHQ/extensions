@@ -19,6 +19,7 @@ without adding those dependencies to the core runtime.
 | `sanka-connector-postgres` | PostgreSQL source and destination connector |
 | `sanka-connector-sqlite` | SQLite source and destination connector |
 | `sanka-extension-sdk` | Dependency-free `sanka-extension/v1` subprocess contract |
+| `sanka-extension-drf-to-flask` | Native Flask generation for stateless JSON APIViews, with explicit manual gaps |
 | `sanka-extension-drf-to-fastapi` | Executable Django REST Framework to FastAPI migration extension |
 
 Connector packages register one `sanka.connectors` Python entry point. The
