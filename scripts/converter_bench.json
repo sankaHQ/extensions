@@ -1,0 +1,86 @@
+{
+  "benchmark_revision": "707f469f6ceb5c16feefb2b32682b8d9186b9079",
+  "route_envelope": {
+    "drf-fastapi-001": [7, 7],
+    "drf-fastapi-002": [7, 7],
+    "drf-fastapi-003": [7, 7],
+    "drf-fastapi-004": [7, 13],
+    "drf-fastapi-005": [1, 8],
+    "drf-fastapi-006": [1, 7],
+    "drf-fastapi-007": [7, 7],
+    "drf-fastapi-008": [7, 29],
+    "drf-fastapi-009": [0, 12],
+    "drf-fastapi-010": [0, 5],
+    "drf-fastapi-011": [0, 5]
+  },
+  "partial_evaluation_floors": {
+    "drf-fastapi-004": {
+      "required_gates": [
+        "deterministic",
+        "native_target",
+        "regression_tests",
+        "side_effect_parity",
+        "source_qualified",
+        "target_boot"
+      ],
+      "metrics": {
+        "behavioral_parity": [5, 17],
+        "database_parity": [10, 17],
+        "native_compliance": [17, 17],
+        "route_coverage": [17, 17],
+        "side_effect_parity": [17, 17]
+      }
+    },
+    "drf-fastapi-005": {
+      "required_gates": [
+        "deterministic",
+        "native_target",
+        "regression_tests",
+        "side_effect_parity",
+        "source_qualified",
+        "target_boot"
+      ],
+      "metrics": {
+        "behavioral_parity": [0, 31],
+        "database_parity": [24, 31],
+        "native_compliance": [31, 31],
+        "route_coverage": [31, 31],
+        "side_effect_parity": [31, 31]
+      }
+    },
+    "drf-fastapi-006": {
+      "required_gates": [
+        "deterministic",
+        "native_target",
+        "regression_tests",
+        "side_effect_parity",
+        "source_qualified",
+        "target_boot"
+      ],
+      "metrics": {
+        "behavioral_parity": [0, 32],
+        "database_parity": [22, 32],
+        "native_compliance": [32, 32],
+        "route_coverage": [32, 32],
+        "side_effect_parity": [32, 32]
+      }
+    },
+    "drf-fastapi-008": {
+      "required_gates": [
+        "deterministic",
+        "native_target",
+        "regression_tests",
+        "side_effect_parity",
+        "source_qualified",
+        "target_boot"
+      ],
+      "metrics": {
+        "behavioral_parity": [6, 32],
+        "database_parity": [23, 32],
+        "native_compliance": [32, 32],
+        "route_coverage": [32, 32],
+        "side_effect_parity": [32, 32]
+      }
+    }
+  }
+}

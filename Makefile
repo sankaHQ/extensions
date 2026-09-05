@@ -20,3 +20,10 @@ update-marketplace-hashes:
 	uv run python scripts/build_release.py --output-dir dist
 	uv run python scripts/update_marketplace_hashes.py --dist dist --release-tag extensions-v0.1.0a13
 	uv run python scripts/check_release_artifacts.py dist
+
+.PHONY: converter-bench
+
+BENCH_DIR ?= ../bench
+converter-bench:
+	@test -n "$(CONVERTER_BENCH_OUTPUT)" || { echo 'Set CONVERTER_BENCH_OUTPUT to a private artifact path outside this repository.' >&2; exit 2; }
+	uv run python scripts/run_converter_bench.py --bench-dir "$(BENCH_DIR)" --output "$(CONVERTER_BENCH_OUTPUT)"
