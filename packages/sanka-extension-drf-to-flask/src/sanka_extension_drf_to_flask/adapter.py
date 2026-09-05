@@ -85,18 +85,12 @@ def _settings(root: Path, config: dict[str, JsonValue]) -> str:
 
 
 def _flask_path(raw: str) -> str | None:
-    raw = raw.removeprefix("^").removesuffix("$").removesuffix(r"\Z")
-    raw = re.sub(r"\(\?P<(\w+)>\[\^/\.\]\+\)", r"<\1>", raw)
-    raw = re.sub(r"\(\?P<(\w+)>\[0-9\]\+\)", r"<int:\1>", raw)
-    # Django str and Flask string converters have the same single-segment scope.
+    # Regex URL patterns and converters with different matching semantics are manual gaps.
     raw = raw.replace("<str:", "<string:")
     if re.search(r"[\\^$?*+()\[\]{}|]", raw):
         return None
     converters = re.findall(r"<(?:(\w+):)?\w+>", raw)
-    if any(c not in {"", "int", "string", "slug", "uuid", "path"} for c in converters):
-        return None
-    # Flask has no slug converter; accepting arbitrary strings would widen the source route.
-    if "slug" in converters:
+    if any(c not in {"", "int", "string"} for c in converters):
         return None
     return "/" + raw.lstrip("/")
 
@@ -216,14 +210,24 @@ def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
     django.setup()
     from django.conf import settings  # type: ignore[import-untyped]
     from django.urls import URLResolver, get_resolver  # type: ignore[import-untyped]
+    from django.urls.converters import IntConverter, StringConverter  # type: ignore[import-untyped]
+    from django.urls.resolvers import RoutePattern  # type: ignore[import-untyped]
 
     routes: list[dict[str, Any]] = []
 
-    def visit(patterns: Any, prefix: str = "") -> None:
+    def visit(patterns: Any, prefix: str = "", parent_supported: bool = True) -> None:
         for pattern in patterns:
             raw = prefix + str(pattern.pattern)
+            supported = (
+                parent_supported
+                and isinstance(pattern.pattern, RoutePattern)
+                and all(
+                    type(converter) in {IntConverter, StringConverter}
+                    for converter in pattern.pattern.converters.values()
+                )
+            )
             if isinstance(pattern, URLResolver):
-                visit(pattern.url_patterns, raw)
+                visit(pattern.url_patterns, raw, supported)
                 continue
             callback = pattern.callback
             view = getattr(callback, "cls", None)
@@ -233,7 +237,7 @@ def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
                 if actions
                 else [m for m in getattr(view, "http_method_names", []) if hasattr(view, m)]
             )
-            path = _flask_path(raw)
+            path = _flask_path(raw) if supported else None
             for method in methods or ["get"]:
                 source, reason = (
                     _handler(view, method.upper()) if view else (None, "non-DRF callback")

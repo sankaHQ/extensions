@@ -76,6 +76,8 @@ def call(root: Path, command: str, config=None, reviewed=None):
 
 def test_native_lifecycle_and_explicit_gaps(tmp_path: Path) -> None:
     project(tmp_path)
+    assert call(tmp_path, "test")["outcome"] == "error"
+    assert call(tmp_path, "verify")["outcome"] == "error"
     scan = call(tmp_path, "scan")
     assert scan["outcome"] == "success", scan
     plan = call(tmp_path, "plan")["data"]
@@ -145,3 +147,24 @@ def test_apply_rejects_stale_or_unsafe_plan(tmp_path: Path, mutation: str) -> No
         config["bench_candidate"] = "linked/escape"
     assert call(tmp_path, "apply", config, "core-reviewed")["outcome"] == "error"
     assert not (tmp_path / ".sanka/output/flask").exists()
+
+
+def test_non_equivalent_url_matchers_remain_manual_gaps(tmp_path: Path) -> None:
+    project(tmp_path)
+    with (tmp_path / "urls.py").open("a") as handle:
+        handle.write("\nfrom django.urls import re_path\n")
+        handle.write(
+            'urlpatterns += [re_path(r"^regex/(?P<quantity>[0-9]+)/$", Quote.as_view()), '
+            'path("uuid/<uuid:quantity>/", Quote.as_view()), '
+            'path("path/<path:quantity>/", Quote.as_view())]\n'
+        )
+    scan = call(tmp_path, "scan")["data"]
+    routes = [
+        route
+        for route in scan["routes"]
+        if route["source_path"].startswith(("^regex", "uuid/", "path/"))
+    ]
+    assert routes
+    assert all(
+        route["path"] is None and route["classification"] == "needs_adaptation" for route in routes
+    )

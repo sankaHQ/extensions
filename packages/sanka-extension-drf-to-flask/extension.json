@@ -50,7 +50,7 @@
     },
     {
       "name": "sanka_extension_drf_to_flask-0.1.0a1-py3-none-any.whl",
-      "sha256": "1f26c96717f82e5e01818c97bcc60b6516a267f2cf375ce1a0b27833371fa19d",
+      "sha256": "21ef75e0d0332d099f65cddd35e8cd5ecccb6ba253aea441fe098ae947a953c4",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a14/sanka_extension_drf_to_flask-0.1.0a1-py3-none-any.whl"
     }
   ]
