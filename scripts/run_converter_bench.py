@@ -31,6 +31,15 @@ from sanka_extension_sdk import (
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "scripts" / "converter_bench.json"
 EXTENSION = ROOT / "packages" / "sanka-extension-drf-to-fastapi"
+CONVERTER_SOURCES = (
+    EXTENSION / "src",
+    ROOT / "packages/sanka-extension-sdk/src",
+    ROOT / "packages/sanka-drf-replay/src",
+)
+
+
+def converter_pythonpath() -> str:
+    return os.pathsep.join(map(str, CONVERTER_SOURCES))
 
 
 def git(root: Path, *args: str) -> str:
@@ -43,8 +52,7 @@ def converter_input_sha256() -> str:
         Path(__file__).resolve(),
         ROOT / "uv.lock",
         EXTENSION / "extension.json",
-        *EXTENSION.joinpath("src").rglob("*.py"),
-        *ROOT.joinpath("packages/sanka-extension-sdk/src").rglob("*.py"),
+        *(path for source in CONVERTER_SOURCES for path in source.rglob("*.py")),
     }
     digest = hashlib.sha256()
     for path in sorted(paths):
@@ -200,12 +208,7 @@ def run_task(task: str, bench: Path, python: Path, manifest: dict[str, Any]) -> 
         # Use the benchmark's pinned Django/DRF environment for both source
         # inspection and evaluation, loading only this checkout's extension/SPI.
         environment["PYTHONSAFEPATH"] = "1"
-        environment["PYTHONPATH"] = os.pathsep.join(
-            [
-                str(EXTENSION / "src"),
-                str(ROOT / "packages" / "sanka-extension-sdk" / "src"),
-            ]
-        )
+        environment["PYTHONPATH"] = converter_pythonpath()
         request = ExtensionRequest(
             request_id=f"{task}-scan",
             command="scan",
