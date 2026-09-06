@@ -18,6 +18,7 @@ the bench's fixed boundary.
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import os
 import shutil
@@ -109,6 +110,14 @@ def _validated_request(item: object, label: str, *, require_id: bool) -> dict[st
     response_body = item.get("response_body")
     if response_body not in (None, "base64"):
         raise ReplayError(f"{label}.response_body must be omitted or 'base64'")
+    if "expected_source_status" in item:
+        if not require_id:
+            raise ReplayError(
+                f"{label}.expected_source_status is supported only on top-level scenarios"
+            )
+        expected = item["expected_source_status"]
+        if type(expected) is not int or not 100 <= expected <= 599:
+            raise ReplayError(f"{label}.expected_source_status must be an integer HTTP status")
     setup_items = item.get("setup") or []
     if not isinstance(setup_items, list):
         raise ReplayError(f"{label}.setup must be an array of requests")
@@ -126,6 +135,11 @@ def _validated_request(item: object, label: str, *, require_id: bool) -> dict[st
         "capture_headers": [str(name).lower() for name in capture],
         "response_body": response_body,
         "setup": setup,
+        **(
+            {"expected_source_status": item["expected_source_status"]}
+            if "expected_source_status" in item
+            else {}
+        ),
     }
     if require_id:
         identifier = item.get("id")
@@ -141,13 +155,16 @@ def _validated_request(item: object, label: str, *, require_id: bool) -> dict[st
 # Scan-derived edge probes
 
 
-def edge_probes_from_scan(scan: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Derive read-only edge scenarios from a scan artifact's route list.
+def edge_probes_from_scan(
+    scan: Mapping[str, Any], scenarios: Sequence[Mapping[str, Any]] = ()
+) -> list[dict[str, Any]]:
+    """Derive edge requests, reusing a matching scenario's headers and fixture setup.
 
     Per concrete path: OPTIONS (Allow), one method the source does not declare
     (405 and Allow), the trailing-slash variant (redirect or 404 with Location),
     and, for single-parameter detail paths, a request for an object that does not
-    exist (404 body). None of these mutate state.
+    exist (404 body). GET routes also receive a HEAD probe. Only provided setup
+    requests may mutate fixture state. Context never crosses route boundaries.
     """
     routes = scan.get("routes")
     if not isinstance(routes, list):
@@ -168,10 +185,13 @@ def edge_probes_from_scan(scan: Mapping[str, Any]) -> list[dict[str, Any]]:
     probes: list[dict[str, Any]] = []
     for path in sorted(methods_by_path):
         methods = methods_by_path[path]
-        concrete = _concrete_path(path)
+        context = _probe_context(path, scenarios)
+        concrete = str(context["path"]).split("?", 1)[0] if context else _concrete_path(path)
         if concrete is None:
             continue
-        probes.append(_edge("options", "OPTIONS", concrete, path))
+        probes.append(_edge("options", "OPTIONS", concrete, path, context))
+        if "GET" in methods:
+            probes.append(_edge("head", "HEAD", concrete, path, context))
         unsupported = next(
             (
                 candidate
@@ -181,12 +201,34 @@ def edge_probes_from_scan(scan: Mapping[str, Any]) -> list[dict[str, Any]]:
             None,
         )
         if unsupported is not None:
-            probes.append(_edge("method-not-allowed", unsupported, concrete, path))
+            probes.append(_edge("method-not-allowed", unsupported, concrete, path, context))
         variant = concrete[:-1] if concrete.endswith("/") and len(concrete) > 1 else concrete + "/"
-        probes.append(_edge("slash-variant", "GET", variant, path))
-        if "{" in path:
-            probes.append(_edge("missing-object", "GET", concrete, path))
+        probes.append(_edge("slash-variant", "GET", variant, path, context))
+        missing = _concrete_path(path)
+        if "{" in path and missing is not None:
+            probes.append(_edge("missing-object", "GET", missing, path, context))
     return probes
+
+
+def _probe_context(route: str, scenarios: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    route_parts = route.split("/")
+    matching = []
+    for scenario in scenarios:
+        parts = str(scenario.get("path", "")).split("?", 1)[0].split("/")
+        if len(parts) == len(route_parts) and all(
+            wanted == actual or (wanted.startswith("{") and wanted.endswith("}") and actual)
+            for wanted, actual in zip(route_parts, parts, strict=True)
+        ):
+            matching.append(scenario)
+    # ponytail: one context per route; use explicit scenarios for other auth/tenant variants.
+    return min(
+        matching,
+        key=lambda item: (
+            item.get("expected_source_status") not in range(200, 400),
+            not bool(item.get("headers")),
+        ),
+        default=None,
+    )
 
 
 def _concrete_path(path: str) -> str | None:
@@ -204,17 +246,27 @@ def _concrete_path(path: str) -> str | None:
     return "/".join(segments) if substituted == 1 else None
 
 
-def _edge(kind: str, method: str, path: str, source_path: str) -> dict[str, Any]:
+def _edge(
+    kind: str,
+    method: str,
+    path: str,
+    source_path: str,
+    context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    context = context or {}
     return {
         "id": f"edge:{kind}:{method} {path}",
         "method": method,
         "path": path,
-        "headers": {},
+        "headers": dict(context.get("headers") or {}),
         "multipart": None,
-        "capture_headers": list(EDGE_HEADERS),
+        "capture_headers": list(
+            dict.fromkeys([*EDGE_HEADERS, *context.get("capture_headers", [])])
+        ),
         "response_body": None,
-        "setup": [],
+        "setup": copy.deepcopy(context.get("setup") or []),
         "generated_from": source_path,
+        **({"context_from": context["id"]} if context.get("id") else {}),
     }
 
 
@@ -703,6 +755,9 @@ def replay(
         "matched": len(matched),
         "mismatched": len(reports) - len(matched),
         "status_mismatches": sum(1 for report in reports if not report["status_match"]),
+        "source_expectation_mismatches": sum(
+            1 for report in reports if not report.get("source_expectation_match", True)
+        ),
         "body_mismatches": sum(1 for report in reports if not report["body_match"]),
         "header_mismatches": sum(1 for report in reports if not report["headers_match"]),
         "database_mismatches": sum(1 for report in reports if not report["database_match"]),
@@ -715,8 +770,8 @@ def replay(
     warnings = []
     if all(report["source"]["status"] >= 400 for report in reports):
         warnings.append(
-            "Only source error responses were exercised. Seed realistic records with --seed "
-            "and check intended success paths; matching errors do not establish completeness."
+            "Only source error responses were exercised. Use --seed and expected_source_status "
+            "for intended success paths; matching errors do not establish completeness."
         )
     if any(
         report.get("generated_from") and report["source"]["status"] in {401, 403}
@@ -843,6 +898,10 @@ def _replay_one(
     native = dict(candidate_result.get("native") or {})
     native_compliant = bool(native.get("is_apiroute")) and bool(native.get("endpoint_in_candidate"))
     status_match = int(source_result["status"]) == int(candidate_result["status"])
+    expected_source_status = scenario.get("expected_source_status")
+    source_expectation_match = (
+        expected_source_status is None or int(source_result["status"]) == expected_source_status
+    )
     if target == "flask":
         native_compliant = (
             bool(native.get("is_flask"))
@@ -862,7 +921,13 @@ def _replay_one(
         "id": identifier,
         "method": scenario["method"],
         "path": scenario["path"],
-        "match": status_match and body_match and headers_match and database_match,
+        "match": source_expectation_match
+        and status_match
+        and body_match
+        and headers_match
+        and database_match,
+        "expected_source_status": expected_source_status,
+        "source_expectation_match": source_expectation_match,
         "status_match": status_match,
         "body_match": body_match,
         "headers_match": headers_match,
@@ -888,6 +953,8 @@ def _replay_one(
     }
     if scenario.get("generated_from"):
         report["generated_from"] = scenario["generated_from"]
+    if scenario.get("context_from"):
+        report["context_from"] = scenario["context_from"]
     return report
 
 
@@ -897,12 +964,19 @@ def _summary_lines(summary: Mapping[str, Any], reports: Sequence[Mapping[str, An
         f"(status {summary['status_mismatches']}, body {summary['body_mismatches']}, "
         f"headers {summary['header_mismatches']}, "
         f"database {summary['database_mismatches']} mismatches; "
+        f"source expectations {summary.get('source_expectation_mismatches', 0)}; "
         f"{summary['non_native']} without native candidate routing)"
     ]
     for report in reports:
         if report["match"] and report["native"]["compliant"]:
             continue
         problems: list[str] = []
+        if not report.get("source_expectation_match", True):
+            problems.append(
+                f"source expected {report['expected_source_status']}, "
+                f"got {report['source']['status']}; "
+                "check fixtures/authentication before changing the candidate"
+            )
         if not report["status_match"]:
             problems.append(
                 f"status {report['source']['status']} vs {report['candidate']['status']}"

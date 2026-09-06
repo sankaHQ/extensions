@@ -47,7 +47,7 @@
   "wheels": [
     {
       "name": "sanka_drf_replay-0.1.0a1-py3-none-any.whl",
-      "sha256": "b16a6f7403a309d7f5a6031ea24179f84569aa7fd31e6267353675ff410fccf0",
+      "sha256": "7989dd303d7d665eb06f1a170c1ad0b459c5b9c502b2ceea78d6dba74eb28d64",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a15/sanka_drf_replay-0.1.0a1-py3-none-any.whl"
     },
     {
@@ -57,7 +57,7 @@
     },
     {
       "name": "sanka_extension_drf_to_fastapi-0.1.0a4-py3-none-any.whl",
-      "sha256": "4cfa5ab7c65ed9aa69f46958779db3076ffd83ce0e721fc3abfef899c268e532",
+      "sha256": "2bf70f7499628a2c20ad120d03354e13333f73ff671dbd805b292e0a9bb59437",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a15/sanka_extension_drf_to_fastapi-0.1.0a4-py3-none-any.whl"
     }
   ]

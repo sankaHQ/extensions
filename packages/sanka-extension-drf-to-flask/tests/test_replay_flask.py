@@ -72,6 +72,15 @@ def echo():
     assert len(full["scenarios"]) == 4
     assert not (tmp_path / "unused.sqlite3").exists()
     assert not list(candidate.glob("*.sqlite3"))
+    # Parity alone must not pass when the caller's intended source status was not reached.
+    (tmp_path / "scenarios.json").write_text(
+        json.dumps([{**scenarios[0], "expected_source_status": 201}])
+    )
+    invalid_coverage = call(tmp_path, "verify", config)
+    assert invalid_coverage["outcome"] == "error", invalid_coverage
+    assert invalid_coverage["data"]["summary"]["source_expectation_mismatches"] == 1
+    assert "expected 201" in invalid_coverage["data"]["failures"][0]["message"]
+    (tmp_path / "scenarios.json").write_text(json.dumps(scenarios))
     for before, after, dimension in [
         ('"flag": True', '"flag": 1', "body_mismatches"),
         ('"X-Check": "yes"', '"X-Check": "no"', "header_mismatches"),

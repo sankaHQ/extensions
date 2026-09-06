@@ -506,7 +506,7 @@ def _verify(request: ExtensionRequest) -> ExtensionResponse:
         for route in scan.get("routes", []):
             if isinstance(route.get("path"), str):
                 route["path"] = re.sub(r"<(?:[^:>]+:)?([^>]+)>", r"{\1}", route["path"])
-        scenarios += edge_probes_from_scan(scan)
+        scenarios += edge_probes_from_scan(scan, scenarios)
     ignored = config.get("ignore_tables", list(DEFAULT_IGNORED_TABLES))
     if isinstance(ignored, str):
         ignored = [ignored]
@@ -533,7 +533,7 @@ def _verify(request: ExtensionRequest) -> ExtensionResponse:
             failure_response(
                 request,
                 code="SANKA_EXTENSION_REPLAY_MISMATCH",
-                message="scenario replay found differences between source and candidate",
+                message="scenario replay failed source expectations or source/candidate parity",
                 details=data,
             ),
             data=data,

@@ -359,7 +359,7 @@ def _handle_replay(request: ExtensionRequest) -> ExtensionResponse:
                     "--edge-probes needs a scan artifact; run `sanka scan` first or omit the flag"
                 )
             scan_payload = json.loads(scan_path.read_text(encoding="utf-8"))
-            scenarios = [*scenarios, *edge_probes_from_scan(scan_payload)]
+            scenarios = [*scenarios, *edge_probes_from_scan(scan_payload, scenarios)]
         report = replay(
             Path(request.project_root),
             scenarios,
@@ -394,7 +394,7 @@ def _handle_replay(request: ExtensionRequest) -> ExtensionResponse:
             failure_response(
                 request,
                 code="SANKA_EXTENSION_REPLAY_MISMATCH",
-                message="scenario replay found differences between the source and the candidate",
+                message="scenario replay failed source expectations or source/candidate parity",
                 details=data,
             ),
             data=data,

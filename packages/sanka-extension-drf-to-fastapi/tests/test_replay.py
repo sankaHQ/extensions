@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 import sqlite3
@@ -93,6 +94,56 @@ def test_edge_probes_cover_options_unsupported_method_slash_and_missing_object()
         probe["capture_headers"] == ["allow", "location", "www-authenticate"] for probe in probes
     )
     assert all(probe["generated_from"] for probe in probes)
+
+
+def test_edge_probes_reuse_only_matching_request_context() -> None:
+    scan = {
+        "routes": [
+            {"method": "GET", "path": "/items/{identifier}/"},
+            {"method": "GET", "path": "/unrelated/"},
+        ]
+    }
+    scenarios = [
+        {"id": "unauthenticated", "method": "GET", "path": "/items/7/", "headers": {}},
+        {
+            "id": "success",
+            "method": "GET",
+            "path": "/items/7/?page=2",
+            "headers": {"authorization": "fixture-token", "x-tenant": "a"},
+            "expected_source_status": 200,
+            "capture_headers": ["etag"],
+            "setup": [{"method": "POST", "path": "/items/", "body": {"name": "item"}}],
+        },
+    ]
+    original = copy.deepcopy(scenarios)
+    probes = edge_probes_from_scan(scan, scenarios)
+    selected = {p["method"]: p for p in probes if p["path"] == "/items/7/"}
+    assert {"HEAD", "OPTIONS", "TRACE"} <= selected.keys()
+    for probe in selected.values():
+        assert probe["headers"] == {"authorization": "fixture-token", "x-tenant": "a"}
+        assert probe["setup"] == scenarios[1]["setup"]
+        assert probe["context_from"] == "success"
+        assert "etag" in probe["capture_headers"]
+        assert "body" not in probe and "expected_source_status" not in probe
+    assert all(not p["headers"] for p in probes if p["generated_from"] == "/unrelated/")
+    selected["HEAD"]["headers"].clear()
+    assert selected["OPTIONS"]["headers"] and scenarios == original
+
+
+def test_expected_source_status_is_validated_instead_of_silently_ignored(tmp_path: Path) -> None:
+    path = tmp_path / "scenarios.json"
+    scenario = {"id": "read", "method": "GET", "path": "/items/1/"}
+    path.write_text(json.dumps([{**scenario, "expected_source_status": 200}]))
+    assert load_scenarios(path)[0]["expected_source_status"] == 200
+    for value in (True, None, "200", 99, 600):
+        path.write_text(json.dumps([{**scenario, "expected_source_status": value}]))
+        with pytest.raises(ReplayError, match="expected_source_status"):
+            load_scenarios(path)
+    path.write_text(
+        json.dumps([{**scenario, "setup": [{**scenario, "expected_source_status": 201}]}])
+    )
+    with pytest.raises(ReplayError, match="top-level"):
+        load_scenarios(path)
 
 
 def test_snapshot_and_diff_report_row_differences(tmp_path: Path) -> None:
