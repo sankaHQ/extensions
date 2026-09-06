@@ -64,6 +64,8 @@ def echo():
     result = call(tmp_path, "verify", config)
     assert result["outcome"] == "success", result
     assert result["data"]["summary"]["matched"] == 4
+    assert result["data"]["summary"]["source_statuses"] == {"200": 4}
+    assert result["data"]["warnings"] == []
     assert result["data"]["failures"] == []
     assert "scenarios" not in result["data"]
     full = json.loads(Path(result["data"]["report_path"]).read_text())
@@ -102,6 +104,8 @@ def echo():
     (candidate / "target_app.py").write_text(code)
     malformed = call(tmp_path, "verify", config)
     assert malformed["data"]["summary"]["body_mismatches"] == 1
+    assert malformed["data"]["summary"]["source_statuses"] == {"400": 1}
+    assert "--seed" in malformed["data"]["warnings"][0]
     # A settings module ignoring the isolation variable must fail before touching its DB.
     with (tmp_path / "settings.py").open("a") as handle:
         handle.write('DATABASES["default"]["NAME"]="do-not-touch.sqlite3"\n')

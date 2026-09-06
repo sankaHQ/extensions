@@ -374,3 +374,33 @@ def test_replay_cleans_temporary_database_on_failure(tmp_path: Path) -> None:
     ):
         replay(tmp_path, [{"id": "one", "method": "GET", "path": "/"}], settings_module="settings")
     assert not temp.exists()
+
+
+def test_matching_errors_expose_coverage_warnings(tmp_path: Path) -> None:
+    (tmp_path / "target_app.py").touch()
+    reports = [
+        {
+            "id": str(status),
+            "match": True,
+            "status_match": True,
+            "body_match": True,
+            "headers_match": True,
+            "database_match": True,
+            "native": {"compliant": True},
+            "source": {"status": status},
+            **({"generated_from": "/private/"} if status == 401 else {}),
+        }
+        for status in (404, 401)
+    ]
+    with (
+        patch.object(replay_module, "_run_side", return_value={}),
+        patch.object(replay_module, "_replay_one", side_effect=reports),
+    ):
+        report = replay(tmp_path, [{}, {}], settings_module="settings")
+    assert report["ok"]  # Error-only parity is valid; it is not successful-path coverage.
+    assert report["summary"]["source_statuses"] == {"401": 1, "404": 1}
+    compact = replay_module.save_report(report, tmp_path / "artifacts")
+    assert len(compact["warnings"]) == 2
+    assert "--seed" in compact["warnings"][0]
+    assert "authenticated" in compact["warnings"][1]
+    assert json.loads(Path(compact["report_path"]).read_text())["warnings"] == compact["warnings"]

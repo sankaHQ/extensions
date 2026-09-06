@@ -708,7 +708,24 @@ def replay(
         "database_mismatches": sum(1 for report in reports if not report["database_match"]),
         "non_native": sum(1 for report in reports if not report["native"]["compliant"]),
         "generated_probes": sum(1 for report in reports if report.get("generated_from")),
+        "source_statuses": dict(
+            sorted(Counter(str(report["source"]["status"]) for report in reports).items())
+        ),
     }
+    warnings = []
+    if all(report["source"]["status"] >= 400 for report in reports):
+        warnings.append(
+            "Only source error responses were exercised. Seed realistic records with --seed "
+            "and check intended success paths; matching errors do not establish completeness."
+        )
+    if any(
+        report.get("generated_from") and report["source"]["status"] in {401, 403}
+        for report in reports
+    ):
+        warnings.append(
+            "Generated probes stopped at authentication or authorization. Add authenticated "
+            "scenarios to exercise the intended handlers, including OPTIONS."
+        )
     return {
         "schema": REPLAY_SCHEMA,
         "ok": summary["mismatched"] == 0 and summary["non_native"] == 0,
@@ -723,6 +740,7 @@ def replay(
         },
         "headers": "all" if all_headers else "declared",
         "summary": summary,
+        "warnings": warnings,
         "scenarios": reports,
         "summary_lines": _summary_lines(summary, reports),
     }
@@ -938,6 +956,7 @@ def save_report(report: Mapping[str, Any], artifact_root: Path) -> dict[str, Any
         "schema": report["schema"],
         "ok": report["ok"],
         "summary": report["summary"],
+        "warnings": report.get("warnings", []),
         "report_path": str(path),
         "failures": [
             {"id": item["id"], "message": line[:2000]}
