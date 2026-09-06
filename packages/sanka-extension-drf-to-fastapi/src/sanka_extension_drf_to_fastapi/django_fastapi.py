@@ -4096,6 +4096,11 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
         lines.append(f"{var} = native.resource({_py_str(view)})")
     if resource_var:
         lines.append("")
+    explicit_head_paths = {
+        str(entry["path"])
+        for entry in [*manifest["routes"], *manifest.get("unsupported_routes", [])]
+        if str(entry["method"]).upper() == "HEAD"
+    }
     for route in manifest["routes"]:
         method = str(route["method"]).upper()
         path = str(route["path"])
@@ -4105,6 +4110,8 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
             raise FrameworkMigrationError(f"unsupported native HTTP method: {method}")
         if str(route.get("strategy")) == ROUTE_STRATEGY_NATIVE_API_ROOT:
             func = _unique_ident("api_root", used_funcs)
+            if method == "GET" and path not in explicit_head_paths:
+                lines.append(f"@app.head({_py_str(path)}, include_in_schema=False)")
             lines.extend(
                 [
                     f"@app.{decorator}({_py_str(path)})",
@@ -4129,6 +4136,8 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
         path_parameters = re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", path)
         signature = ", ".join(["request: Request", *(f"{name}: str" for name in path_parameters)])
         call = f"    return await native.handle({var}, {_py_str(operation)}, request)"
+        if method == "GET" and path not in explicit_head_paths:
+            lines.append(f"@app.head({_py_str(runtime_path)}, include_in_schema=False)")
         lines.extend(
             [
                 f"@app.{decorator}({_py_str(runtime_path)})",

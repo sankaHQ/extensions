@@ -51,11 +51,11 @@ MIGRATION_MANIFEST: dict[str, Any] = {
     "schema_version": "sanka-extension-manifest/v2",
     "kind": "migration",
     "id": "sanka/drf-to-fastapi",
-    "version": "0.1.0a3",
+    "version": "0.1.0a4",
     "protocol_version": "sanka-extension/v1",
     "distribution": {
         "name": "sanka-extension-drf-to-fastapi",
-        "version": "0.1.0a3",
+        "version": "0.1.0a4",
         "executable": "sanka-extension-drf-to-fastapi",
     },
     "commands": ["apply", "plan", "scan", "test", "verify"],
@@ -147,12 +147,12 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
 FLASK_MANIFEST = {
     **MIGRATION_MANIFEST,
     "id": "sanka/drf-to-flask",
-    "version": "0.1.0a1",
-    "commands": ["apply", "plan", "scan"],
+    "version": "0.1.0a2",
+    "commands": ["apply", "plan", "scan", "verify"],
     "targets": ["flask"],
     "distribution": {
         "name": "sanka-extension-drf-to-flask",
-        "version": "0.1.0a1",
+        "version": "0.1.0a2",
         "executable": "sanka-extension-drf-to-flask",
     },
 }
@@ -289,7 +289,7 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
         ]
         if versions.get(name) != version:
             errors.append(f"{name} wheel version {version} does not match package version")
-        if name == "sanka-connector-sdk" or name == "sanka-extension-sdk":
+        if name in {"sanka-connector-sdk", "sanka-extension-sdk", "sanka-drf-replay"}:
             if requirements or entries:
                 errors.append(f"{name} SDK wheel must have no dependencies or entry points")
         elif name.startswith("sanka-connector-"):
@@ -299,7 +299,10 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
             if connector_entries != CONNECTOR_ENTRY_POINTS[name]:
                 errors.append(f"{name} wheel has no exact connector entry point")
         elif name in {"sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask"}:
-            if requirements != ["sanka-extension-sdk==0.1.0a1"]:
+            if sorted(requirements) != [
+                "sanka-drf-replay==0.1.0a1",
+                "sanka-extension-sdk==0.1.0a1",
+            ]:
                 errors.append(f"{name} must depend exactly on sanka-extension-sdk==0.1.0a1")
             if _entry_points(entries, "console_scripts") != {
                 name: f"{name.replace('-', '_')}.__main__:main"

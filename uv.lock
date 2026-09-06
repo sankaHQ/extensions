@@ -15,6 +15,7 @@ members = [
     "sanka-connector-postgres",
     "sanka-connector-sdk",
     "sanka-connector-sqlite",
+    "sanka-drf-replay",
     "sanka-extension-drf-to-fastapi",
     "sanka-extension-drf-to-flask",
     "sanka-extension-sdk",
@@ -1145,26 +1146,39 @@ dependencies = [
 requires-dist = [{ name = "sanka-connector-sdk", editable = "packages/sanka-connector-sdk" }]
 
 [[package]]
+name = "sanka-drf-replay"
+version = "0.1.0a1"
+source = { editable = "packages/sanka-drf-replay" }
+
+[[package]]
 name = "sanka-extension-drf-to-fastapi"
-version = "0.1.0a3"
+version = "0.1.0a4"
 source = { editable = "packages/sanka-extension-drf-to-fastapi" }
 dependencies = [
+    { name = "sanka-drf-replay" },
     { name = "sanka-extension-sdk" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
+requires-dist = [
+    { name = "sanka-drf-replay", editable = "packages/sanka-drf-replay" },
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+]
 
 [[package]]
 name = "sanka-extension-drf-to-flask"
-version = "0.1.0a1"
+version = "0.1.0a2"
 source = { editable = "packages/sanka-extension-drf-to-flask" }
 dependencies = [
+    { name = "sanka-drf-replay" },
     { name = "sanka-extension-sdk" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
+requires-dist = [
+    { name = "sanka-drf-replay", editable = "packages/sanka-drf-replay" },
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+]
 
 [[package]]
 name = "sanka-extension-sdk"

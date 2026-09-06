@@ -10,6 +10,16 @@ from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
+from sanka_drf_replay.replay import (
+    DEFAULT_DB_ENV,
+    DEFAULT_ENTRYPOINT,
+    DEFAULT_IGNORED_TABLES,
+    ReplayError,
+    edge_probes_from_scan,
+    load_scenarios,
+    replay,
+    save_report,
+)
 from sanka_extension_drf_to_fastapi.django_fastapi import (
     NATIVE_STRATEGY,
     SCAN_FILE,
@@ -23,15 +33,6 @@ from sanka_extension_drf_to_fastapi.django_fastapi import (
     write_gap_report,
 )
 from sanka_extension_drf_to_fastapi.fastapi_tests import test_fastapi_app
-from sanka_extension_drf_to_fastapi.replay import (
-    DEFAULT_DB_ENV,
-    DEFAULT_ENTRYPOINT,
-    DEFAULT_IGNORED_TABLES,
-    ReplayError,
-    edge_probes_from_scan,
-    load_scenarios,
-    replay,
-)
 from sanka_extension_sdk import (
     ExtensionRequest,
     ExtensionResponse,
@@ -358,7 +359,7 @@ def _handle_replay(request: ExtensionRequest) -> ExtensionResponse:
                     "--edge-probes needs a scan artifact; run `sanka scan` first or omit the flag"
                 )
             scan_payload = json.loads(scan_path.read_text(encoding="utf-8"))
-            scenarios = [*scenarios, *edge_probes_from_scan(scan_payload)]
+            scenarios = [*scenarios, *edge_probes_from_scan(scan_payload, scenarios)]
         report = replay(
             Path(request.project_root),
             scenarios,
@@ -386,22 +387,23 @@ def _handle_replay(request: ExtensionRequest) -> ExtensionResponse:
             code="SANKA_EXTENSION_REPLAY_INVALID",
             message=str(error),
         )
-    data = _data(report)
+    data = _data(save_report(report, Path(request.artifact_root)))
+    artifacts = (str(data["report_path"]),)
     if not report["ok"]:
         return replace(
             failure_response(
                 request,
                 code="SANKA_EXTENSION_REPLAY_MISMATCH",
-                message="scenario replay found differences between the source and the candidate",
+                message="scenario replay failed source expectations or source/candidate parity",
                 details=data,
             ),
             data=data,
-            limitations=tuple(str(line) for line in report["summary_lines"]),
+            artifacts=artifacts,
         )
     return success_response(
         request,
         data=data,
-        limitations=tuple(str(line) for line in report["summary_lines"][1:]),
+        artifacts=artifacts,
     )
 
 

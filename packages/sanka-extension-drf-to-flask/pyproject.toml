@@ -1,13 +1,13 @@
 [project]
 name = "sanka-extension-drf-to-flask"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Isolated DRF-to-Flask migration extension for Sanka"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Sanka, Inc." }]
-dependencies = ["sanka-extension-sdk==0.1.0a1"]
+dependencies = ["sanka-extension-sdk==0.1.0a1", "sanka-drf-replay==0.1.0a1"]
 
 [project.scripts]
 sanka-extension-drf-to-flask = "sanka_extension_drf_to_flask.__main__:main"

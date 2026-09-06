@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 import sqlite3
@@ -11,9 +12,8 @@ from unittest.mock import patch
 import pytest
 from adapter_cli import run_cli
 
-from sanka_extension_drf_to_fastapi import adapter
-from sanka_extension_drf_to_fastapi import replay as replay_module
-from sanka_extension_drf_to_fastapi.replay import (
+from sanka_drf_replay import replay as replay_module
+from sanka_drf_replay.replay import (
     ReplayError,
     body_difference,
     diff_snapshots,
@@ -23,6 +23,7 @@ from sanka_extension_drf_to_fastapi.replay import (
     replay,
     snapshot_database,
 )
+from sanka_extension_drf_to_fastapi import adapter
 from sanka_extension_sdk import ExtensionRequest
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -93,6 +94,56 @@ def test_edge_probes_cover_options_unsupported_method_slash_and_missing_object()
         probe["capture_headers"] == ["allow", "location", "www-authenticate"] for probe in probes
     )
     assert all(probe["generated_from"] for probe in probes)
+
+
+def test_edge_probes_reuse_only_matching_request_context() -> None:
+    scan = {
+        "routes": [
+            {"method": "GET", "path": "/items/{identifier}/"},
+            {"method": "GET", "path": "/unrelated/"},
+        ]
+    }
+    scenarios = [
+        {"id": "unauthenticated", "method": "GET", "path": "/items/7/", "headers": {}},
+        {
+            "id": "success",
+            "method": "GET",
+            "path": "/items/7/?page=2",
+            "headers": {"authorization": "fixture-token", "x-tenant": "a"},
+            "expected_source_status": 200,
+            "capture_headers": ["etag"],
+            "setup": [{"method": "POST", "path": "/items/", "body": {"name": "item"}}],
+        },
+    ]
+    original = copy.deepcopy(scenarios)
+    probes = edge_probes_from_scan(scan, scenarios)
+    selected = {p["method"]: p for p in probes if p["path"] == "/items/7/"}
+    assert {"HEAD", "OPTIONS", "TRACE"} <= selected.keys()
+    for probe in selected.values():
+        assert probe["headers"] == {"authorization": "fixture-token", "x-tenant": "a"}
+        assert probe["setup"] == scenarios[1]["setup"]
+        assert probe["context_from"] == "success"
+        assert "etag" in probe["capture_headers"]
+        assert "body" not in probe and "expected_source_status" not in probe
+    assert all(not p["headers"] for p in probes if p["generated_from"] == "/unrelated/")
+    selected["HEAD"]["headers"].clear()
+    assert selected["OPTIONS"]["headers"] and scenarios == original
+
+
+def test_expected_source_status_is_validated_instead_of_silently_ignored(tmp_path: Path) -> None:
+    path = tmp_path / "scenarios.json"
+    scenario = {"id": "read", "method": "GET", "path": "/items/1/"}
+    path.write_text(json.dumps([{**scenario, "expected_source_status": 200}]))
+    assert load_scenarios(path)[0]["expected_source_status"] == 200
+    for value in (True, None, "200", 99, 600):
+        path.write_text(json.dumps([{**scenario, "expected_source_status": value}]))
+        with pytest.raises(ReplayError, match="expected_source_status"):
+            load_scenarios(path)
+    path.write_text(
+        json.dumps([{**scenario, "setup": [{**scenario, "expected_source_status": 201}]}])
+    )
+    with pytest.raises(ReplayError, match="top-level"):
+        load_scenarios(path)
 
 
 def test_snapshot_and_diff_report_row_differences(tmp_path: Path) -> None:
@@ -286,7 +337,7 @@ def test_verify_with_scenarios_dispatches_to_replay_without_a_plan(tmp_path: Pat
         "schema": "sanka-verify-replay/v1",
         "ok": False,
         "summary": {"scenarios": 1, "matched": 0, "mismatched": 1},
-        "scenarios": [],
+        "scenarios": [{"id": "list", "match": False, "native": {"compliant": True}}],
         "summary_lines": ["0/1 scenarios match", "list [GET /api/x/]: status 200 vs 404"],
     }
     with patch.object(adapter, "replay", return_value=report) as run:
@@ -303,7 +354,9 @@ def test_verify_with_scenarios_dispatches_to_replay_without_a_plan(tmp_path: Pat
     assert response.error is not None
     assert response.error.code == "SANKA_EXTENSION_REPLAY_MISMATCH"
     assert response.data["summary"]["mismatched"] == 1
-    assert response.limitations[-1].startswith("list [GET /api/x/]")
+    assert response.artifacts == (response.data["report_path"],)
+    assert "scenarios" not in response.data
+    assert json.loads(Path(response.data["report_path"]).read_text()) == report
 
 
 def test_verify_with_scenarios_reports_invalid_scenario_files(tmp_path: Path) -> None:
@@ -321,3 +374,84 @@ def test_default_interpreter_prefers_the_checkout_virtualenv(tmp_path: Path) -> 
     interpreter.parent.mkdir(parents=True)
     interpreter.write_text("", encoding="utf-8")
     assert replay_module.default_interpreter(tmp_path, fallback) == interpreter
+
+
+def test_replay_preserves_json_types_and_absent_body(tmp_path: Path) -> None:
+    assert body_difference({"value": True}, {"value": 1}) is not None
+    assert body_difference([False], [0]) is not None
+    assert body_difference(1, 1.0) is None
+    path = tmp_path / "bodies.json"
+    path.write_text(
+        json.dumps(
+            [
+                {"id": "absent", "path": "/"},
+                {"id": "empty", "path": "/", "body": {}},
+                {"id": "null", "path": "/", "body": None},
+            ]
+        )
+    )
+    absent, empty, null = load_scenarios(path)
+    assert "body" not in absent
+    assert empty["body"] == {}
+    assert null["body"] is None and "body" in null
+
+
+def test_compact_report_keeps_full_artifact_and_limits_failures(tmp_path: Path) -> None:
+    reports = [
+        {"id": f"failure-{n}", "match": False, "native": {"compliant": True}} for n in range(25)
+    ]
+    full = {
+        "schema": "sanka-verify-replay/v1",
+        "ok": False,
+        "summary": {"scenarios": 25, "mismatched": 25},
+        "scenarios": reports,
+        "summary_lines": ["0/25"] + [item["id"] for item in reports],
+    }
+    compact = replay_module.save_report(full, tmp_path)
+    assert len(compact["failures"]) == 20
+    assert compact["omitted_failures"] == 5
+    assert "scenarios" not in compact
+    assert json.loads(Path(compact["report_path"]).read_text()) == full
+
+
+def test_replay_cleans_temporary_database_on_failure(tmp_path: Path) -> None:
+    (tmp_path / "target_app.py").touch()
+    temp = tmp_path / "temporary"
+    temp.mkdir()
+    with (
+        patch.object(replay_module.tempfile, "mkdtemp", return_value=str(temp)),
+        patch.object(replay_module, "_run_side", side_effect=ReplayError("failed")),
+        pytest.raises(ReplayError, match="failed"),
+    ):
+        replay(tmp_path, [{"id": "one", "method": "GET", "path": "/"}], settings_module="settings")
+    assert not temp.exists()
+
+
+def test_matching_errors_expose_coverage_warnings(tmp_path: Path) -> None:
+    (tmp_path / "target_app.py").touch()
+    reports = [
+        {
+            "id": str(status),
+            "match": True,
+            "status_match": True,
+            "body_match": True,
+            "headers_match": True,
+            "database_match": True,
+            "native": {"compliant": True},
+            "source": {"status": status},
+            **({"generated_from": "/private/"} if status == 401 else {}),
+        }
+        for status in (404, 401)
+    ]
+    with (
+        patch.object(replay_module, "_run_side", return_value={}),
+        patch.object(replay_module, "_replay_one", side_effect=reports),
+    ):
+        report = replay(tmp_path, [{}, {}], settings_module="settings")
+    assert report["ok"]  # Error-only parity is valid; it is not successful-path coverage.
+    assert report["summary"]["source_statuses"] == {"401": 1, "404": 1}
+    compact = replay_module.save_report(report, tmp_path / "artifacts")
+    assert len(compact["warnings"]) == 2
+    assert "--seed" in compact["warnings"][0]
+    assert "authenticated" in compact["warnings"][1]
+    assert json.loads(Path(compact["report_path"]).read_text())["warnings"] == compact["warnings"]

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Differential scenario replay: the source Django application against a candidate.
 
-The candidate is any FastAPI application exposing ``app`` from an entrypoint module.
+The candidate is a FastAPI or Flask application exposing ``app`` from an entrypoint module.
 Every scenario starts from an identical freshly migrated (and optionally seeded)
 SQLite database, is sent to both applications, and the responses and the resulting
 database state are compared. Nothing here depends on a Sanka plan or a generated
@@ -9,7 +9,7 @@ manifest, so the replay works at any readiness, including zero.
 
 Request and response semantics deliberately match the Sanka Migration Bench
 evaluator: the source side uses Django's test client with CSRF enforcement and a
-JSON content type, the candidate side uses FastAPI's ``TestClient`` without
+JSON content type, the candidate uses its framework test client without
 following redirects, declared headers are compared lower-cased, bodies compare as
 JSON when both parse and as bytes otherwise, and multipart bodies are encoded with
 the bench's fixed boundary.
@@ -18,6 +18,7 @@ the bench's fixed boundary.
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import os
 import shutil
@@ -25,6 +26,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -64,6 +66,8 @@ def load_scenarios(path: Path) -> list[dict[str, Any]]:
     items = payload.get("scenarios") if isinstance(payload, dict) else payload
     if not isinstance(items, list):
         raise ReplayError("scenarios must be a JSON array or an object with a `scenarios` array")
+    if not items:
+        raise ReplayError("scenarios must not be empty")
     scenarios: list[dict[str, Any]] = []
     seen: set[str] = set()
     for index, item in enumerate(items):
@@ -90,6 +94,13 @@ def _validated_request(item: object, label: str, *, require_id: bool) -> dict[st
         isinstance(key, str) and isinstance(value, str) for key, value in headers.items()
     ):
         raise ReplayError(f"{label}.headers must map strings to strings")
+    if sum(name in item for name in ("body", "body_base64", "multipart")) > 1:
+        raise ReplayError(f"{label} must use only one body encoding")
+    if "body_base64" in item:
+        try:
+            base64.b64decode(item["body_base64"], validate=True)
+        except (ValueError, TypeError) as error:
+            raise ReplayError(f"{label}.body_base64 must be valid base64") from error
     multipart = item.get("multipart")
     if multipart is not None and not isinstance(multipart, dict):
         raise ReplayError(f"{label}.multipart must be an object")
@@ -99,6 +110,14 @@ def _validated_request(item: object, label: str, *, require_id: bool) -> dict[st
     response_body = item.get("response_body")
     if response_body not in (None, "base64"):
         raise ReplayError(f"{label}.response_body must be omitted or 'base64'")
+    if "expected_source_status" in item:
+        if not require_id:
+            raise ReplayError(
+                f"{label}.expected_source_status is supported only on top-level scenarios"
+            )
+        expected = item["expected_source_status"]
+        if type(expected) is not int or not 100 <= expected <= 599:
+            raise ReplayError(f"{label}.expected_source_status must be an integer HTTP status")
     setup_items = item.get("setup") or []
     if not isinstance(setup_items, list):
         raise ReplayError(f"{label}.setup must be an array of requests")
@@ -109,12 +128,18 @@ def _validated_request(item: object, label: str, *, require_id: bool) -> dict[st
     validated: dict[str, Any] = {
         "method": method,
         "path": path,
-        "headers": dict(headers),
-        "body": item.get("body"),
+        "headers": {key.lower(): value for key, value in headers.items()},
+        **({"body": item["body"]} if "body" in item else {}),
+        **({"body_base64": item["body_base64"]} if "body_base64" in item else {}),
         "multipart": multipart,
         "capture_headers": [str(name).lower() for name in capture],
         "response_body": response_body,
         "setup": setup,
+        **(
+            {"expected_source_status": item["expected_source_status"]}
+            if "expected_source_status" in item
+            else {}
+        ),
     }
     if require_id:
         identifier = item.get("id")
@@ -130,13 +155,16 @@ def _validated_request(item: object, label: str, *, require_id: bool) -> dict[st
 # Scan-derived edge probes
 
 
-def edge_probes_from_scan(scan: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Derive read-only edge scenarios from a scan artifact's route list.
+def edge_probes_from_scan(
+    scan: Mapping[str, Any], scenarios: Sequence[Mapping[str, Any]] = ()
+) -> list[dict[str, Any]]:
+    """Derive edge requests, reusing a matching scenario's headers and fixture setup.
 
     Per concrete path: OPTIONS (Allow), one method the source does not declare
     (405 and Allow), the trailing-slash variant (redirect or 404 with Location),
     and, for single-parameter detail paths, a request for an object that does not
-    exist (404 body). None of these mutate state.
+    exist (404 body). GET routes also receive a HEAD probe. Only provided setup
+    requests may mutate fixture state. Context never crosses route boundaries.
     """
     routes = scan.get("routes")
     if not isinstance(routes, list):
@@ -157,10 +185,13 @@ def edge_probes_from_scan(scan: Mapping[str, Any]) -> list[dict[str, Any]]:
     probes: list[dict[str, Any]] = []
     for path in sorted(methods_by_path):
         methods = methods_by_path[path]
-        concrete = _concrete_path(path)
+        context = _probe_context(path, scenarios)
+        concrete = str(context["path"]).split("?", 1)[0] if context else _concrete_path(path)
         if concrete is None:
             continue
-        probes.append(_edge("options", "OPTIONS", concrete, path))
+        probes.append(_edge("options", "OPTIONS", concrete, path, context))
+        if "GET" in methods:
+            probes.append(_edge("head", "HEAD", concrete, path, context))
         unsupported = next(
             (
                 candidate
@@ -170,12 +201,34 @@ def edge_probes_from_scan(scan: Mapping[str, Any]) -> list[dict[str, Any]]:
             None,
         )
         if unsupported is not None:
-            probes.append(_edge("method-not-allowed", unsupported, concrete, path))
+            probes.append(_edge("method-not-allowed", unsupported, concrete, path, context))
         variant = concrete[:-1] if concrete.endswith("/") and len(concrete) > 1 else concrete + "/"
-        probes.append(_edge("slash-variant", "GET", variant, path))
-        if "{" in path:
-            probes.append(_edge("missing-object", "GET", concrete, path))
+        probes.append(_edge("slash-variant", "GET", variant, path, context))
+        missing = _concrete_path(path)
+        if "{" in path and missing is not None:
+            probes.append(_edge("missing-object", "GET", missing, path, context))
     return probes
+
+
+def _probe_context(route: str, scenarios: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    route_parts = route.split("/")
+    matching = []
+    for scenario in scenarios:
+        parts = str(scenario.get("path", "")).split("?", 1)[0].split("/")
+        if len(parts) == len(route_parts) and all(
+            wanted == actual or (wanted.startswith("{") and wanted.endswith("}") and actual)
+            for wanted, actual in zip(route_parts, parts, strict=True)
+        ):
+            matching.append(scenario)
+    # ponytail: one context per route; use explicit scenarios for other auth/tenant variants.
+    return min(
+        matching,
+        key=lambda item: (
+            item.get("expected_source_status") not in range(200, 400),
+            not bool(item.get("headers")),
+        ),
+        default=None,
+    )
 
 
 def _concrete_path(path: str) -> str | None:
@@ -193,18 +246,27 @@ def _concrete_path(path: str) -> str | None:
     return "/".join(segments) if substituted == 1 else None
 
 
-def _edge(kind: str, method: str, path: str, source_path: str) -> dict[str, Any]:
+def _edge(
+    kind: str,
+    method: str,
+    path: str,
+    source_path: str,
+    context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    context = context or {}
     return {
         "id": f"edge:{kind}:{method} {path}",
         "method": method,
         "path": path,
-        "headers": {},
-        "body": None,
+        "headers": dict(context.get("headers") or {}),
         "multipart": None,
-        "capture_headers": list(EDGE_HEADERS),
+        "capture_headers": list(
+            dict.fromkeys([*EDGE_HEADERS, *context.get("capture_headers", [])])
+        ),
         "response_body": None,
-        "setup": [],
+        "setup": copy.deepcopy(context.get("setup") or []),
         "generated_from": source_path,
+        **({"context_from": context["id"]} if context.get("id") else {}),
     }
 
 
@@ -220,6 +282,12 @@ os.environ["DJANGO_SETTINGS_MODULE"] = payload["settings_module"]
 os.environ[payload["db_env"]] = payload["database"]
 import django
 django.setup()
+from django.db import connections
+for connection in connections.all():
+    if (connection.settings_dict["ENGINE"] != "django.db.backends.sqlite3"
+        or os.path.realpath(str(connection.settings_dict["NAME"]))
+           != os.path.realpath(payload["database"])):
+        raise SystemExit("every Django database alias must use the isolated SQLite path")
 from django.core.management import call_command
 call_command("migrate", interactive=False, verbosity=0, run_syncdb=True)
 if payload.get("seed"):
@@ -240,36 +308,14 @@ django.setup()
 from django.test import Client
 client = Client(enforce_csrf_checks=True)
 
-def multipart(spec):
-    boundary = str(spec.get("boundary") or payload["boundary"]).encode("ascii")
-    chunks = []
-    for name, value in (spec.get("fields") or {}).items():
-        disposition = 'Content-Disposition: form-data; name="%s"' % name
-        chunks += [b"--" + boundary, disposition.encode(), b"", str(value).encode()]
-    for item in spec.get("files") or []:
-        disposition = 'Content-Disposition: form-data; name="%s"; filename="%s"' % (
-            item["field"], item["filename"])
-        content_type = item.get("content_type") or "application/octet-stream"
-        chunks += [b"--" + boundary, disposition.encode(),
-                   ("Content-Type: %s" % content_type).encode("ascii"), b"",
-                   base64.b64decode(str(item["content_b64"]), validate=True)]
-    chunks += [b"--" + boundary + b"--", b""]
-    return b"\r\n".join(chunks), boundary.decode("ascii")
 
 def send(request):
+    body, headers = request_bytes(request)
+    content_type = headers.pop("content-type", "application/octet-stream")
     headers = {"HTTP_" + key.upper().replace("-", "_"): value
-               for key, value in request.get("headers", {}).items()}
-    if request.get("multipart") is not None:
-        body, boundary = multipart(request["multipart"])
-        response = client.generic(
-            request["method"], request["path"], data=body,
-            content_type="multipart/form-data; boundary=" + boundary, **headers)
-    else:
-        body = request.get("body")
-        response = client.generic(
-            request["method"], request["path"],
-            data=json.dumps(body) if body is not None else "",
-            content_type="application/json", **headers)
+               for key, value in headers.items()}
+    response = client.generic(request["method"], request["path"], data=body,
+                              content_type=content_type, **headers)
     if getattr(response, "streaming", False):
         content = b"".join(response.streaming_content)
     else:
@@ -299,11 +345,28 @@ spec = importlib.util.spec_from_file_location("_sanka_replay_candidate", entrypo
 module = importlib.util.module_from_spec(spec)
 sys.modules["_sanka_replay_candidate"] = module
 spec.loader.exec_module(module)
+if "django" in sys.modules:
+    from django.db import connections
+    for connection in connections.all():
+        if (connection.settings_dict["ENGINE"] != "django.db.backends.sqlite3"
+            or os.path.realpath(str(connection.settings_dict["NAME"]))
+               != os.path.realpath(payload["database"])):
+            raise SystemExit("candidate database must use the isolated SQLite path")
 app = getattr(module, "app", None)
 if app is None:
     raise SystemExit("candidate entrypoint does not expose `app`")
-from fastapi.testclient import TestClient
-from starlette.routing import Match
+if payload["target"] == "flask":
+    from flask import Flask
+    if not isinstance(app, Flask):
+        raise SystemExit("candidate app is not Flask")
+    client_context = app.test_client()
+else:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from starlette.routing import Match
+    if not isinstance(app, FastAPI):
+        raise SystemExit("candidate app is not FastAPI")
+    client_context = TestClient(app, follow_redirects=False)
 
 def resolve(route, scope, depth=0):
     if route is None or depth > 16 or type(route).__qualname__ != "_IncludedRouter":
@@ -319,6 +382,23 @@ def resolve(route, scope, depth=0):
     return route
 
 def native(method, path):
+    if payload["target"] == "flask":
+        from flask import request
+        from werkzeug.exceptions import NotFound, MethodNotAllowed
+        from werkzeug.routing import RequestRedirect
+        with app.test_request_context(path, method=method, base_url="http://testserver"):
+            rule = request.url_rule
+            endpoint = app.view_functions.get(rule.endpoint) if rule else None
+            filename = inspect.getsourcefile(inspect.unwrap(endpoint)) if endpoint else None
+            framework_response = isinstance(request.routing_exception,
+                                            (NotFound, MethodNotAllowed, RequestRedirect))
+        forbidden = any(name == "rest_framework" or name.startswith("rest_framework.")
+                        for name in sys.modules)
+        inside = bool(filename) and os.path.realpath(filename).startswith(
+            os.path.realpath(candidate_root) + os.sep)
+        return {"is_flask": True, "endpoint_in_candidate": inside,
+                "framework_response": framework_response, "forbidden_imports": forbidden,
+                "default_wsgi_dispatch": getattr(app.wsgi_app, "__func__", None) is Flask.wsgi_app}
     scope = {"type": "http", "method": method, "path": path.split("?", 1)[0],
              "root_path": "", "headers": [], "query_string": b""}
     matched = None
@@ -348,6 +428,32 @@ def native(method, path):
     return {"route_class": cls.__module__ + "." + cls.__qualname__,
             "is_apiroute": is_apiroute, "endpoint_in_candidate": inside}
 
+with client_context as client:
+    def send(request):
+        body, headers = request_bytes(request)
+        if payload["target"] == "flask":
+            response = client.open(request["path"], method=request["method"],
+                                   data=body, headers=headers, follow_redirects=False,
+                                   base_url="http://testserver")
+            content = response.data
+        else:
+            response = client.request(request["method"], request["path"],
+                                      content=body, headers=headers)
+            content = response.content
+        return {"status": response.status_code,
+                "headers": {str(key).lower(): str(value)
+                            for key, value in response.headers.items()},
+                "body_b64": base64.b64encode(content).decode("ascii")}
+    for step in payload["setup"]:
+        send(step)
+    result = send(payload["request"])
+result["native"] = native(payload["request"]["method"], payload["request"]["path"])
+print(json.dumps(result))
+"""
+
+
+_REQUEST_SCRIPT = r"""
+import base64, json
 def multipart(spec):
     boundary = str(spec.get("boundary") or payload["boundary"]).encode("ascii")
     chunks = []
@@ -364,27 +470,24 @@ def multipart(spec):
     chunks += [b"--" + boundary + b"--", b""]
     return b"\r\n".join(chunks), boundary.decode("ascii")
 
-with TestClient(app, follow_redirects=False) as client:
-    def send(request):
-        headers = dict(request.get("headers", {}))
-        if request.get("multipart") is not None:
-            body, boundary = multipart(request["multipart"])
-            headers.setdefault("content-type", "multipart/form-data; boundary=" + boundary)
-            response = client.request(request["method"], request["path"],
-                                      content=body, headers=headers)
-        else:
-            response = client.request(request["method"], request["path"],
-                                      json=request.get("body"), headers=headers)
-        return {"status": response.status_code,
-                "headers": {str(key).lower(): str(value)
-                            for key, value in response.headers.items()},
-                "body_b64": base64.b64encode(response.content).decode("ascii")}
-    for step in payload["setup"]:
-        send(step)
-    result = send(payload["request"])
-result["native"] = native(payload["request"]["method"], payload["request"]["path"])
-print(json.dumps(result))
+
+def request_bytes(request):
+    headers = {key.lower(): value for key, value in request.get("headers", {}).items()}
+    if request.get("multipart") is not None:
+        body, boundary = multipart(request["multipart"])
+        headers.setdefault("content-type", "multipart/form-data; boundary=" + boundary)
+    elif "body_base64" in request:
+        body = base64.b64decode(request["body_base64"], validate=True)
+    elif "body" in request:
+        body = json.dumps(request["body"], allow_nan=False).encode("utf-8")
+        headers.setdefault("content-type", "application/json")
+    else:
+        body = b""
+        headers.setdefault("content-type", "application/json")
+    return body, headers
 """
+_SOURCE_SCRIPT = _REQUEST_SCRIPT + _SOURCE_SCRIPT
+_CANDIDATE_SCRIPT = _REQUEST_SCRIPT + _CANDIDATE_SCRIPT
 
 
 def _run_side(
@@ -421,7 +524,7 @@ def snapshot_database(path: Path, ignored: Iterable[str]) -> dict[str, dict[str,
     ignored_names = set(ignored)
     snapshot: dict[str, dict[str, Any]] = {}
     if not path.is_file():
-        return snapshot
+        raise ReplayError(f"isolated database is missing: {path}")
     connection = sqlite3.connect(str(path))
     try:
         tables = [
@@ -433,7 +536,7 @@ def snapshot_database(path: Path, ignored: Iterable[str]) -> dict[str, dict[str,
         for table in tables:
             if table in ignored_names or table.startswith("sqlite_"):
                 continue
-            cursor = connection.execute(f'SELECT * FROM "{table}"')
+            cursor = connection.execute(f'SELECT * FROM "{table.replace(chr(34), chr(34) * 2)}"')
             columns = [str(item[0]) for item in cursor.description or ()]
             rows = sorted(
                 ([_jsonable(value) for value in row] for row in cursor.fetchall()),
@@ -479,8 +582,10 @@ def diff_snapshots(
             )
             continue
         if left["rows"] != right["rows"]:
-            only_source = [row for row in left["rows"] if row not in right["rows"]]
-            only_candidate = [row for row in right["rows"] if row not in left["rows"]]
+            left_counts = Counter(json.dumps(row, sort_keys=True) for row in left["rows"])
+            right_counts = Counter(json.dumps(row, sort_keys=True) for row in right["rows"])
+            only_source = [json.loads(row) for row in (left_counts - right_counts).elements()]
+            only_candidate = [json.loads(row) for row in (right_counts - left_counts).elements()]
             differences.append(
                 {
                     "table": table,
@@ -511,8 +616,6 @@ def normalize_body(content: bytes, content_type: str, response_body: str | None)
 
 
 def body_difference(source: Any, candidate: Any, path: str = "$") -> str | None:
-    if source == candidate:
-        return None
     if isinstance(source, dict) and isinstance(candidate, dict):
         for key in sorted(set(source) | set(candidate)):
             if key not in source:
@@ -529,6 +632,12 @@ def body_difference(source: Any, candidate: Any, path: str = "$") -> str | None:
             inner = body_difference(left, right, f"{path}[{index}]")
             if inner:
                 return inner
+    if isinstance(source, (dict, list)) and isinstance(candidate, type(source)):
+        return None
+    if isinstance(source, bool) != isinstance(candidate, bool):
+        return f"{path}: source={_short(source)} candidate={_short(candidate)}"
+    if source == candidate:
+        return None
     return f"{path}: source={_short(source)} candidate={_short(candidate)}"
 
 
@@ -549,7 +658,7 @@ def default_interpreter(root: Path, fallback: Path) -> Path:
     """Prefer the checkout's own virtualenv so its Django or FastAPI stack is importable.
 
     The extension runs from its own isolated environment, which deliberately carries
-    neither Django nor FastAPI; the source and the candidate each bring theirs.
+    no framework packages; the source and the candidate each bring theirs.
     """
     for relative in (("bin", "python"), ("Scripts", "python.exe")):
         candidate = root / ".venv" / Path(*relative)
@@ -572,8 +681,13 @@ def replay(
     python: Path | None = None,
     candidate_python: Path | None = None,
     keep_temp: bool = False,
+    target: str = "fastapi",
 ) -> dict[str, Any]:
     """Replay ``scenarios`` against the source and the candidate and return the report."""
+    if target not in {"fastapi", "flask"}:
+        raise ReplayError("target must be fastapi or flask")
+    if not scenarios:
+        raise ReplayError("scenarios must not be empty")
     project = Path(project_root).resolve()
     candidate = Path(candidate_root).resolve() if candidate_root is not None else project
     source_python = (
@@ -616,6 +730,7 @@ def replay(
             reports.append(
                 _replay_one(
                     scenario,
+                    target=target,
                     index=index,
                     project=project,
                     candidate=candidate,
@@ -640,12 +755,32 @@ def replay(
         "matched": len(matched),
         "mismatched": len(reports) - len(matched),
         "status_mismatches": sum(1 for report in reports if not report["status_match"]),
+        "source_expectation_mismatches": sum(
+            1 for report in reports if not report.get("source_expectation_match", True)
+        ),
         "body_mismatches": sum(1 for report in reports if not report["body_match"]),
         "header_mismatches": sum(1 for report in reports if not report["headers_match"]),
         "database_mismatches": sum(1 for report in reports if not report["database_match"]),
         "non_native": sum(1 for report in reports if not report["native"]["compliant"]),
         "generated_probes": sum(1 for report in reports if report.get("generated_from")),
+        "source_statuses": dict(
+            sorted(Counter(str(report["source"]["status"]) for report in reports).items())
+        ),
     }
+    warnings = []
+    if all(report["source"]["status"] >= 400 for report in reports):
+        warnings.append(
+            "Only source error responses were exercised. Use --seed and expected_source_status "
+            "for intended success paths; matching errors do not establish completeness."
+        )
+    if any(
+        report.get("generated_from") and report["source"]["status"] in {401, 403}
+        for report in reports
+    ):
+        warnings.append(
+            "Generated probes stopped at authentication or authorization. Add authenticated "
+            "scenarios to exercise the intended handlers, including OPTIONS."
+        )
     return {
         "schema": REPLAY_SCHEMA,
         "ok": summary["mismatched"] == 0 and summary["non_native"] == 0,
@@ -660,6 +795,7 @@ def replay(
         },
         "headers": "all" if all_headers else "declared",
         "summary": summary,
+        "warnings": warnings,
         "scenarios": reports,
         "summary_lines": _summary_lines(summary, reports),
     }
@@ -669,6 +805,7 @@ def _replay_one(
     scenario: Mapping[str, Any],
     *,
     index: int,
+    target: str,
     project: Path,
     candidate: Path,
     entrypoint: str,
@@ -691,7 +828,8 @@ def _replay_one(
         "method": scenario["method"],
         "path": scenario["path"],
         "headers": dict(scenario.get("headers") or {}),
-        "body": scenario.get("body"),
+        **({"body": scenario["body"]} if "body" in scenario else {}),
+        **({"body_base64": scenario["body_base64"]} if "body_base64" in scenario else {}),
         "multipart": scenario.get("multipart"),
     }
     setup = [
@@ -699,7 +837,8 @@ def _replay_one(
             "method": step["method"],
             "path": step["path"],
             "headers": dict(step.get("headers") or {}),
-            "body": step.get("body"),
+            **({"body": step["body"]} if "body" in step else {}),
+            **({"body_base64": step["body_base64"]} if "body_base64" in step else {}),
             "multipart": step.get("multipart"),
         }
         for step in scenario.get("setup") or []
@@ -725,6 +864,7 @@ def _replay_one(
             "side": f"candidate[{identifier}]",
             "project_root": str(project),
             "candidate_root": str(candidate),
+            "target": target,
             "entrypoint": entrypoint,
             "database": str(candidate_db),
         },
@@ -746,7 +886,7 @@ def _replay_one(
     if all_headers:
         compared = sorted((set(source_headers) | set(candidate_headers)) - VOLATILE_HEADERS)
     else:
-        compared = list(scenario.get("capture_headers") or [])
+        compared = [str(name).lower() for name in scenario.get("capture_headers") or []]
     header_diffs = {
         name: {"source": source_headers.get(name, ""), "candidate": candidate_headers.get(name, "")}
         for name in compared
@@ -758,14 +898,36 @@ def _replay_one(
     native = dict(candidate_result.get("native") or {})
     native_compliant = bool(native.get("is_apiroute")) and bool(native.get("endpoint_in_candidate"))
     status_match = int(source_result["status"]) == int(candidate_result["status"])
-    body_match = source_body == candidate_body
+    expected_source_status = scenario.get("expected_source_status")
+    source_expectation_match = (
+        expected_source_status is None or int(source_result["status"]) == expected_source_status
+    )
+    if target == "flask":
+        native_compliant = (
+            bool(native.get("is_flask"))
+            and bool(native.get("default_wsgi_dispatch"))
+            and not native.get("forbidden_imports")
+            and (
+                bool(native.get("endpoint_in_candidate")) or bool(native.get("framework_response"))
+            )
+        )
+    body_match = (
+        bool(source_bytes) == bool(candidate_bytes)
+        and body_difference(source_body, candidate_body) is None
+    )
     headers_match = not header_diffs
     database_match = not database_diffs
     report: dict[str, Any] = {
         "id": identifier,
         "method": scenario["method"],
         "path": scenario["path"],
-        "match": status_match and body_match and headers_match and database_match,
+        "match": source_expectation_match
+        and status_match
+        and body_match
+        and headers_match
+        and database_match,
+        "expected_source_status": expected_source_status,
+        "source_expectation_match": source_expectation_match,
         "status_match": status_match,
         "body_match": body_match,
         "headers_match": headers_match,
@@ -778,13 +940,21 @@ def _replay_one(
             "status": candidate_result["status"],
             "headers": {name: candidate_headers.get(name, "") for name in compared},
         },
-        "body_difference": None if body_match else body_difference(source_body, candidate_body),
+        "body_difference": None
+        if body_match
+        else (
+            "empty response vs non-empty response"
+            if bool(source_bytes) != bool(candidate_bytes)
+            else body_difference(source_body, candidate_body)
+        ),
         "header_differences": header_diffs,
         "database_differences": database_diffs,
         "native": {**native, "compliant": native_compliant},
     }
     if scenario.get("generated_from"):
         report["generated_from"] = scenario["generated_from"]
+    if scenario.get("context_from"):
+        report["context_from"] = scenario["context_from"]
     return report
 
 
@@ -794,12 +964,19 @@ def _summary_lines(summary: Mapping[str, Any], reports: Sequence[Mapping[str, An
         f"(status {summary['status_mismatches']}, body {summary['body_mismatches']}, "
         f"headers {summary['header_mismatches']}, "
         f"database {summary['database_mismatches']} mismatches; "
-        f"{summary['non_native']} served outside a FastAPI APIRoute in the candidate)"
+        f"source expectations {summary.get('source_expectation_mismatches', 0)}; "
+        f"{summary['non_native']} without native candidate routing)"
     ]
     for report in reports:
         if report["match"] and report["native"]["compliant"]:
             continue
         problems: list[str] = []
+        if not report.get("source_expectation_match", True):
+            problems.append(
+                f"source expected {report['expected_source_status']}, "
+                f"got {report['source']['status']}; "
+                "check fixtures/authentication before changing the candidate"
+            )
         if not report["status_match"]:
             problems.append(
                 f"status {report['source']['status']} vs {report['candidate']['status']}"
@@ -830,3 +1007,34 @@ def _summary_lines(summary: Mapping[str, Any], reports: Sequence[Mapping[str, An
             f"{report['id']} [{report['method']} {report['path']}]: " + "; ".join(problems)
         )
     return lines
+
+
+def save_report(report: Mapping[str, Any], artifact_root: Path) -> dict[str, Any]:
+    """Persist all scenarios; keep protocol responses bounded and useful for repairs."""
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        suffix=".json",
+        prefix="replay-",
+        dir=artifact_root,
+        delete=False,
+    ) as handle:
+        json.dump(report, handle, indent=2, sort_keys=True, allow_nan=False)
+        handle.write("\n")
+        path = Path(handle.name).resolve()
+    failures = [
+        item for item in report["scenarios"] if not item["match"] or not item["native"]["compliant"]
+    ]
+    return {
+        "schema": report["schema"],
+        "ok": report["ok"],
+        "summary": report["summary"],
+        "warnings": report.get("warnings", []),
+        "report_path": str(path),
+        "failures": [
+            {"id": item["id"], "message": line[:2000]}
+            for item, line in zip(failures[:20], report["summary_lines"][1:21], strict=True)
+        ],
+        "omitted_failures": max(0, len(failures) - 20),
+    }
