@@ -57,7 +57,7 @@ urlpatterns = [path("stock/", Stock.as_view())]
 """)
     assert call(tmp_path, "scan")["outcome"] == "success"
     plan = call(tmp_path, "plan")["data"]
-    assert plan["native_routes"] == 2
+    assert plan["native_routes"] == 4
     applied = call(tmp_path, "apply", {"extension_plan_hash": plan["plan_hash"]}, "reviewed")
     assert applied["outcome"] == "success", applied
     probe = """import os, sys, json
@@ -106,4 +106,8 @@ print(json.dumps(records))
     with (tmp_path / "stock/models.py").open("a") as handle:
         handle.write("\nimport rest_framework\n")
     scan = call(tmp_path, "scan")["data"]
-    assert all(route["classification"] == "needs_adaptation" for route in scan["routes"])
+    assert all(
+        route["classification"] == "needs_adaptation"
+        for route in scan["routes"]
+        if route["method"] != "OPTIONS"
+    )

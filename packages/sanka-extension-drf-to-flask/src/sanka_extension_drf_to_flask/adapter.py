@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Conservative native Flask generation, without importing another extension.
 
-ponytail: JSON APIView handlers and isolated ORM models only; serializers,
-authentication, middleware, and custom dispatch remain explicit manual gaps.
-Extend the recognizer only with differential evidence for the additional behavior.
+ponytail: only the tested JSON APIView, flat validation and header-auth subset.
+Nested serializers, session auth and custom dispatch remain manual gaps;
+extend the recognizer only with differential evidence.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -32,6 +33,7 @@ from sanka_drf_replay.replay import (
     replay,
     save_report,
 )
+from sanka_extension_drf_to_flask.native import authentication, isolated_module, serializer
 from sanka_extension_sdk import (
     ExtensionRequest,
     ExtensionResponse,
@@ -132,11 +134,14 @@ def _handler(view: Any, method: str) -> tuple[str | None, str]:
     from rest_framework.permissions import AllowAny  # type: ignore[import-untyped]
     from rest_framework.renderers import JSONRenderer  # type: ignore[import-untyped]
     from rest_framework.response import Response  # type: ignore[import-untyped]
-    from rest_framework.views import APIView  # type: ignore[import-untyped]
+    from rest_framework.settings import api_settings  # type: ignore[import-untyped]
+    from rest_framework.views import APIView, exception_handler  # type: ignore[import-untyped]
 
-    if view.__bases__ != (APIView,):
-        return None, "generic views, viewsets and inherited handlers require manual migration"
-    if list(view.permission_classes) != [AllowAny] or view.authentication_classes:
+    if not inspect.isclass(view) or not issubclass(view, APIView):
+        return None, "non-APIView callbacks require manual migration"
+    view = cast(Any, view)
+    auth = authentication(view)
+    if list(view.permission_classes) != [AllowAny] or auth is None:
         return None, "authentication and permissions require manual migration"
     if view.throttle_classes or list(view.renderer_classes) != [JSONRenderer]:
         return None, "throttling and content negotiation require manual migration"
@@ -153,11 +158,41 @@ def _handler(view: Any, method: str) -> tuple[str | None, str]:
         "renderer_classes",
         "parser_classes",
     }
-    if any(not name.startswith("__") and name not in allowed for name in vars(view)):
-        return None, "custom view attributes or lifecycle hooks require manual migration"
+    for base in view.__mro__[: view.__mro__.index(APIView)]:
+        if any(not name.startswith("__") and name not in allowed for name in vars(base)):
+            return None, "custom view attributes or lifecycle hooks require manual migration"
+    if (
+        view.metadata_class is not APIView.metadata_class
+        or view.content_negotiation_class is not APIView.content_negotiation_class
+    ):
+        return None, "custom metadata or negotiation requires manual migration"
+    if view.versioning_class or api_settings.EXCEPTION_HANDLER is not exception_handler:
+        return None, "versioning or custom exception handling requires manual migration"
+    if auth and api_settings.UNAUTHENTICATED_USER is not None:
+        return None, "custom authentication currently requires UNAUTHENTICATED_USER=None"
+    prelude = f"_negotiate_json({api_settings.URL_FORMAT_OVERRIDE!r})\n"
+    prelude += auth + "\n" if auth else ""
+    if auth:
+        prelude += "g._auth_header = _RouteAuth().authenticate_header(request)\n"
+        prelude += "g.user, g.auth = _RouteAuth().authenticate(request) or (None, None)\n"
+    if method == "OPTIONS":
+        if any("options" in vars(base) for base in view.__mro__[: view.__mro__.index(APIView)]):
+            return None, "custom OPTIONS requires manual migration"
+        instance = view()
+        metadata = {
+            "name": instance.get_view_name(),
+            "description": instance.get_view_description(),
+            "renders": [r.media_type for r in view.renderer_classes],
+            "parses": [p.media_type for p in view.parser_classes],
+        }
+        return "def options(**kwargs):\n" + textwrap.indent(
+            prelude + f"return Response({metadata!r})", "    "
+        ), ""
     function = getattr(view, method.lower(), None)
-    if function is None or method in {"HEAD", "OPTIONS"}:
-        return None, "implicit HEAD and OPTIONS behavior requires manual migration"
+    if method == "HEAD" and function is None:
+        function = getattr(view, "get", None)
+    if function is None:
+        return None, "handler missing"
     node = ast.parse(textwrap.dedent(inspect.getsource(function))).body[0]
     if not isinstance(node, ast.FunctionDef) or node.decorator_list:
         return None, "decorated or asynchronous handlers require manual migration"
@@ -197,6 +232,7 @@ def _handler(view: Any, method: str) -> tuple[str | None, str]:
         return None, "shadowed builtins require manual migration"
     used = {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
     imports = []
+    serializers = set()
     for name in sorted(used - bound - builtins - {"request", "Response"}):
         value = function.__globals__.get(name)
         statement = (
@@ -205,9 +241,56 @@ def _handler(view: Any, method: str) -> tuple[str | None, str]:
             else _model_import(name, value)
         )
         if statement is None:
+            statement = serializer(name, value)
+            if statement is not None:
+                serializers.add(name)
+        if (
+            statement is None
+            and inspect.isfunction(value)
+            and isolated_module(inspect.getmodule(value))
+        ):
+            statement = f"from {value.__module__} import {value.__name__} as {name}"
+        if statement is None:
             return None, "handler depends on unsupported source globals, serializers or services"
         imports.extend(ast.parse(statement).body)
     parents = {child: parent for parent in ast.walk(node) for child in ast.iter_child_nodes(parent)}
+    serializer_instances = set()
+    for item in ast.walk(node):
+        if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Load) and item.id in serializers:
+            parent = parents.get(item)
+            assignment = parents.get(parent) if parent is not None else None
+            if (
+                not isinstance(parent, ast.Call)
+                or parent.func is not item
+                or parent.args
+                or [k.arg for k in parent.keywords] != ["data"]
+                or not isinstance(assignment, ast.Assign)
+                or len(assignment.targets) != 1
+                or not isinstance(assignment.targets[0], ast.Name)
+            ):
+                return None, "only serializer(data=...) validation is converted"
+            serializer_instances.add(assignment.targets[0].id)
+    for item in ast.walk(node):
+        if (
+            isinstance(item, ast.Name)
+            and isinstance(item.ctx, ast.Load)
+            and item.id in serializer_instances
+        ):
+            parent = parents.get(item)
+            if not isinstance(parent, ast.Attribute) or parent.attr not in {
+                "is_valid",
+                "validated_data",
+                "errors",
+            }:
+                return None, "serializer saves and representation require manual migration"
+            if parent.attr == "is_valid":
+                call = parents.get(parent)
+                if (
+                    not isinstance(call, ast.Call)
+                    or call.args
+                    or any(k.arg != "raise_exception" for k in call.keywords)
+                ):
+                    return None, "nonstandard serializer validation requires manual migration"
     for item in list(ast.walk(node)):
         if isinstance(item, ast.Name) and item.id == "request":
             parent = parents.get(item)
@@ -220,8 +303,12 @@ def _handler(view: Any, method: str) -> tuple[str | None, str]:
             and isinstance(item.value, ast.Name)
             and item.value.id == "request"
         ):
-            if item.attr not in {"query_params", "method", "data"}:
+            if item.attr not in {"query_params", "method", "data", "headers", "user", "auth"}:
                 return None, f"request.{item.attr} semantics require manual migration"
+            if item.attr in {"user", "auth"}:
+                if not auth:
+                    return None, "unauthenticated user defaults require manual migration"
+                item.value.id = "g"
             if item.attr == "data":
                 if (
                     list(view.parser_classes) != [JSONParser]
@@ -267,7 +354,7 @@ def _handler(view: Any, method: str) -> tuple[str | None, str]:
             return self.generic_visit(item)
 
     node = cast(ast.FunctionDef, JsonBody().visit(node))
-    node.body = imports + node.body
+    node.body = ast.parse(prelude).body + imports + node.body
     return ast.unparse(ast.fix_missing_locations(node)), ""
 
 
@@ -307,6 +394,14 @@ def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
                 if actions
                 else [m for m in getattr(view, "http_method_names", []) if hasattr(view, m)]
             )
+            if (
+                not actions
+                and view
+                and "get" in methods
+                and "head" not in methods
+                and "head" in view.http_method_names
+            ):
+                methods.insert(methods.index("get") + 1, "head")
             path = _flask_path(raw) if supported else None
             for method in methods or ["get"]:
                 source, reason = (
@@ -330,6 +425,11 @@ def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
                         "classification": "native" if source else "needs_adaptation",
                         "reasons": [reason] if reason else [],
                         "view": f"{view.__module__}.{view.__name__}" if view else repr(callback),
+                        "allow": ", ".join(
+                            m.upper()
+                            for m in getattr(view, "http_method_names", [])
+                            if m in methods
+                        ),
                     }
                 )
 
@@ -352,6 +452,9 @@ django.setup()
 from flask import Flask, g, jsonify, request
 from flask.json.provider import DefaultJSONProvider
 from django.db.models.query import QuerySet
+from sanka_native import (
+    _Input, _ValidationError, _exceptions, AuthenticationFailed, SimpleNamespace,
+)
 
 class _OrmJSON(DefaultJSONProvider):
     @staticmethod
@@ -374,6 +477,16 @@ class _OrmJSON(DefaultJSONProvider):
         return DefaultJSONProvider.default(value)
 
 app = Flask(__name__)
+
+class _NativeResponse(app.response_class):
+    def get_wsgi_headers(self, environ):
+        headers = super().get_wsgi_headers(environ)
+        # Werkzeug strips Allow on 304; DRF's conditional responses retain it.
+        if self.status_code == 304 and "Allow" in self.headers:
+            headers["Allow"] = self.headers["Allow"]
+        return headers
+
+app.response_class = _NativeResponse
 app.json = _OrmJSON(app)
 app.json.sort_keys = False
 
@@ -384,6 +497,26 @@ class _RequestError(Exception):
 @app.errorhandler(_RequestError)
 def _request_error(error):
     return Response({"detail": error.detail}, status=error.status)
+
+@app.errorhandler(_ValidationError)
+def _validation_error(error):
+    return Response(error.detail, status=400)
+
+@app.errorhandler(AuthenticationFailed)
+def _authentication_error(error):
+    header = getattr(g, "_auth_header", None)
+    return Response({"detail": error.detail}, status=401 if header else 403,
+                    headers={"WWW-Authenticate": header} if header else {})
+
+@app.after_request
+def _allow_header(response):
+    if request.url_rule is not None:
+        allow = _allowed.get(request.url_rule.rule)
+        if allow:
+            response.headers["Allow"] = allow
+    return response
+
+_allowed = {}
 
 def _json_data():
     if hasattr(g, "_sanka_json_data"):
@@ -403,6 +536,14 @@ def _json_data():
         return g._sanka_json_data
     except (ValueError, UnicodeError) as error:
         raise _RequestError("JSON parse error - " + str(error), 400) from error
+
+def _negotiate_json(format_key):
+    if format_key and _query_get(format_key) not in (None, "", "json"):
+        raise _RequestError("Not found.", 404)
+    accepted = [part.split(";", 1)[0].strip()
+                for part in request.headers.get("Accept", "*/*").split(",")]
+    if not any(media in {"*/*", "application/*", "application/json"} for media in accepted):
+        raise _RequestError("Could not satisfy the request Accept header.", 406)
 
 def _query_get(key, default=None):
     values = request.args.getlist(key)
@@ -435,10 +576,40 @@ def Response(data=None, status=200, headers=None):
             f"app.add_url_rule({path!r}, {name!r}, {name}, "
             f"methods={[route['method']]!r}, provide_automatic_options=False)"
         )
+        pieces.append(f"_allowed[{path!r}] = {route.get('allow', '')!r}")
         if route["method"] == "GET":
             pieces.append(
                 f"for rule in app.url_map.iter_rules({name!r}):\n    rule.methods.discard('HEAD')"
             )
+        if route["method"] == "OPTIONS" and route["source"]:
+            fallback = ast.parse(route["source"]).body[0]
+            assert isinstance(fallback, ast.FunctionDef)
+            fallback.name = name + "_method_not_allowed"
+            fallback.body[-1] = ast.parse(
+                "return Response({'detail': 'Method \"' + request.method + "
+                "'\" not allowed.'}, status=405)"
+            ).body[0]
+            pieces.append(ast.unparse(fallback))
+            methods = [
+                m
+                for m in (
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "HEAD",
+                    "OPTIONS",
+                    "TRACE",
+                    "CONNECT",
+                )
+                if m not in route["allow"].split(", ")
+            ]
+            if methods:
+                pieces.append(
+                    f"app.add_url_rule({path!r}, {fallback.name!r}, {fallback.name}, "
+                    f"methods={methods!r}, provide_automatic_options=False)"
+                )
     settings = f"""from {scan["settings_module"]} import *
 INSTALLED_APPS = [a for a in INSTALLED_APPS if not a.startswith("rest_framework")]
 MIDDLEWARE = []
@@ -448,6 +619,7 @@ urlpatterns = []
     gaps = [r for r in scan["routes"] if r["classification"] != "native"]
     return {
         "target_app.py": "\n\n".join(pieces) + "\n",
+        "sanka_native.py": Path(__file__).with_name("native_runtime.py").read_text(),
         "sanka_flask_settings.py": settings,
         "migration-gaps.json": json.dumps(gaps, indent=2, sort_keys=True) + "\n",
         "requirements-flask.txt": "Flask>=3.1,<4\n"
@@ -542,6 +714,23 @@ def _verify(request: ExtensionRequest) -> ExtensionResponse:
     return success_response(request, data=data, artifacts=paths)
 
 
+def _reviewed_plan(request: ExtensionRequest) -> tuple[dict[str, Any], str]:
+    artifacts = Path(request.artifact_root)
+    root = Path(request.project_root).resolve()
+    config = request.configuration
+    plan = json.loads((artifacts / "plan-flask.json").read_text())
+    digest = plan.pop("plan_hash")
+    if (
+        not request.reviewed_plan_hash
+        or config.get("extension_plan_hash") != digest
+        or _hash(plan) != digest
+    ):
+        raise ValueError("apply requires the current reviewed core and extension plan hashes")
+    if plan["source_hash"] != _source_hash(root):
+        raise ValueError("source changed after plan; scan and review again")
+    return plan, digest
+
+
 def handle(request: ExtensionRequest) -> ExtensionResponse:
     try:
         root = Path(request.project_root).resolve()
@@ -551,6 +740,59 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             raise ValueError("extension identity does not match sanka/drf-to-flask")
         if request.command == "verify":
             return _verify(request)
+        if request.command == "test":
+            plan, _ = _reviewed_plan(request)
+            output = _within(root, str(config.get("output") or plan["output"]))
+            if config.get("bench_candidate"):
+                output = _within(root, str(Path(str(config["bench_candidate"])) / "overlay"))
+            if plan["needs_adaptation_routes"]:
+                raise ValueError(
+                    "generated scope contains manual gaps; "
+                    "implement them and use scenario verification"
+                )
+            for name in plan["files"]:
+                path = output / name
+                if path.is_symlink() or not path.is_file():
+                    raise ValueError(f"missing or unsafe generated file: {name}")
+                if path.read_text() != plan["files"][name]:
+                    raise ValueError(
+                        "generated file changed; verify repaired candidates with scenarios"
+                    )
+                if path.suffix == ".py":
+                    compile(path.read_text(), name, "exec")
+            probe = (
+                "import sys; import target_app; from flask import Flask; "
+                "assert isinstance(target_app.app, Flask); "
+                "assert not any(m == 'rest_framework' or m.startswith('rest_framework.') "
+                "for m in sys.modules)"
+            )
+            result = subprocess.run(
+                [str(config.get("candidate_python") or sys.executable), "-c", probe],
+                cwd=output,
+                env=os.environ
+                | {
+                    "PYTHONPATH": os.pathsep.join(
+                        filter(None, (str(output), str(root), os.environ.get("PYTHONPATH")))
+                    )
+                },
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode:
+                raise ValueError("generated native app failed to boot: " + result.stderr[-2000:])
+            return success_response(
+                request,
+                data={
+                    "ok": True,
+                    "scope": "generated syntax and native boot",
+                    "output": str(output),
+                },
+                next_actions=["verify --scenarios <scenario-file>"],
+                limitations=[
+                    "Boot does not establish HTTP or database parity; run scenario verification."
+                ],
+            )
         if request.command == "scan":
             with contextlib.redirect_stdout(io.StringIO()):
                 data = _scan(root, config)
@@ -587,18 +829,7 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             artifact = artifacts / "plan-flask.json"
             _write_json(artifact, data)
         elif request.command == "apply":
-            plan = json.loads((artifacts / "plan-flask.json").read_text())
-            digest = plan.pop("plan_hash")
-            if (
-                not request.reviewed_plan_hash
-                or config.get("extension_plan_hash") != digest
-                or _hash(plan) != digest
-            ):
-                raise ValueError(
-                    "apply requires the current reviewed core and extension plan hashes"
-                )
-            if plan["source_hash"] != _source_hash(root):
-                raise ValueError("source changed after plan; scan and review again")
+            plan, digest = _reviewed_plan(request)
             minimum = config.get("min_readiness", 0)
             if (
                 isinstance(minimum, bool)

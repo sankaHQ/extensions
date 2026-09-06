@@ -182,3 +182,36 @@ def test_private_report_cannot_be_written_into_public_repo(
         gate.main()
     assert error.value.code == 2
     assert not output.exists()
+
+
+def test_flask_protocol_uses_flask_converter(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    request = ExtensionRequest(
+        "flask-scan",
+        "scan",
+        str(tmp_path),
+        str(tmp_path),
+        "sanka/drf-to-flask",
+        "0.1.0a2",
+        "a" * 64,
+        {},
+        {},
+        (),
+        None,
+    )
+    seen = []
+
+    def run(args, **kwargs):
+        seen.extend(args)
+        return subprocess.CompletedProcess(
+            args, 0, json.dumps(encode_response(success_response(request, data={}))), ""
+        )
+
+    monkeypatch.setattr(gate.subprocess, "run", run)
+    gate.invoke(Path("python"), request, {})
+    assert seen == ["python", "-m", "sanka_extension_drf_to_flask"]
+
+
+def test_converter_closure_contains_both_frameworks() -> None:
+    assert any("drf-to-flask" in str(path) for path in gate.CONVERTER_SOURCES)

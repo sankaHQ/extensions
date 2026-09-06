@@ -3,6 +3,7 @@
     "apply",
     "plan",
     "scan",
+    "test",
     "verify"
   ],
   "distribution": {
@@ -56,7 +57,7 @@
     },
     {
       "name": "sanka_extension_drf_to_flask-0.1.0a2-py3-none-any.whl",
-      "sha256": "16e852a718d2c6a1f94763f3643759d596c1d36a535910c2f525f0bf46a989f2",
+      "sha256": "fa1bd5cd20119716af77dacb30ed5ebb104f191654ff9efe4c55ed2fea207da2",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a15/sanka_extension_drf_to_flask-0.1.0a2-py3-none-any.whl"
     }
   ]

@@ -1,5 +1,5 @@
 {
-  "benchmark_revision": "707f469f6ceb5c16feefb2b32682b8d9186b9079",
+  "benchmark_revision": "77a1d763536dbd00eb26db34c952788cc74b2fb5",
   "route_envelope": {
     "drf-fastapi-001": [7, 7],
     "drf-fastapi-002": [7, 7],
@@ -11,7 +11,13 @@
     "drf-fastapi-008": [7, 29],
     "drf-fastapi-009": [0, 12],
     "drf-fastapi-010": [0, 5],
-    "drf-fastapi-011": [0, 5]
+    "drf-fastapi-011": [0, 5],
+    "drf-flask-001": [0, 5],
+    "drf-flask-002": [0, 12],
+    "drf-flask-003": [1, 9],
+    "drf-flask-004": [0, 5],
+    "drf-flask-005": [5, 5],
+    "drf-flask-006": [6, 6]
   },
   "partial_evaluation_floors": {
     "drf-fastapi-004": {
@@ -80,6 +86,50 @@
         "native_compliance": [32, 32],
         "route_coverage": [32, 32],
         "side_effect_parity": [32, 32]
+      }
+    },
+    "drf-flask-001": {
+      "required_gates": [
+        "source_qualified",
+        "regression_tests",
+        "target_boot",
+        "deterministic"
+      ],
+      "metrics": {
+        "behavioral_parity": [0, 32]
+      }
+    },
+    "drf-flask-002": {
+      "required_gates": [
+        "source_qualified",
+        "regression_tests",
+        "target_boot",
+        "deterministic"
+      ],
+      "metrics": {
+        "behavioral_parity": [0, 32]
+      }
+    },
+    "drf-flask-003": {
+      "required_gates": [
+        "source_qualified",
+        "regression_tests",
+        "target_boot",
+        "deterministic"
+      ],
+      "metrics": {
+        "behavioral_parity": [0, 32]
+      }
+    },
+    "drf-flask-004": {
+      "required_gates": [
+        "source_qualified",
+        "regression_tests",
+        "target_boot",
+        "deterministic"
+      ],
+      "metrics": {
+        "behavioral_parity": [0, 32]
       }
     }
   }

@@ -33,6 +33,7 @@ MANIFEST = ROOT / "scripts" / "converter_bench.json"
 EXTENSION = ROOT / "packages" / "sanka-extension-drf-to-fastapi"
 CONVERTER_SOURCES = (
     EXTENSION / "src",
+    ROOT / "packages/sanka-extension-drf-to-flask/src",
     ROOT / "packages/sanka-extension-sdk/src",
     ROOT / "packages/sanka-drf-replay/src",
 )
@@ -52,6 +53,7 @@ def converter_input_sha256() -> str:
         Path(__file__).resolve(),
         ROOT / "uv.lock",
         EXTENSION / "extension.json",
+        ROOT / "packages/sanka-extension-drf-to-flask/extension.json",
         *(path for source in CONVERTER_SOURCES for path in source.rglob("*.py")),
     }
     digest = hashlib.sha256()
@@ -90,7 +92,7 @@ def preflight(bench: Path, manifest: dict[str, Any]) -> Path:
         "uv.lock",
     ):
         raise ValueError("Bench evaluator, fixtures and dependency lock must be clean")
-    tasks = {path.parent.name for path in (bench / "tasks" / "drf-fastapi").glob("*/task.yaml")}
+    tasks = {path.parent.name for path in (bench / "tasks").glob("*/*/task.yaml")}
     if tasks != set(manifest["route_envelope"]):
         raise ValueError("Bench tasks differ from the reviewed route envelope")
     python = bench / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -116,7 +118,14 @@ def invoke(
     python: Path, request: ExtensionRequest, environment: dict[str, str]
 ) -> ExtensionResponse:
     outcome = subprocess.run(
-        [str(python), "-m", "sanka_extension_drf_to_fastapi"],
+        [
+            str(python),
+            "-m",
+            {
+                "sanka/drf-to-fastapi": "sanka_extension_drf_to_fastapi",
+                "sanka/drf-to-flask": "sanka_extension_drf_to_flask",
+            }[request.extension_id],
+        ],
         input=json.dumps(encode_request(request)),
         cwd=request.project_root,
         env=environment,
@@ -188,12 +197,15 @@ def evaluation_error(
 
 
 def run_task(task: str, bench: Path, python: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    flask = task.startswith("drf-flask-")
+    lane = "drf-flask" if flask else "drf-fastapi"
+    extension = ROOT / "packages" / f"sanka-extension-{lane.replace('drf-', 'drf-to-')}"
     with tempfile.TemporaryDirectory(prefix=f"converter-{task}-") as temporary:
         root = Path(temporary).resolve()
         # Even the source-side regression commands run against a disposable task.
         task_root = root / "task"
         shutil.copytree(
-            bench / "tasks" / "drf-fastapi" / task,
+            bench / "tasks" / lane / task,
             task_root,
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
@@ -201,8 +213,8 @@ def run_task(task: str, bench: Path, python: Path, manifest: dict[str, Any]) -> 
         shutil.copytree(task_root / "source", project)
         artifacts = root / "extension-artifacts"
         artifacts.mkdir()
-        candidate = root / "candidate"
-        extension_manifest = (EXTENSION / "extension.json").read_bytes()
+        candidate = project / ".sanka/candidate" if flask else root / "candidate"
+        extension_manifest = (extension / "extension.json").read_bytes()
         identity = json.loads(extension_manifest)
         environment = clean_environment()
         # Use the benchmark's pinned Django/DRF environment for both source
@@ -231,10 +243,10 @@ def run_task(task: str, bench: Path, python: Path, manifest: dict[str, Any]) -> 
             prior_artifacts=scan.artifacts,
             configuration={
                 "generation": "minimal",
-                "output": str(root / "generated"),
+                "output": str(project / ".sanka/generated" if flask else root / "generated"),
                 "strategy": "native",
                 "package_manager": "pip",
-                "orm": "tortoise",
+                "orm": "django" if flask else "tortoise",
             },
         )
         plan_response = invoke(python, request, environment)
@@ -265,7 +277,7 @@ def run_task(task: str, bench: Path, python: Path, manifest: dict[str, Any]) -> 
             },
         )
         applied = invoke(python, request, environment)
-        refused = native == 0 or native / eligible < 0.5
+        refused = not flask and (native == 0 or native / eligible < 0.5)
         if refused:
             if (
                 applied.error is None
@@ -284,7 +296,7 @@ def run_task(task: str, bench: Path, python: Path, manifest: dict[str, Any]) -> 
             "default_refusal_verified": refused,
             "plan_hash": plan["plan_hash"],
         }
-        if native == 0:
+        if native == 0 and not flask:
             return {**summary, "outcome": "expected_refusal"}
         if refused:
             applied = invoke(
@@ -297,7 +309,20 @@ def run_task(task: str, bench: Path, python: Path, manifest: dict[str, Any]) -> 
                 environment,
             )
             require_success(applied)
-        if not (candidate / "GAP-REPORT.md").is_file():
+        if flask:
+            if not (candidate / "overlay/migration-gaps.json").is_file():
+                raise ValueError("generated Flask candidate omitted its gap disclosure")
+            (candidate / "candidate.yaml").write_text(
+                "schema_version: sanka-bench/candidate/v0.1\nid: generated-flask\n"
+                "kind: overlay\noverlay: overlay\nprovenance:\n"
+                "  producer: sanka-extension\n  revision: reviewed-converter\n"
+                "  command: deterministic apply\n"
+            )
+            if native == eligible:
+                tested = invoke(python, replace(request, command="test"), environment)
+                require_success(tested)
+                summary["generated_test_passed"] = True
+        elif not (candidate / "GAP-REPORT.md").is_file():
             raise ValueError("generated candidate omitted its gap disclosure")
         result_path = root / "evaluation.json"
         evaluated = subprocess.run(

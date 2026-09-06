@@ -5,29 +5,35 @@ resolved DRF routes, creates a deterministic reviewed plan, and emits a native
 Flask target plus ORM-only Django settings and a machine-readable gap inventory.
 It never imports the Sanka runtime or the FastAPI extension.
 
-This alpha converts recognized JSON `APIView` methods with explicit
-`AllowAny`, no authentication, no throttling, JSON-only rendering and no source
-middleware. Supported handlers use local values, basic builtins, query parameters
-and `Response(data, status=..., headers=...)`. It also converts JSON-only request
-bodies with the standard strict JSONParser, isolated Django model imports and
-`transaction.atomic()` blocks. Source validation and ORM operations stay intact;
-malformed JSON, empty bodies and unsupported content types have differential tests.
-Model modules with imports outside the small ORM/stdlib allowlist remain gaps.
-Other source globals, serializers, viewsets, custom lifecycle hooks, form/multipart
-bodies, authentication and implicit HEAD/OPTIONS remain
-manual gaps. Unsupported mapped routes return 501 in generated code; unsupported
-URL patterns are listed without inventing a route. Readiness counts converted
-method/path pairs, not scaffolded placeholders, and is not an accuracy score.
+This alpha converts recognized JSON APIView handlers and configuration-only
+APIView inheritance. It preserves JSON parsing, isolated Django ORM modules,
+transaction blocks, and framework-independent project functions whose transitive
+imports stay inside the permitted ORM/stdlib boundary.
 
-Use the existing CLI marketplace/project lock to select `sanka/drf-to-flask`, then
-scan, plan with `--to flask --strategy native --generation minimal`, and apply the
-reviewed **core** plan hash. The generated directory is an overlay: run it with
-the original application's ORM modules on the Python path and its pinned source
-dependencies plus Flask 3.1 installed in the destination environment. Inspect
-`migration-gaps.json`, repair only the required gaps, and compare source/candidate
-responses, database state and side effects in independent tests. No Django/DRF
-request dispatcher is carried into the target. This version does not offer the
-FastAPI extension's differential replay command.
+The native envelope also includes plain serializers with CharField/IntegerField
+validation and self-independent object validation, plus a single self-independent
+header authenticator returning a user/token pair or raising AuthenticationFailed.
+That authentication subset requires AllowAny and UNAUTHENTICATED_USER=None;
+session authentication, multiple authenticators, custom permissions, throttling,
+custom dispatch, serializer saves/nested fields, and middleware remain manual gaps.
+No DRF classes are imported by the generated serving process. Recognized HEAD,
+OPTIONS, method rejection, JSON content negotiation, and conditional Allow headers
+are generated alongside handlers. Readiness counts converted method/path pairs,
+not placeholders, and does not certify untested behavior.
+
+Use `sanka/drf-to-flask` through the CLI marketplace/project lock. Follow
+`scan → plan --to flask --strategy native --generation minimal → apply → test → verify`.
+Apply requires the reviewed **core** plan hash. The output is an overlay: retain the
+original ORM modules and dependencies on the target Python path and install Flask
+in the target environment. `test` checks the unchanged generated files compile and
+the native Flask app boots without DRF. It rejects plans with manual gaps; it does
+not claim HTTP or database parity. `verify --scenarios` performs that comparison
+with isolated fixtures. For an already repaired candidate, preserve the changes and
+use scenario verification instead of regenerating a plan just to rerun its test gate.
+
+Unsupported mapped routes still return 501 and remain listed in migration-gaps.json.
+Those are incomplete migrations. Repair explicit gaps only; prefer reusing domain
+functions and extension replay over recreating them in a model-written test harness.
 
 Apply rejects changed source, tampered plans, changed output locations, symlinks,
 existing output directories and collisions with original source files. It does
