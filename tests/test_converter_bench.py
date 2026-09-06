@@ -102,6 +102,19 @@ def test_pinned_benchmark_source_wins_over_current_directory(tmp_path: Path) -> 
     assert Path(module) == pinned
 
 
+def test_converter_imports_with_only_reviewed_source_paths(tmp_path: Path) -> None:
+    environment = gate.clean_environment()
+    environment["PYTHONPATH"] = gate.converter_pythonpath()
+    result = subprocess.run(
+        [sys.executable, "-S", "-P", "-c", "import sanka_extension_drf_to_fastapi.adapter"],
+        cwd=tmp_path,
+        env=environment,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("wrong_identity,returncode", [(True, 0), (False, 1)])
 def test_stdio_rejects_wrong_response_identity_or_exit_status(
     monkeypatch: pytest.MonkeyPatch,
