@@ -6,6 +6,10 @@
       "manifest": "packages/sanka-extension-drf-to-fastapi/extension.json"
     },
     {
+      "id": "sanka/drf-to-flask",
+      "manifest": "packages/sanka-extension-drf-to-flask/extension.json"
+    },
+    {
       "id": "sanka/markdown",
       "manifest": "packages/sanka-connector-markdown/extension.json"
     },

@@ -33,6 +33,10 @@ CATALOG: dict[str, Any] = {
             "id": "sanka/drf-to-fastapi",
             "manifest": "packages/sanka-extension-drf-to-fastapi/extension.json",
         },
+        {
+            "id": "sanka/drf-to-flask",
+            "manifest": "packages/sanka-extension-drf-to-flask/extension.json",
+        },
         {"id": "sanka/markdown", "manifest": "packages/sanka-connector-markdown/extension.json"},
         {"id": "sanka/csv", "manifest": "packages/sanka-connector-csv/extension.json"},
         {"id": "sanka/sqlite", "manifest": "packages/sanka-connector-sqlite/extension.json"},
@@ -140,7 +144,23 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
         "providers": [{"name": "clickhouse", "roles": ["destination"]}],
     },
 }
-MANIFESTS = {"sanka-extension-drf-to-fastapi": MIGRATION_MANIFEST, **CONNECTOR_MANIFESTS}
+FLASK_MANIFEST = {
+    **MIGRATION_MANIFEST,
+    "id": "sanka/drf-to-flask",
+    "version": "0.1.0a1",
+    "commands": ["apply", "plan", "scan"],
+    "targets": ["flask"],
+    "distribution": {
+        "name": "sanka-extension-drf-to-flask",
+        "version": "0.1.0a1",
+        "executable": "sanka-extension-drf-to-flask",
+    },
+}
+MANIFESTS = {
+    "sanka-extension-drf-to-fastapi": MIGRATION_MANIFEST,
+    "sanka-extension-drf-to-flask": FLASK_MANIFEST,
+    **CONNECTOR_MANIFESTS,
+}
 CONNECTOR_ENTRY_POINTS = {
     "sanka-connector-markdown": {"markdown": "sanka_connector_markdown:CONNECTOR"},
     "sanka-connector-csv": {"csv": "sanka_connector_csv:CONNECTOR"},
@@ -278,11 +298,11 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
                 errors.append(f"{name} wheel does not depend on its exact connector SDK")
             if connector_entries != CONNECTOR_ENTRY_POINTS[name]:
                 errors.append(f"{name} wheel has no exact connector entry point")
-        elif name == "sanka-extension-drf-to-fastapi":
+        elif name in {"sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask"}:
             if requirements != ["sanka-extension-sdk==0.1.0a1"]:
                 errors.append(f"{name} must depend exactly on sanka-extension-sdk==0.1.0a1")
             if _entry_points(entries, "console_scripts") != {
-                name: "sanka_extension_drf_to_fastapi.__main__:main"
+                name: f"{name.replace('-', '_')}.__main__:main"
             }:
                 errors.append(f"{name} wheel has no exact executable entry point")
         else:

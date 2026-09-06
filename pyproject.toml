@@ -21,6 +21,7 @@ dev = [
   "django>=5.2,<7",
   "djangorestframework>=3.16,<4",
   "fastapi>=0.115,<1",
+  "flask>=3.1,<4",
   "httpx>=0.27,<1",
   "mypy>=1.14",
   "psycopg[binary]>=3.2,<4",
@@ -56,6 +57,7 @@ known-first-party = [
   "sanka_connector_sqlite",
   "sanka_extension_sdk",
   "sanka_extension_drf_to_fastapi",
+  "sanka_extension_drf_to_flask",
 ]
 
 [tool.mypy]

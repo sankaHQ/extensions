@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ROOT / "packages"
 SDK_NAME = "sanka-connector-sdk"
 EXTENSION_SDK_NAME = "sanka-extension-sdk"
-EXTENSION_NAME = "sanka-extension-drf-to-fastapi"
+EXTENSION_NAMES = ("sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask")
 HOSTED_SYSTEM_PROVIDERS = frozenset({"hubspot", "salesforce", "sendgrid"})
 
 
@@ -97,19 +97,17 @@ def main() -> int:
     if extension_sdk_project.get("dependencies") != []:
         errors.append(f"{EXTENSION_SDK_NAME} must have zero runtime dependencies")
     extension_version = str(extension_sdk_project["version"])
-    for package in (extension_sdk, PACKAGES / EXTENSION_NAME):
+    for package in (extension_sdk, *(PACKAGES / name for name in EXTENSION_NAMES)):
         own_module = package.name.replace("-", "_")
         allowed_modules: tuple[str, ...] = (own_module,)
         project = _project(package)
-        if package.name == EXTENSION_NAME:
+        if package.name in EXTENSION_NAMES:
             allowed_modules += ("sanka_extension_sdk",)
             expected_dependency = f"{EXTENSION_SDK_NAME}=={extension_version}"
             if project.get("dependencies") != [expected_dependency]:
-                errors.append(f"{EXTENSION_NAME} must depend exactly on {expected_dependency}")
-            if project.get("scripts") != {
-                EXTENSION_NAME: "sanka_extension_drf_to_fastapi.__main__:main"
-            }:
-                errors.append(f"{EXTENSION_NAME} must own its exact executable entry point")
+                errors.append(f"{package.name} must depend exactly on {expected_dependency}")
+            if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
+                errors.append(f"{package.name} must own its exact executable entry point")
         for source in sorted((package / "src").rglob("*.py")):
             if not source.read_text(encoding="utf-8").startswith(
                 "# SPDX-License-Identifier: Apache-2.0"

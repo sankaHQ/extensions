@@ -6,8 +6,17 @@ from pathlib import Path
 
 import yaml
 
-RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a13/"
+RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a14/"
 EXPECTED = {
+    "sanka/drf-to-flask": {
+        "kind": "migration",
+        "protocol_version": "sanka-extension/v1",
+        "distribution": {
+            "name": "sanka-extension-drf-to-flask",
+            "version": "0.1.0a1",
+            "executable": "sanka-extension-drf-to-flask",
+        },
+    },
     "sanka/drf-to-fastapi": {
         "kind": "migration",
         "protocol_version": "sanka-extension/v1",
@@ -103,6 +112,7 @@ def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> No
     ]
     assert destinations == [
         "release-assets/sanka-extension-drf-to-fastapi.json",
+        "release-assets/sanka-extension-drf-to-flask.json",
         "release-assets/sanka-connector-markdown.json",
         "release-assets/sanka-connector-csv.json",
         "release-assets/sanka-connector-sqlite.json",

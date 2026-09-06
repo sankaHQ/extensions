@@ -2,16 +2,14 @@
   "commands": [
     "apply",
     "plan",
-    "scan",
-    "test",
-    "verify"
+    "scan"
   ],
   "distribution": {
-    "executable": "sanka-extension-drf-to-fastapi",
-    "name": "sanka-extension-drf-to-fastapi",
-    "version": "0.1.0a3"
+    "executable": "sanka-extension-drf-to-flask",
+    "name": "sanka-extension-drf-to-flask",
+    "version": "0.1.0a1"
   },
-  "id": "sanka/drf-to-fastapi",
+  "id": "sanka/drf-to-flask",
   "kind": "migration",
   "match": {
     "all": [
@@ -41,9 +39,9 @@
   },
   "schema_version": "sanka-extension-manifest/v2",
   "targets": [
-    "fastapi"
+    "flask"
   ],
-  "version": "0.1.0a3",
+  "version": "0.1.0a1",
   "wheels": [
     {
       "name": "sanka_extension_sdk-0.1.0a1-py3-none-any.whl",
@@ -51,9 +49,9 @@
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a14/sanka_extension_sdk-0.1.0a1-py3-none-any.whl"
     },
     {
-      "name": "sanka_extension_drf_to_fastapi-0.1.0a3-py3-none-any.whl",
-      "sha256": "13732c82c817a1232192c9e57be191330772eac4ba9c99ff3d6c88246315e79c",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a14/sanka_extension_drf_to_fastapi-0.1.0a3-py3-none-any.whl"
+      "name": "sanka_extension_drf_to_flask-0.1.0a1-py3-none-any.whl",
+      "sha256": "21ef75e0d0332d099f65cddd35e8cd5ecccb6ba253aea441fe098ae947a953c4",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a14/sanka_extension_drf_to_flask-0.1.0a1-py3-none-any.whl"
     }
   ]
 }
