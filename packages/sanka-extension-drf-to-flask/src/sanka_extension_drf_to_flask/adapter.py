@@ -20,9 +20,18 @@ import shutil
 import sys
 import tempfile
 import textwrap
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+from sanka_drf_replay.replay import (
+    DEFAULT_IGNORED_TABLES,
+    ReplayError,
+    edge_probes_from_scan,
+    load_scenarios,
+    replay,
+    save_report,
+)
 from sanka_extension_sdk import (
     ExtensionRequest,
     ExtensionResponse,
@@ -471,6 +480,68 @@ def _apply(root: Path, output: Path, files: dict[str, str]) -> None:
             shutil.rmtree(temporary)
 
 
+def _verify(request: ExtensionRequest) -> ExtensionResponse:
+    config = request.configuration
+    root = Path(request.project_root)
+    artifacts = Path(request.artifact_root)
+
+    def path(name: str) -> Path | None:
+        value = config.get(name)
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value:
+            raise ReplayError(f"{name} must be a non-empty path")
+        return (root / value).absolute()
+
+    scenarios_path = path("scenarios")
+    if scenarios_path is None:
+        raise ReplayError("Flask verification requires --scenarios and a candidate app")
+    scenarios = load_scenarios(scenarios_path)
+    if config.get("edge_probes"):
+        scan_path = artifacts / "scan.json"
+        if not scan_path.is_file():
+            raise ReplayError("--edge-probes needs a scan artifact; run sanka scan first")
+        scan = json.loads(scan_path.read_text())
+        # The Flask scan uses Werkzeug converters, the common probe engine uses braces.
+        for route in scan.get("routes", []):
+            if isinstance(route.get("path"), str):
+                route["path"] = re.sub(r"<(?:[^:>]+:)?([^>]+)>", r"{\1}", route["path"])
+        scenarios += edge_probes_from_scan(scan)
+    ignored = config.get("ignore_tables", list(DEFAULT_IGNORED_TABLES))
+    if isinstance(ignored, str):
+        ignored = [ignored]
+    if not isinstance(ignored, list) or not all(isinstance(item, str) for item in ignored):
+        raise ReplayError("ignore_tables must be an array of strings")
+    report = replay(
+        root,
+        scenarios,
+        settings_module=_settings(root, config),
+        target="flask",
+        candidate_root=path("candidate"),
+        entrypoint=str(config.get("entrypoint") or "target_app.py"),
+        db_env=str(config.get("db_env") or "SANKA_TEST_DB"),
+        seed=path("seed"),
+        ignored_tables=cast(list[str], ignored),
+        all_headers=bool(config.get("all_headers")),
+        python=path("python"),
+        candidate_python=path("candidate_python"),
+    )
+    data = cast(dict[str, JsonValue], save_report(report, artifacts))
+    paths = (str(data["report_path"]),)
+    if not report["ok"]:
+        return replace(
+            failure_response(
+                request,
+                code="SANKA_EXTENSION_REPLAY_MISMATCH",
+                message="scenario replay found differences between source and candidate",
+                details=data,
+            ),
+            data=data,
+            artifacts=paths,
+        )
+    return success_response(request, data=data, artifacts=paths)
+
+
 def handle(request: ExtensionRequest) -> ExtensionResponse:
     try:
         root = Path(request.project_root).resolve()
@@ -478,6 +549,8 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
         config = request.configuration
         if request.extension_id != "sanka/drf-to-flask":
             raise ValueError("extension identity does not match sanka/drf-to-flask")
+        if request.command == "verify":
+            return _verify(request)
         if request.command == "scan":
             with contextlib.redirect_stdout(io.StringIO()):
                 data = _scan(root, config)
@@ -560,7 +633,7 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             return failure_response(
                 request,
                 code="SANKA_EXTENSION_UNSUPPORTED_COMMAND",
-                message="Use independent source/candidate tests; Flask replay is not yet supported",
+                message=f"Flask does not support {request.command}; use verify --scenarios",
             )
         return success_response(
             request,
@@ -572,6 +645,8 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 "Review migration-gaps.json and independently verify all behavior."
             ],
         )
+    except ReplayError as error:
+        return failure_response(request, code="SANKA_EXTENSION_REPLAY_INVALID", message=str(error))
     except Exception as error:
         return failure_response(
             request, code="SANKA_EXTENSION_EXECUTION_FAILED", message=str(error)

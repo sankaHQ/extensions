@@ -104,7 +104,7 @@ def main() -> int:
         if package.name in EXTENSION_NAMES:
             allowed_modules += ("sanka_extension_sdk",)
             expected_dependency = f"{EXTENSION_SDK_NAME}=={extension_version}"
-            if project.get("dependencies") != [expected_dependency]:
+            if project.get("dependencies") != [expected_dependency, "sanka-drf-replay==0.1.0a1"]:
                 errors.append(f"{package.name} must depend exactly on {expected_dependency}")
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
                 errors.append(f"{package.name} must own its exact executable entry point")
@@ -125,6 +125,16 @@ def main() -> int:
                         f"extension imports another extension in "
                         f"{source.relative_to(ROOT)}: {module}"
                     )
+
+    replay = PACKAGES / "sanka-drf-replay"
+    if _project(replay).get("dependencies") != []:
+        errors.append("sanka-drf-replay must have zero runtime dependencies")
+    for source in (replay / "src").rglob("*.py"):
+        if not source.read_text().startswith("# SPDX-License-Identifier: Apache-2.0"):
+            errors.append(f"missing Apache-2.0 SPDX header: {source.relative_to(ROOT)}")
+        for module in _imports(source):
+            if module.split(".")[0] not in sys.stdlib_module_names:
+                errors.append(f"replay must use only stdlib: {source.relative_to(ROOT)}: {module}")
 
     if errors:
         print("Connector boundary validation failed:", file=sys.stderr)

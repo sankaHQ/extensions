@@ -11,9 +11,8 @@ from unittest.mock import patch
 import pytest
 from adapter_cli import run_cli
 
-from sanka_extension_drf_to_fastapi import adapter
-from sanka_extension_drf_to_fastapi import replay as replay_module
-from sanka_extension_drf_to_fastapi.replay import (
+from sanka_drf_replay import replay as replay_module
+from sanka_drf_replay.replay import (
     ReplayError,
     body_difference,
     diff_snapshots,
@@ -23,6 +22,7 @@ from sanka_extension_drf_to_fastapi.replay import (
     replay,
     snapshot_database,
 )
+from sanka_extension_drf_to_fastapi import adapter
 from sanka_extension_sdk import ExtensionRequest
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -286,7 +286,7 @@ def test_verify_with_scenarios_dispatches_to_replay_without_a_plan(tmp_path: Pat
         "schema": "sanka-verify-replay/v1",
         "ok": False,
         "summary": {"scenarios": 1, "matched": 0, "mismatched": 1},
-        "scenarios": [],
+        "scenarios": [{"id": "list", "match": False, "native": {"compliant": True}}],
         "summary_lines": ["0/1 scenarios match", "list [GET /api/x/]: status 200 vs 404"],
     }
     with patch.object(adapter, "replay", return_value=report) as run:
@@ -303,7 +303,9 @@ def test_verify_with_scenarios_dispatches_to_replay_without_a_plan(tmp_path: Pat
     assert response.error is not None
     assert response.error.code == "SANKA_EXTENSION_REPLAY_MISMATCH"
     assert response.data["summary"]["mismatched"] == 1
-    assert response.limitations[-1].startswith("list [GET /api/x/]")
+    assert response.artifacts == (response.data["report_path"],)
+    assert "scenarios" not in response.data
+    assert json.loads(Path(response.data["report_path"]).read_text()) == report
 
 
 def test_verify_with_scenarios_reports_invalid_scenario_files(tmp_path: Path) -> None:
@@ -321,3 +323,54 @@ def test_default_interpreter_prefers_the_checkout_virtualenv(tmp_path: Path) -> 
     interpreter.parent.mkdir(parents=True)
     interpreter.write_text("", encoding="utf-8")
     assert replay_module.default_interpreter(tmp_path, fallback) == interpreter
+
+
+def test_replay_preserves_json_types_and_absent_body(tmp_path: Path) -> None:
+    assert body_difference({"value": True}, {"value": 1}) is not None
+    assert body_difference([False], [0]) is not None
+    assert body_difference(1, 1.0) is None
+    path = tmp_path / "bodies.json"
+    path.write_text(
+        json.dumps(
+            [
+                {"id": "absent", "path": "/"},
+                {"id": "empty", "path": "/", "body": {}},
+                {"id": "null", "path": "/", "body": None},
+            ]
+        )
+    )
+    absent, empty, null = load_scenarios(path)
+    assert "body" not in absent
+    assert empty["body"] == {}
+    assert null["body"] is None and "body" in null
+
+
+def test_compact_report_keeps_full_artifact_and_limits_failures(tmp_path: Path) -> None:
+    reports = [
+        {"id": f"failure-{n}", "match": False, "native": {"compliant": True}} for n in range(25)
+    ]
+    full = {
+        "schema": "sanka-verify-replay/v1",
+        "ok": False,
+        "summary": {"scenarios": 25, "mismatched": 25},
+        "scenarios": reports,
+        "summary_lines": ["0/25"] + [item["id"] for item in reports],
+    }
+    compact = replay_module.save_report(full, tmp_path)
+    assert len(compact["failures"]) == 20
+    assert compact["omitted_failures"] == 5
+    assert "scenarios" not in compact
+    assert json.loads(Path(compact["report_path"]).read_text()) == full
+
+
+def test_replay_cleans_temporary_database_on_failure(tmp_path: Path) -> None:
+    (tmp_path / "target_app.py").touch()
+    temp = tmp_path / "temporary"
+    temp.mkdir()
+    with (
+        patch.object(replay_module.tempfile, "mkdtemp", return_value=str(temp)),
+        patch.object(replay_module, "_run_side", side_effect=ReplayError("failed")),
+        pytest.raises(ReplayError, match="failed"),
+    ):
+        replay(tmp_path, [{"id": "one", "method": "GET", "path": "/"}], settings_module="settings")
+    assert not temp.exists()

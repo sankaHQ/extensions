@@ -1,0 +1,16 @@
+[project]
+name = "sanka-drf-replay"
+version = "0.1.0a1"
+description = "Shared isolated DRF differential replay for Sanka migration extensions"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = []
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sanka_drf_replay"]

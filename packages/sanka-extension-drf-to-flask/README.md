@@ -37,3 +37,24 @@ without copying or modifying the original application.
 The release manifest is staged for the next extension release; a repository PR is
 not a published wheel. Local development: `uv sync --all-packages` and
 `uv run pytest packages/sanka-extension-drf-to-flask/tests`.
+
+
+## Differential replay
+
+`verify` with `scenarios` compares the live DRF source and a repaired candidate,
+without requiring a reviewed plan. Configure the source's settings to read an
+isolated SQLite path from `SANKA_TEST_DB` (or pass `--db-env`). Replay refuses
+settings that point elsewhere, before running migrations or seeds.
+
+```sh
+sanka verify . --scenarios public-tests/scenarios.json --candidate candidate \
+  --settings config.settings --db-env SANKA_TEST_DB --seed seed.py --json
+```
+
+The response gives counts, up to 20 failing scenario messages, and `report_path`.
+The report artifact contains all results; open it only when a failure needs more
+detail. Use `--source-python` and `--candidate-python` for separate source/target virtual
+environments. All fixture databases are temporary and removed after replay.
+Omit a scenario's `body` for no bytes, use `body: null` for JSON null, or
+`body_base64` for raw input. Capture required response headers explicitly.
+The independent benchmark's acceptance and native-compliance gates still apply.

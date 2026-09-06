@@ -12,6 +12,7 @@ package = false
 members = ["packages/*"]
 
 [tool.uv.sources]
+sanka-drf-replay = { workspace = true }
 sanka-connector-sdk = { workspace = true }
 sanka-extension-sdk = { workspace = true }
 
@@ -49,6 +50,7 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
 
 [tool.ruff.lint.isort]
 known-first-party = [
+  "sanka_drf_replay",
   "sanka_connector",
   "sanka_connector_clickhouse",
   "sanka_connector_csv",
