@@ -5,11 +5,16 @@ resolved DRF routes, creates a deterministic reviewed plan, and emits a native
 Flask target plus ORM-only Django settings and a machine-readable gap inventory.
 It never imports the Sanka runtime or the FastAPI extension.
 
-This first release converts stateless JSON `APIView` methods with explicit
+This alpha converts recognized JSON `APIView` methods with explicit
 `AllowAny`, no authentication, no throttling, JSON-only rendering and no source
 middleware. Supported handlers use local values, basic builtins, query parameters
-and `Response(data, status=..., headers=...)`. Source globals, serializers,
-viewsets, custom lifecycle hooks, request bodies and implicit HEAD/OPTIONS remain
+and `Response(data, status=..., headers=...)`. It also converts JSON-only request
+bodies with the standard strict JSONParser, isolated Django model imports and
+`transaction.atomic()` blocks. Source validation and ORM operations stay intact;
+malformed JSON, empty bodies and unsupported content types have differential tests.
+Model modules with imports outside the small ORM/stdlib allowlist remain gaps.
+Other source globals, serializers, viewsets, custom lifecycle hooks, form/multipart
+bodies, authentication and implicit HEAD/OPTIONS remain
 manual gaps. Unsupported mapped routes return 501 in generated code; unsupported
 URL patterns are listed without inventing a route. Readiness counts converted
 method/path pairs, not scaffolded placeholders, and is not an accuracy score.
