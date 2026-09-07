@@ -369,6 +369,7 @@ def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
     from django.urls import URLResolver, get_resolver  # type: ignore[import-untyped]
     from django.urls.converters import IntConverter, StringConverter  # type: ignore[import-untyped]
     from django.urls.resolvers import RoutePattern  # type: ignore[import-untyped]
+    from django.views.defaults import ERROR_PAGE_TEMPLATE  # type: ignore[import-untyped]
 
     routes: list[dict[str, Any]] = []
 
@@ -438,6 +439,11 @@ def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
     routes.sort(key=lambda route: (route["source_path"], route["method"]))
     return {
         "settings_module": module,
+        "default_404_body": ERROR_PAGE_TEMPLATE
+        % {
+            "title": "Not Found",
+            "details": "The requested resource was not found on this server.",
+        },
         "source_hash": _source_hash(root),
         "routes": routes,
         "append_slash": bool(
@@ -566,6 +572,13 @@ def Response(data=None, status=200, headers=None):
     return response
 """
     ]
+    # Freeze the source Django default page; do not dispatch requests through Django.
+    pieces.append(
+        "@app.errorhandler(404)\n"
+        "def _default_not_found(error):\n"
+        f"    return app.response_class({scan['default_404_body']!r}, status=404, "
+        "content_type='text/html; charset=utf-8')\n"
+    )
     no_append_slash = sorted(
         r["path"] for r in scan["routes"] if r["path"] and not r.get("append_slash", True)
     )

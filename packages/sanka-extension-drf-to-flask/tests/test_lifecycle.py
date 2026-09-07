@@ -196,8 +196,8 @@ c=app.test_client()
 responses = [c.open(path, method=method)
     for path in ['/quotes/4?x=1', '/secret', '/absent']
     for method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE']]
-print(json.dumps([(r.status_code, r.headers.get('Location'),
-                   r.get_data().decode() if r.status_code == 301 else None) for r in responses]))
+print(json.dumps([(r.status_code, r.headers.get('Location'), r.headers.get('Content-Type'),
+                   r.get_data().decode()) for r in responses]))
 """
     target = subprocess.run(
         [sys.executable, "-c", probe],
@@ -219,8 +219,8 @@ c=Client()
 responses = [c.generic(method, path)
     for path in ['/quotes/4?x=1', '/secret', '/absent']
     for method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE']]
-print(json.dumps([(r.status_code, r.headers.get('Location'),
-                   r.content.decode() if r.status_code == 301 else None) for r in responses]))
+print(json.dumps([(r.status_code, r.headers.get('Location'), r.headers.get('Content-Type'),
+                   r.content.decode()) for r in responses]))
 """,
         ],
         cwd=tmp_path,
