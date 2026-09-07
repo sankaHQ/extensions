@@ -97,6 +97,9 @@ r = client.get('/quotes/4/?label=ignored&label=bulk')
 assert r.status_code == 200 and r.json == {'label': 'bulk', 'total': 28}
 assert r.headers['X-Quote'] == 'calculated'
 assert client.get('/secret/').status_code == 501
+for method in ('GET', 'POST', 'HEAD', 'OPTIONS'):
+    assert client.open('/quotes/4', method=method).status_code == 404
+assert client.get('/quotes//4/').status_code == 404
 assert client.post('/quotes/4/', json={'value': 3}).status_code == 501
 print(json.dumps({'status': r.status_code, 'body': r.json}))
 """
@@ -168,3 +171,61 @@ def test_non_equivalent_url_matchers_remain_manual_gaps(tmp_path: Path) -> None:
     assert all(
         route["path"] is None and route["classification"] == "needs_adaptation" for route in routes
     )
+
+
+@pytest.mark.parametrize("middleware", [False, True])
+@pytest.mark.parametrize("append_slash", [False, True])
+def test_source_slash_policy(tmp_path: Path, middleware: bool, append_slash: bool) -> None:
+    project(tmp_path)
+    with (tmp_path / "urls.py").open("a") as handle:
+        handle.write(
+            "\nfrom django.views.decorators.common import no_append_slash\n"
+            "urlpatterns[1].callback = no_append_slash(urlpatterns[1].callback)\n"
+        )
+    middleware_names = ["django.middleware.common.CommonMiddleware"] if middleware else []
+    with (tmp_path / "settings.py").open("a") as handle:
+        handle.write(f"\nMIDDLEWARE={middleware_names!r}\nAPPEND_SLASH={append_slash!r}\n")
+    scan = call(tmp_path, "scan")["data"]
+    assert scan["append_slash"] is (middleware and append_slash)
+    plan = call(tmp_path, "plan")["data"]
+    applied = call(tmp_path, "apply", {"extension_plan_hash": plan["plan_hash"]}, "reviewed")
+    output = Path(applied["data"]["output"])
+    probe = """import json
+from target_app import app
+c=app.test_client()
+responses = [c.open(path, method=method)
+    for path in ['/quotes/4?x=1', '/secret', '/absent']
+    for method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE']]
+print(json.dumps([(r.status_code, r.headers.get('Location'),
+                   r.get_data().decode() if r.status_code == 301 else None) for r in responses]))
+"""
+    target = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=output,
+        env=os.environ | {"PYTHONPATH": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    source = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """import os, django, json
+os.environ['DJANGO_SETTINGS_MODULE']='settings'
+django.setup()
+from django.test import Client
+c=Client()
+responses = [c.generic(method, path)
+    for path in ['/quotes/4?x=1', '/secret', '/absent']
+    for method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE']]
+print(json.dumps([(r.status_code, r.headers.get('Location'),
+                   r.content.decode() if r.status_code == 301 else None) for r in responses]))
+""",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads(target.stdout) == json.loads(source.stdout)

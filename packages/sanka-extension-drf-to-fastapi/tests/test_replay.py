@@ -451,7 +451,89 @@ def test_matching_errors_expose_coverage_warnings(tmp_path: Path) -> None:
     assert report["ok"]  # Error-only parity is valid; it is not successful-path coverage.
     assert report["summary"]["source_statuses"] == {"401": 1, "404": 1}
     compact = replay_module.save_report(report, tmp_path / "artifacts")
+    assert compact["coverage_issues"] == [
+        {"code": "missing_success_coverage", "scenario_ids": ["404", "401"]},
+        {"code": "authentication_coverage", "scenario_ids": ["401"]},
+    ]
     assert len(compact["warnings"]) == 2
     assert "--seed" in compact["warnings"][0]
     assert "authenticated" in compact["warnings"][1]
     assert json.loads(Path(compact["report_path"]).read_text())["warnings"] == compact["warnings"]
+
+
+@pytest.mark.parametrize("successful", [False, True])
+@pytest.mark.parametrize("different_context", [None, "headers", "setup", "body", "multipart"])
+def test_explicit_auth_rejection_requires_success_coverage(
+    tmp_path: Path, successful: bool, different_context: str | None
+) -> None:
+    (tmp_path / "target_app.py").touch()
+    reports = [
+        {
+            "id": "expected",
+            "path": "/private/",
+            "method": "OPTIONS",
+            "expected_source_status": 403,
+            "source": {"status": 403},
+        },
+        {
+            "id": "probe",
+            "path": "/private/",
+            "method": "OPTIONS",
+            "generated_from": "/private/",
+            "source": {"status": 403},
+        },
+    ]
+    if successful:
+        reports.append(
+            {"id": "success", "path": "/private/", "method": "GET", "source": {"status": 200}}
+        )
+    for item in reports:
+        item.update(
+            match=True,
+            status_match=True,
+            body_match=True,
+            headers_match=True,
+            database_match=True,
+            native={"compliant": True},
+        )
+    scenarios = [{"method": r["method"], "path": r["path"]} for r in reports]
+    if different_context:
+        scenarios[1][different_context] = "different"
+    with (
+        patch.object(replay_module, "_run_side", return_value={}),
+        patch.object(replay_module, "_replay_one", side_effect=reports),
+    ):
+        report = replay(tmp_path, scenarios, settings_module="settings")
+    accepted = successful and different_context is None
+    assert bool(report["warnings"]) is not accepted
+    assert bool(report["coverage_issues"]) is not accepted
+
+
+def test_source_expectation_failure_is_reported_as_coverage(tmp_path: Path) -> None:
+    (tmp_path / "target_app.py").touch()
+    result = {
+        "id": "seeded-success",
+        "method": "GET",
+        "path": "/private/",
+        "expected_source_status": 200,
+        "source": {"status": 404},
+        "match": False,
+        "source_expectation_match": False,
+        "status_match": True,
+        "body_match": True,
+        "headers_match": True,
+        "database_match": True,
+        "native": {"compliant": True},
+    }
+    with (
+        patch.object(replay_module, "_run_side", return_value={}),
+        patch.object(replay_module, "_replay_one", return_value=result),
+    ):
+        report = replay(tmp_path, [{}], settings_module="settings")
+    assert not report["ok"]
+    assert report["summary"]["source_expectation_mismatches"] == 1
+    assert report["summary"]["status_mismatches"] == 0
+    assert report["coverage_issues"][0] == {
+        "code": "source_expectation_mismatch",
+        "scenario_ids": ["seeded-success"],
+    }
