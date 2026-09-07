@@ -710,6 +710,7 @@ def replay(
         if key not in {"DJANGO_SETTINGS_MODULE", db_env}
     }
     reports: list[dict[str, Any]] = []
+    replay_scenarios = [dict(scenario) for scenario in scenarios]
     try:
         base_db = temp / "base.sqlite3"
         _run_side(
@@ -726,7 +727,33 @@ def replay(
             cwd=project,
             env=base_environment,
         )
-        for index, scenario in enumerate(scenarios):
+        for index, scenario in enumerate(replay_scenarios):
+            if scenario.get("generated_from") and scenario.get("context_from"):
+                original = next(
+                    (
+                        s
+                        for s in replay_scenarios[:index]
+                        if s.get("id") == scenario["context_from"]
+                    ),
+                    None,
+                )
+                # Reuse a context proven by the source, not the first credential-looking header.
+                # Stay on the same concrete resource; keep all supplied negative tests intact.
+                successful = [
+                    {**s, "expected_source_status": r["source"]["status"]}
+                    for s, r in zip(replay_scenarios[:index], reports, strict=True)
+                    if original is not None
+                    and not s.get("generated_from")
+                    and s.get("path") == original.get("path")
+                    and 200 <= r["source"]["status"] < 400
+                ]
+                context = _probe_context(scenario["generated_from"], successful)
+                if context is not None:
+                    scenario.update(
+                        headers=dict(context.get("headers") or {}),
+                        setup=copy.deepcopy(context.get("setup") or []),
+                        context_from=context.get("id"),
+                    )
             reports.append(
                 _replay_one(
                     scenario,
@@ -792,7 +819,7 @@ def replay(
     context_fields = ("method", "path", "headers", "setup", "body", "body_base64", "multipart")
     intentional_auth = [
         (r["source"]["status"], {key: scenario.get(key) for key in context_fields})
-        for scenario, r in zip(scenarios, reports, strict=True)
+        for scenario, r in zip(replay_scenarios, reports, strict=True)
         if not r.get("generated_from")
         and r.get("expected_source_status") == r["source"]["status"]
         and r["source"]["status"] in {401, 403}
@@ -800,7 +827,7 @@ def replay(
     ]
     blocked = [
         r["id"]
-        for scenario, r in zip(scenarios, reports, strict=True)
+        for scenario, r in zip(replay_scenarios, reports, strict=True)
         if r.get("generated_from")
         and r["source"]["status"] in {401, 403}
         and (r["source"]["status"], {key: scenario.get(key) for key in context_fields})

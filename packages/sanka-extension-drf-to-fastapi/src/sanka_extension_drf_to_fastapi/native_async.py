@@ -2146,19 +2146,31 @@ def not_found_response(request: Request, page: str) -> Response:
     return HTMLResponse(page, status_code=404)
 
 
-def fallback_response(request: Request, page: str) -> Response:
+async def fallback_response(request: Request, page: str) -> Response:
     """Catch-all APIRoute body: DRF's 405 for a known path, Django's 404/301 otherwise."""
     if _route_match(request, request.url.path) == "partial":
-        return method_not_allowed(request)
+        return await method_not_allowed(request)
     return not_found_response(request, page)
 
 
-def method_not_allowed(request: Request) -> Response:
+async def method_not_allowed(request: Request) -> Response:
     """DRF's 405: its detail template and the Allow header in http_method_names order."""
     template = MANIFEST.get("generic_messages", {}).get("method_not_allowed") or (
         'Method "{method}" not allowed.'
     )
     allow = _allow_for_path(request.url.path)
+    # DRF authenticates and checks view permissions before rejecting the method.
+    for resource in MANIFEST["resources"]:
+        auth = resource.get("auth")
+        if auth is None:
+            continue
+        for route in resource["routes"]:
+            regex = "^" + re.sub(r"\\\{[^}\\\\]*\\\}", "[^/]+", re.escape(route["path"])) + "$"
+            if re.match(regex, request.url.path):
+                _user, error = await _require_user(request, auth, allow or "")
+                if error is not None:
+                    return error
+                break
     headers = {"Allow": allow} if allow else {}
     return JSONResponse(
         {"detail": template.format(method=request.method)}, status_code=405, headers=headers

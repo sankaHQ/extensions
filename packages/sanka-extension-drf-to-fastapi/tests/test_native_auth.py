@@ -23,6 +23,11 @@ ALICE = {"Authorization": "Token " + "a" * 40}
 INACTIVE = {"Authorization": "Token " + "c" * 40}
 
 SCENARIOS: list[dict[str, Any]] = [
+    *[
+        {"method": "TRACE", "path": path, "headers": headers}
+        for path in ("/api/bulletins/", "/api/bulletins/2/", "/unknown/")
+        for headers in ({}, {"Authorization": "Token " + "x" * 40}, INACTIVE, ALICE)
+    ],
     {"method": "GET", "path": "/api/bulletins/"},
     {"method": "GET", "path": "/api/bulletins/", "headers": {"Authorization": "Token " + "x" * 40}},
     {"method": "GET", "path": "/api/bulletins/", "headers": {"Authorization": "Token"}},

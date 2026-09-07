@@ -537,3 +537,51 @@ def test_source_expectation_failure_is_reported_as_coverage(tmp_path: Path) -> N
         "code": "source_expectation_mismatch",
         "scenario_ids": ["seeded-success"],
     }
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_generated_auth_context_uses_observed_source_success(tmp_path: Path, success: bool) -> None:
+    (tmp_path / "target_app.py").touch()
+    supplied = [
+        {
+            "id": "invalid",
+            "method": "GET",
+            "path": "/private/",
+            "headers": {"Authorization": "invalid"},
+        },
+        {
+            "id": "valid",
+            "method": "GET",
+            "path": "/private/",
+            "headers": {"Authorization": "valid"},
+        },
+    ]
+    probes = edge_probes_from_scan({"routes": [{"method": "GET", "path": "/private/"}]}, supplied)
+    assert probes[0]["context_from"] == "invalid"
+    observed = []
+
+    def one(scenario, **kwargs):
+        observed.append(dict(scenario))
+        status = (
+            200 if success and scenario.get("headers", {}).get("Authorization") == "valid" else 401
+        )
+        return {
+            **scenario,
+            "source": {"status": status},
+            "match": True,
+            "status_match": True,
+            "body_match": True,
+            "headers_match": True,
+            "database_match": True,
+            "native": {"compliant": True},
+        }
+
+    with (
+        patch.object(replay_module, "_run_side", return_value={}),
+        patch.object(replay_module, "_replay_one", side_effect=one),
+    ):
+        result = replay(tmp_path, supplied + probes, settings_module="settings")
+    assert observed[:2] == supplied
+    assert probes[0]["context_from"] == "invalid"  # caller artifacts remain immutable
+    assert observed[2]["context_from"] == ("valid" if success else "invalid")
+    assert bool(result["coverage_issues"]) is not success
