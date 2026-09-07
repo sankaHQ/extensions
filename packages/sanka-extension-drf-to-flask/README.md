@@ -64,3 +64,7 @@ environments. All fixture databases are temporary and removed after replay.
 Omit a scenario's `body` for no bytes, use `body: null` for JSON null, or
 `body_base64` for raw input. Capture required response headers explicitly.
 The independent benchmark's acceptance and native-compliance gates still apply.
+
+Unmatched URLs use the source Django built-in 404 page, rendered as a native Flask
+response. Custom `handler404`, `404.html` templates, and debug error pages still
+require manual adaptation and differential verification.
