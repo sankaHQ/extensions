@@ -81,7 +81,7 @@ def test_native_lifecycle_and_explicit_gaps(tmp_path: Path) -> None:
     scan = call(tmp_path, "scan")
     assert scan["outcome"] == "success", scan
     plan = call(tmp_path, "plan")["data"]
-    assert plan["native_routes"] == 1
+    assert plan["native_routes"] == 3
     assert plan["needs_adaptation_routes"] >= 2
     assert call(tmp_path, "plan")["data"]["plan_hash"] == plan["plan_hash"]
     applied = call(tmp_path, "apply", {"extension_plan_hash": plan["plan_hash"]}, "core-reviewed")

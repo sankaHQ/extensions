@@ -172,3 +172,10 @@ DRF-to-FastAPI package.
 
 Connector development details are in
 [`docs/connector-development.md`](docs/connector-development.md).
+
+
+The converter regression gate pins a reviewed benchmark revision and covers both
+DRF-to-FastAPI and DRF-to-Flask tasks. Fully generated Flask candidates must pass
+the generated-scope test and every independent benchmark gate; partial candidates
+remain disclosed with route floors and execution checks. The private benchmark
+fixtures and reports stay outside this repository.
