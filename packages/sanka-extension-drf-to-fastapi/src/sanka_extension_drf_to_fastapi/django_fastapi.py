@@ -4007,7 +4007,7 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
         "# header in http_method_names order; FastAPI's default differs on both.",
         "@app.exception_handler(405)",
         "async def django_rest_405(request: Request, _error: Exception) -> Response:",
-        "    return native.method_not_allowed(request)",
+        "    return await native.method_not_allowed(request)",
         "",
         '_HTTP_SECURITY = native.MANIFEST.get("http_security", {})',
         '_ALLOWED_HOSTS = _HTTP_SECURITY.get("allowed_hosts", [])',
@@ -4245,7 +4245,7 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
             "",
             '@app.api_route("/{path:path}", methods=_FALLBACK_METHODS, include_in_schema=False)',
             "async def django_fallback(request: Request, path: str) -> Response:",
-            "    return native.fallback_response(request, _DJANGO_DEFAULT_404)",
+            "    return await native.fallback_response(request, _DJANGO_DEFAULT_404)",
         ]
     )
 
