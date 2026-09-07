@@ -767,16 +767,47 @@ def replay(
             sorted(Counter(str(report["source"]["status"]) for report in reports).items())
         ),
     }
+    coverage_issues: list[dict[str, Any]] = []
     warnings = []
+    source_expectations = [r["id"] for r in reports if not r.get("source_expectation_match", True)]
+    if source_expectations:
+        coverage_issues.append(
+            {"code": "source_expectation_mismatch", "scenario_ids": source_expectations}
+        )
+        warnings.append(
+            "Source responses did not satisfy expected_source_status. Check seed data, "
+            "authentication and scenario prerequisites before repairing the candidate."
+        )
     if all(report["source"]["status"] >= 400 for report in reports):
+        coverage_issues.append(
+            {"code": "missing_success_coverage", "scenario_ids": [r["id"] for r in reports]}
+        )
         warnings.append(
             "Only source error responses were exercised. Use --seed and expected_source_status "
             "for intended success paths; matching errors do not establish completeness."
         )
-    if any(
-        report.get("generated_from") and report["source"]["status"] in {401, 403}
-        for report in reports
-    ):
+    successful_paths = {r.get("path") for r in reports if 200 <= r["source"]["status"] < 400}
+    # Compare request context, not only status/path: a declared anonymous rejection
+    # cannot excuse a generated authenticated probe failing to reach its handler.
+    context_fields = ("method", "path", "headers", "setup", "body", "body_base64", "multipart")
+    intentional_auth = [
+        (r["source"]["status"], {key: scenario.get(key) for key in context_fields})
+        for scenario, r in zip(scenarios, reports, strict=True)
+        if not r.get("generated_from")
+        and r.get("expected_source_status") == r["source"]["status"]
+        and r["source"]["status"] in {401, 403}
+        and r.get("path") in successful_paths
+    ]
+    blocked = [
+        r["id"]
+        for scenario, r in zip(scenarios, reports, strict=True)
+        if r.get("generated_from")
+        and r["source"]["status"] in {401, 403}
+        and (r["source"]["status"], {key: scenario.get(key) for key in context_fields})
+        not in intentional_auth
+    ]
+    if blocked:
+        coverage_issues.append({"code": "authentication_coverage", "scenario_ids": blocked})
         warnings.append(
             "Generated probes stopped at authentication or authorization. Add authenticated "
             "scenarios to exercise the intended handlers, including OPTIONS."
@@ -796,6 +827,7 @@ def replay(
         "headers": "all" if all_headers else "declared",
         "summary": summary,
         "warnings": warnings,
+        "coverage_issues": coverage_issues,
         "scenarios": reports,
         "summary_lines": _summary_lines(summary, reports),
     }
@@ -1031,6 +1063,7 @@ def save_report(report: Mapping[str, Any], artifact_root: Path) -> dict[str, Any
         "ok": report["ok"],
         "summary": report["summary"],
         "warnings": report.get("warnings", []),
+        "coverage_issues": report.get("coverage_issues", []),
         "report_path": str(path),
         "failures": [
             {"id": item["id"], "message": line[:2000]}

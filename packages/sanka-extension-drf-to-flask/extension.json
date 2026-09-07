@@ -47,7 +47,7 @@
   "wheels": [
     {
       "name": "sanka_drf_replay-0.1.0a1-py3-none-any.whl",
-      "sha256": "7989dd303d7d665eb06f1a170c1ad0b459c5b9c502b2ceea78d6dba74eb28d64",
+      "sha256": "ec3ecc349f2e6667ec77eef421f936fd749a94e90931d74e1e1a8bb2304d7758",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a15/sanka_drf_replay-0.1.0a1-py3-none-any.whl"
     },
     {
@@ -57,7 +57,7 @@
     },
     {
       "name": "sanka_extension_drf_to_flask-0.1.0a2-py3-none-any.whl",
-      "sha256": "fa1bd5cd20119716af77dacb30ed5ebb104f191654ff9efe4c55ed2fea207da2",
+      "sha256": "b47f3abaa241054d7b4d715da4b2abe5a0f49508aec4a83a31e3e3f2e86e6ae2",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a15/sanka_extension_drf_to_flask-0.1.0a2-py3-none-any.whl"
     }
   ]

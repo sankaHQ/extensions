@@ -420,6 +420,7 @@ def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
                     {
                         "path": path,
                         "source_path": raw,
+                        "append_slash": getattr(callback, "should_append_slash", True),
                         "method": method.upper(),
                         "source": source,
                         "classification": "native" if source else "needs_adaptation",
@@ -435,7 +436,15 @@ def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
 
     visit(get_resolver().url_patterns)
     routes.sort(key=lambda route: (route["source_path"], route["method"]))
-    return {"settings_module": module, "source_hash": _source_hash(root), "routes": routes}
+    return {
+        "settings_module": module,
+        "source_hash": _source_hash(root),
+        "routes": routes,
+        "append_slash": bool(
+            "django.middleware.common.CommonMiddleware" in settings.MIDDLEWARE
+            and getattr(settings, "APPEND_SLASH", True)
+        ),
+    }
 
 
 def _render(scan: dict[str, Any]) -> dict[str, str]:
@@ -557,6 +566,44 @@ def Response(data=None, status=200, headers=None):
     return response
 """
     ]
+    no_append_slash = sorted(
+        r["path"] for r in scan["routes"] if r["path"] and not r.get("append_slash", True)
+    )
+    pieces.append(
+        "from werkzeug.routing import RequestRedirect\n"
+        "from werkzeug.exceptions import NotFound, MethodNotAllowed\n"
+        "from urllib.parse import quote\n"
+        "from flask import abort\n"
+        "app.url_map.merge_slashes = False\n"
+        f"_no_append_slash = {no_append_slash!r}\n"
+        "@app.before_request\n"
+        "def _source_slash_redirect():\n"
+        "    error = request.routing_exception\n"
+        + (
+            "    if not isinstance(error, (RequestRedirect, NotFound)) "
+            "or request.path.endswith('/'):\n"
+            "        return None\n"
+            "    adapter = app.url_map.bind_to_environ(request.environ)\n"
+            "    try:\n"
+            "        rule, _ = adapter.match(\n"
+            "            request.path + '/', method=request.method, return_rule=True)\n"
+            "    except NotFound:\n"
+            "        return None\n"
+            "    except MethodNotAllowed as error:\n"
+            "        rule, _ = adapter.match(\n"
+            "            request.path + '/', method=error.valid_methods[0], return_rule=True)\n"
+            "    if rule.rule in _no_append_slash:\n"
+            "        abort(404)\n"
+            "    location = quote(request.path + '/', safe='/')\n"
+            "    if request.query_string:\n"
+            "        location += '?' + request.query_string.decode('latin-1')\n"
+            "    if location.startswith('//'):\n"
+            "        location = '/%2F' + location[2:]\n"
+            "    return app.response_class(status=301, headers={'Location': location})\n"
+            if scan.get("append_slash", False)
+            else "    if isinstance(error, RequestRedirect):\n        abort(404)\n"
+        )
+    )
     for index, route in enumerate(scan["routes"]):
         path = route["path"]
         if not path:
