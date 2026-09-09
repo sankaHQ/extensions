@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import json
 import os
 import shutil
@@ -292,6 +293,9 @@ from django.core.management import call_command
 call_command("migrate", interactive=False, verbosity=0, run_syncdb=True)
 if payload.get("seed"):
     runpy.run_path(payload["seed"], run_name="__main__")
+from django.conf import settings
+if os.path.realpath(settings.MEDIA_ROOT) != os.path.realpath(payload["media_root"]):
+    raise SystemExit("seed changed MEDIA_ROOT; write seed files under settings.MEDIA_ROOT")
 from django.db import connections
 connections.close_all()
 print(json.dumps({"ok": True}))
@@ -486,6 +490,16 @@ def request_bytes(request):
         headers.setdefault("content-type", "application/json")
     return body, headers
 """
+_MEDIA_SCRIPT = r"""
+import importlib
+os.environ["BENCH_MEDIA_ROOT"] = payload["media_root"]
+# Configure the source settings before Django or a derived serving module imports it.
+importlib.import_module(payload["settings_module"]).MEDIA_ROOT = payload["media_root"]
+"""
+for _script_name in ("_PREPARE_SCRIPT", "_SOURCE_SCRIPT", "_CANDIDATE_SCRIPT"):
+    _script = globals()[_script_name]
+    _marker = 'os.environ[payload["db_env"]] = payload["database"]'
+    globals()[_script_name] = _script.replace(_marker, _marker + "\n" + _MEDIA_SCRIPT, 1)
 _SOURCE_SCRIPT = _REQUEST_SCRIPT + _SOURCE_SCRIPT
 _CANDIDATE_SCRIPT = _REQUEST_SCRIPT + _CANDIDATE_SCRIPT
 
@@ -518,6 +532,20 @@ def _run_side(
 
 # ---------------------------------------------------------------------------
 # Database snapshots and comparison
+
+
+def snapshot_media(path: Path) -> dict[str, str]:
+    """Compare relative names and bytes, never temporary directory names."""
+    result = {}
+    for item in sorted(path.rglob("*")):
+        if item.is_symlink():
+            raise ReplayError("media snapshots do not support symbolic links")
+        if item.is_file():
+            with item.open("rb") as stream:
+                result[item.relative_to(path).as_posix()] = hashlib.file_digest(
+                    stream, "sha256"
+                ).hexdigest()
+    return result
 
 
 def snapshot_database(path: Path, ignored: Iterable[str]) -> dict[str, dict[str, Any]]:
@@ -713,6 +741,8 @@ def replay(
     replay_scenarios = [dict(scenario) for scenario in scenarios]
     try:
         base_db = temp / "base.sqlite3"
+        base_media = temp / "base-media"
+        base_media.mkdir()
         _run_side(
             _PREPARE_SCRIPT,
             {
@@ -721,6 +751,7 @@ def replay(
                 "settings_module": settings_module,
                 "db_env": db_env,
                 "database": str(base_db),
+                "media_root": str(base_media),
                 "seed": str(Path(seed).resolve()) if seed is not None else None,
             },
             python=source_python,
@@ -765,6 +796,7 @@ def replay(
                     settings_module=settings_module,
                     db_env=db_env,
                     base_db=base_db,
+                    base_media=base_media,
                     temp=temp,
                     ignored=ignored,
                     all_headers=all_headers,
@@ -788,6 +820,7 @@ def replay(
         "body_mismatches": sum(1 for report in reports if not report["body_match"]),
         "header_mismatches": sum(1 for report in reports if not report["headers_match"]),
         "database_mismatches": sum(1 for report in reports if not report["database_match"]),
+        "media_mismatches": sum(1 for report in reports if not report["media_match"]),
         "non_native": sum(1 for report in reports if not report["native"]["compliant"]),
         "generated_probes": sum(1 for report in reports if report.get("generated_from")),
         "source_statuses": dict(
@@ -871,6 +904,7 @@ def _replay_one(
     settings_module: str,
     db_env: str,
     base_db: Path,
+    base_media: Path,
     temp: Path,
     ignored: tuple[str, ...],
     all_headers: bool,
@@ -883,6 +917,10 @@ def _replay_one(
     candidate_db = temp / f"candidate-{index}.sqlite3"
     shutil.copy2(base_db, source_db)
     shutil.copy2(base_db, candidate_db)
+    source_media = temp / f"source-{index}-media"
+    candidate_media = temp / f"candidate-{index}-media"
+    shutil.copytree(base_media, source_media)
+    shutil.copytree(base_media, candidate_media)
     request = {
         "method": scenario["method"],
         "path": scenario["path"],
@@ -911,6 +949,7 @@ def _replay_one(
             "project_root": str(project),
             "settings_module": settings_module,
             "database": str(source_db),
+            "media_root": str(source_media),
         },
         python=source_python,
         cwd=project,
@@ -926,6 +965,8 @@ def _replay_one(
             "target": target,
             "entrypoint": entrypoint,
             "database": str(candidate_db),
+            "settings_module": settings_module,
+            "media_root": str(candidate_media),
         },
         python=target_python,
         cwd=candidate,
@@ -976,6 +1017,9 @@ def _replay_one(
     )
     headers_match = not header_diffs
     database_match = not database_diffs
+    source_files = snapshot_media(source_media)
+    candidate_files = snapshot_media(candidate_media)
+    media_match = source_files == candidate_files
     report: dict[str, Any] = {
         "id": identifier,
         "method": scenario["method"],
@@ -984,13 +1028,20 @@ def _replay_one(
         and status_match
         and body_match
         and headers_match
-        and database_match,
+        and database_match
+        and media_match,
         "expected_source_status": expected_source_status,
         "source_expectation_match": source_expectation_match,
         "status_match": status_match,
         "body_match": body_match,
         "headers_match": headers_match,
         "database_match": database_match,
+        "media_match": media_match,
+        "media_differences": [
+            name
+            for name in sorted(source_files.keys() | candidate_files.keys())
+            if source_files.get(name) != candidate_files.get(name)
+        ],
         "source": {
             "status": source_result["status"],
             "headers": {name: source_headers.get(name, "") for name in compared},
@@ -1022,7 +1073,8 @@ def _summary_lines(summary: Mapping[str, Any], reports: Sequence[Mapping[str, An
         f"{summary['matched']}/{summary['scenarios']} scenarios match "
         f"(status {summary['status_mismatches']}, body {summary['body_mismatches']}, "
         f"headers {summary['header_mismatches']}, "
-        f"database {summary['database_mismatches']} mismatches; "
+        f"database {summary['database_mismatches']}, "
+        f"media {summary['media_mismatches']} mismatches; "
         f"source expectations {summary.get('source_expectation_mismatches', 0)}; "
         f"{summary['non_native']} without native candidate routing)"
     ]
@@ -1056,6 +1108,13 @@ def _summary_lines(summary: Mapping[str, Any], reports: Sequence[Mapping[str, An
                 + ", ".join(
                     f"{item['table']} ({item['kind']})" for item in report["database_differences"]
                 )
+            )
+        if not report["media_match"]:
+            names = report["media_differences"]
+            problems.append(
+                "media "
+                + ", ".join(names[:8])
+                + (f" (+{len(names) - 8} more)" if len(names) > 8 else "")
             )
         if not report["native"]["compliant"]:
             problems.append(
