@@ -157,7 +157,7 @@ def test_multipart_uniqueness_and_message_notes(tmp_path: Path) -> None:
     assert '"No file was submitted."' in message
     assert '"The submitted file is empty."' in message
     assert '"Only files with .csv, .json, or .txt extensions are allowed."' in message
-    assert "byte-exact" in message
+    assert "instead of assuming byte preservation" in message
     unique = _message(create, "SANKA_DRF_PARITY_UNIQUE_FIELD")
     assert '{"key": ["artifact with this key already exists."]}' in unique
     nullability = _message(create, "SANKA_DRF_PARITY_NULLABILITY")

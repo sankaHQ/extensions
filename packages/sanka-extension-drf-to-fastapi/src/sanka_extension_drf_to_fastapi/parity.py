@@ -1069,8 +1069,10 @@ def _multipart_notes(context: _Context) -> Iterator[ParityNote]:
                 else ""
             )
             + f". Its representation is {representation}. Uploaded bytes are read from "
-            "Django's MultiPartParser: part content is byte-exact even when it contains "
-            "boundary-like text, and the filename is the basename of Content-Disposition.",
+            "the source multipart parser. Boundary-token handling can differ from native "
+            "target parsers; compare source/candidate replay with binary content and the "
+            "declared boundary instead of assuming byte preservation. The filename is "
+            "the basename of Content-Disposition.",
             _location(validator, context.root) if validator is not None else None,
         )
 
