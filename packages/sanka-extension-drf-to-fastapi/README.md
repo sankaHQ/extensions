@@ -20,6 +20,12 @@ strings they emit). Notes appear in `.sanka/scan.json` (schema 5), `plan-*.json`
 (schema 4), the gap report, and the generated manifest's `unsupported_routes`. A family
 that cannot be derived reports `SANKA_DRF_PARITY_UNAVAILABLE` instead of failing the scan.
 
+`GAP-REPORT.md` lists each identical source fact once, with `G1`, `G2`, … references
+on the routes where it applies. Different messages or source locations remain
+separate. This reduces repeated reading without dropping route coverage or
+changing the full JSON artifacts. Reuse generated helpers where they match the
+source, then verify the remaining behavior against the source application.
+
 ## OPTIONS and 405 parity
 
 Generated native apps answer `OPTIONS` with the exact `SimpleMetadata` body DRF would

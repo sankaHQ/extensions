@@ -4253,32 +4253,13 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
 
 
 _PARITY_CHECKLIST = """\
-## DRF parity checklist for hand-written handlers
+## Completing the migration
 
-Behavior that most often breaks exact parity when porting DRF by hand — every
-item below has cost a real migration its last few percent:
-
-- DRF stamps an `Allow` header on every response, including 400/404 (HEAD is
-  added for GET; OPTIONS is always present).
-- 404 has two flavors: a missing object renders the model's "No X matches the
-  given query." while an invalid pk type renders the generic "Not found."
-- Field-level null checks run before type checks: `{"items": null}` must yield
-  `["This field may not be null."]`, not a list-type error.
-- "may not be blank" (blank string) and "This field is required." (absent or
-  null-file field) are different validations with different wording.
-- Redirect responses carry an absolute `Location` URI
-  (`request.build_absolute_uri`), never a relative path — and a framework's
-  implicit trailing-slash redirect is not equivalent to the source's redirect
-  view.
-- Auth failures have exact strings and a `WWW-Authenticate` header; session
-  authentication enforces CSRF even for API clients (Django's test client
-  skips that only until `enforce_csrf_checks=True`).
-- Unique-constraint violations surface as the model's own message (e.g.
-  "order with this reference already exists.") as a 400 response — an
-  unhandled database IntegrityError that kills the serving process is not
-  parity.
-- Django's test client omits `Content-Length`; adding or keeping the header
-  where the source has none is a visible difference."""
+Reuse generated handlers and the helpers in `sanka_native.py` and `sanka_store.py`
+where their behavior matches the source. Implement the remaining gaps, then run
+`sanka test` and differential `sanka verify`; generated tests alone do not prove
+source parity. The route references below scope each source-derived fact. Do not
+apply a fact from one route to every handler."""
 
 
 def _gap_report_payload(plan: FrameworkPlan, scan: FrameworkScan) -> dict[str, Any]:
@@ -4340,18 +4321,29 @@ def _render_gap_report(plan: FrameworkPlan, scan: FrameworkScan) -> str:
     if manual:
         lines.append(f"## Routes needing manual adaptation ({len(manual)})")
         lines.append("")
+        # Identical guidance is repeated across methods and format aliases. Keep its
+        # full identity (including source location), with explicit per-route references.
+        guidance: dict[tuple[str, str, str], str] = {}
         for route in manual:
             mounted = (
                 "stubbed to answer 501 in the generated app"
                 if _stub_safe_path(route.path)
                 else "NOT mounted — the path is not representable as a FastAPI route"
             )
-            lines.append(f"- `{route.method} {route.path}` — {mounted}")
+            references = []
             for reason in route.adaptation_reasons:
-                lines.append(f"  - `{reason.code}`: {reason.message}")
+                key = (f"adaptation/{reason.feature} `{reason.code}`", reason.message, "")
+                reference = guidance.setdefault(key, f"G{len(guidance) + 1}")
+                references.append(reference)
             for note in route.parity_notes:
-                where = f" ({note.source})" if note.source else ""
-                lines.append(f"  - parity/{note.family} `{note.code}`: {note.message}{where}")
+                key = (f"parity/{note.family} `{note.code}`", note.message, note.source or "")
+                reference = guidance.setdefault(key, f"G{len(guidance) + 1}")
+                references.append(reference)
+            lines.append(f"- `{route.method} {route.path}` — {mounted}; " + ", ".join(references))
+        lines.extend(["", "## Source-derived guidance", ""])
+        for (label, message, source), reference in guidance.items():
+            where = f" ({source})" if source else ""
+            lines.append(f"- **{reference}** {label}: {message}{where}")
         lines.append("")
     else:
         lines.extend(
