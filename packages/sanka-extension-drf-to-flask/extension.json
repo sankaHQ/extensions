@@ -47,7 +47,7 @@
   "wheels": [
     {
       "name": "sanka_drf_replay-0.1.0a1-py3-none-any.whl",
-      "sha256": "56c60eb625a114dc476ebc0c72dd7997f9ecc4a56be949d0e224c7966c4da6d6",
+      "sha256": "a609e88384ba2719ba97b8b2188c3a270659eed65d0ecf7f716e603c58439f99",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a15/sanka_drf_replay-0.1.0a1-py3-none-any.whl"
     },
     {
