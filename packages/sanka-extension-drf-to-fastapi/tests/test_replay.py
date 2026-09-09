@@ -29,6 +29,99 @@ from sanka_extension_sdk import ExtensionRequest
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+@pytest.mark.parametrize("target", ["fastapi", "flask"])
+def test_replay_isolates_seed_media_and_rejects_relocated_uploads(tmp_path, target):
+    project = tmp_path / "crud"
+    shutil.copytree(FIXTURES / "drf_crud_project", project)
+    (project / "crud_config/urls.py").write_text("""
+from pathlib import Path
+from django.conf import settings
+from django.http import JsonResponse
+from django.urls import path
+def upload(request):
+    root = Path(settings.MEDIA_ROOT)
+    assert (root / "seed.txt").read_text() == "seed"
+    assert not (root / "new.txt").exists()
+    (root / "new.txt").write_text("new")
+    return JsonResponse({"ok": True})
+urlpatterns = [path("upload/", upload)]
+""")
+    seed = project / "seed.py"
+    seed.write_text("""
+from pathlib import Path
+from django.conf import settings
+Path(settings.MEDIA_ROOT, "seed.txt").write_text("seed")
+""")
+    app = project / "target_app.py"
+    header = (
+        'from fastapi import FastAPI\napp = FastAPI()\n@app.get("/upload/")\n'
+        if target == "fastapi"
+        else 'from flask import Flask\napp = Flask(__name__)\n@app.get("/upload/")\n'
+    )
+    implementation = """def upload():
+    import os
+    from pathlib import Path
+    root = Path(os.environ["BENCH_MEDIA_ROOT"])
+    assert (root / "seed.txt").read_text() == "seed"
+    assert not (root / "new.txt").exists()
+    DEST.write_text("new")
+    return {"ok": True}
+"""
+    scenarios = [{"id": str(i), "method": "GET", "path": "/upload/"} for i in range(2)]
+    for destination, expected in [
+        ('(root / "new.txt")', True),
+        ('(root.parent / "relocated.txt")', False),
+    ]:
+        app.write_text(header + implementation.replace("DEST", destination))
+        report = replay(
+            project,
+            scenarios,
+            settings_module="crud_config.settings",
+            db_env="SANKA_TEST_DB",
+            seed=seed,
+            python=Path(sys.executable),
+            target=target,
+        )
+        assert report["ok"] is expected
+        assert report["summary"]["media_mismatches"] == (0 if expected else 2)
+        assert all(row["body_match"] for row in report["scenarios"])
+    assert not (project / "media").exists()
+    seed.write_text('from django.conf import settings\nsettings.MEDIA_ROOT = "elsewhere"\n')
+    with pytest.raises(ReplayError, match="seed changed MEDIA_ROOT"):
+        replay(
+            project,
+            scenarios,
+            settings_module="crud_config.settings",
+            db_env="SANKA_TEST_DB",
+            seed=seed,
+            python=Path(sys.executable),
+            target=target,
+        )
+
+
+def test_multipart_keeps_declared_boundary_and_binary_content():
+    import base64
+
+    scope = {"payload": {"boundary": "default"}}
+    exec(replay_module._REQUEST_SCRIPT, scope)
+    body, headers = scope["request_bytes"](
+        {
+            "multipart": {
+                "boundary": "ExactBoundary",
+                "files": [
+                    {
+                        "field": "file",
+                        "filename": "x.bin",
+                        "content_b64": base64.b64encode(b"prefix--ExactBoundary-suffix").decode(),
+                    }
+                ],
+            }
+        }
+    )
+    assert headers["content-type"].endswith("boundary=ExactBoundary")
+    assert b"prefix--ExactBoundary-suffix" in body
+
+
 def test_load_scenarios_accepts_the_bench_format_and_rejects_duplicates(tmp_path: Path) -> None:
     path = tmp_path / "scenarios.json"
     path.write_text(
@@ -437,6 +530,7 @@ def test_matching_errors_expose_coverage_warnings(tmp_path: Path) -> None:
             "body_match": True,
             "headers_match": True,
             "database_match": True,
+            "media_match": True,
             "native": {"compliant": True},
             "source": {"status": status},
             **({"generated_from": "/private/"} if status == 401 else {}),
@@ -494,6 +588,7 @@ def test_explicit_auth_rejection_requires_success_coverage(
             body_match=True,
             headers_match=True,
             database_match=True,
+            media_match=True,
             native={"compliant": True},
         )
     scenarios = [{"method": r["method"], "path": r["path"]} for r in reports]
@@ -523,6 +618,7 @@ def test_source_expectation_failure_is_reported_as_coverage(tmp_path: Path) -> N
         "body_match": True,
         "headers_match": True,
         "database_match": True,
+        "media_match": True,
         "native": {"compliant": True},
     }
     with (
@@ -573,6 +669,7 @@ def test_generated_auth_context_uses_observed_source_success(tmp_path: Path, suc
             "body_match": True,
             "headers_match": True,
             "database_match": True,
+            "media_match": True,
             "native": {"compliant": True},
         }
 
@@ -585,3 +682,106 @@ def test_generated_auth_context_uses_observed_source_success(tmp_path: Path, suc
     assert probes[0]["context_from"] == "invalid"  # caller artifacts remain immutable
     assert observed[2]["context_from"] == ("valid" if success else "invalid")
     assert bool(result["coverage_issues"]) is not success
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_contract_probes_preserve_negative_context_and_require_baseline_success(
+    tmp_path: Path, success: bool
+) -> None:
+    (tmp_path / "target_app.py").touch()
+    supplied = [
+        {
+            "id": "create",
+            "method": "POST",
+            "path": "/items/",
+            "body": {"name": "sample"},
+            "expected_source_status": 201,
+            "headers": {
+                "Authorization": "Token valid",
+                "X-CSRFToken": "valid",
+                "Cookie": "sessionid=valid",
+            },
+        }
+    ]
+    scan = {
+        "routes": [
+            None,
+            {
+                "method": "POST",
+                "path": "/items/",
+                "serializer": "ItemSerializer",
+                "authentication": ["TokenAuthentication", "SessionAuthentication"],
+            },
+        ],
+        "serializer_details": [
+            {
+                "name": "ItemSerializer",
+                "fields": [{"name": "id", "read_only": True}, {"name": "name", "read_only": False}],
+            }
+        ],
+    }
+    probes = [p for p in edge_probes_from_scan(scan, supplied) if p.get("probe_kind")]
+    assert [p["probe_kind"] for p in probes] == [
+        "read-only",
+        "credential-rejection",
+        "csrf-rejection",
+    ]
+    assert probes[0]["body"] == {"name": "sample", "id": {"sanka_read_only_probe": True}}
+    assert "expected_source_status" not in probes[0]
+    assert probes[1]["headers"]["authorization"] == "Token"
+    assert "x-csrftoken" not in probes[2]["headers"]
+    assert supplied[0]["body"] == {"name": "sample"}
+    observed = []
+
+    def one(scenario, **kwargs):
+        observed.append(dict(scenario))
+        status = (
+            201
+            if success
+            and scenario.get("probe_kind") not in {"credential-rejection", "csrf-rejection"}
+            else 403
+        )
+        return {
+            **scenario,
+            "source": {"status": status},
+            "match": True,
+            "status_match": True,
+            "body_match": True,
+            "headers_match": True,
+            "database_match": True,
+            "media_match": True,
+            "native": {"compliant": True},
+        }
+
+    with (
+        patch.object(replay_module, "_run_side", return_value={}),
+        patch.object(replay_module, "_replay_one", side_effect=one),
+    ):
+        result = replay(tmp_path, supplied + probes, settings_module="settings")
+    assert observed[2]["headers"]["authorization"] == "Token"
+    assert "x-csrftoken" not in observed[3]["headers"]
+    assert bool(result["coverage_issues"]) is not success
+    assert all("baseline_source_status" not in p for p in probes)
+
+
+def test_contract_probes_are_bounded_and_do_not_invent_contracts() -> None:
+    scan = {
+        "routes": [
+            {"method": "POST", "path": f"/items/{i}/", "authentication": ["TokenAuthentication"]}
+            for i in range(20)
+        ]
+    }
+    scenarios = [
+        {
+            "id": str(i),
+            "method": "POST",
+            "path": f"/items/{i}/",
+            "headers": {"Authorization": "Token valid"},
+            "body": {"id": 1},
+        }
+        for i in range(20)
+    ]
+    probes = [p for p in edge_probes_from_scan(scan, scenarios) if p.get("probe_kind")]
+    assert len(probes) == 12
+    assert all(p["probe_kind"] == "credential-rejection" for p in probes)
+    assert edge_probes_from_scan({"routes": [None], "serializer_details": [None]}, scenarios) == []
