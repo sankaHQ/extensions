@@ -122,6 +122,141 @@ def test_multipart_keeps_declared_boundary_and_binary_content():
     assert b"prefix--ExactBoundary-suffix" in body
 
 
+def test_write_probes_keep_context_and_mutate_only_supplied_payloads():
+    import base64
+
+    supplied = [
+        {
+            "id": "write",
+            "method": "PATCH",
+            "path": "/records/4/",
+            "headers": {"authorization": "Bearer fixture"},
+            "setup": [{"method": "POST", "path": "/records/"}],
+            "expected_source_status": 200,
+            "body": {"records": [{"name": "a", "parts": [{"code": "b"}]}]},
+        },
+        {
+            "id": "upload",
+            "method": "POST",
+            "path": "/uploads/",
+            "multipart": {
+                "boundary": "Sample-73",
+                "fields": {"label": "original"},
+                "files": [{"field": "blob", "filename": "original.bin", "content_b64": "YQ=="}],
+            },
+        },
+    ]
+    original = copy.deepcopy(supplied)
+    scan = {"routes": [{"method": s["method"], "path": s["path"]} for s in supplied]}
+    probes = {
+        p["probe_kind"]: p for p in edge_probes_from_scan(scan, supplied) if p.get("probe_kind")
+    }
+    assert supplied == original
+    assert len(probes["duplicate-record-0"]["body"]["records"]) == 2
+    nested = probes["duplicate-record-1"]
+    assert len(nested["body"]["records"][0]["parts"]) == 2
+    assert nested["headers"] == supplied[0]["headers"]
+    assert nested["setup"] == supplied[0]["setup"]
+    assert "expected_source_status" not in nested
+    upload = probes["upload-boundary"]["multipart"]
+    assert upload["fields"] == {"label": "original"}
+    assert upload["files"][0]["filename"] == "original.bin"
+    assert b"--Sample-73" in base64.b64decode(upload["files"][0]["content_b64"])
+    nested["body"]["records"][0]["parts"][0]["code"] = "changed"
+    assert supplied == original
+    assert nested["body"]["records"][0]["parts"][1]["code"] == "b"
+    assert not replay_module._write_probes({"body": {"records": []}, "multipart": {"files": []}})
+
+
+@pytest.mark.parametrize("target", ["fastapi", "flask"])
+def test_write_probes_find_parser_and_nested_validation_divergence(tmp_path, target):
+    project = tmp_path / "crud"
+    shutil.copytree(FIXTURES / "drf_crud_project", project)
+    (project / "crud_config/urls.py").write_text("""
+import base64, json
+from django.http import JsonResponse
+from django.urls import path
+from django.views.decorators.csrf import csrf_exempt
+@csrf_exempt
+def write(request):
+    if request.content_type == "multipart/form-data":
+        return JsonResponse({"bytes": base64.b64encode(request.FILES["blob"].read()).decode()})
+    records = json.loads(request.body)["records"]
+    if len({record["code"] for record in records}) != len(records):
+        return JsonResponse({"records": ["duplicate"]}, status=400)
+    return JsonResponse({"count": len(records)})
+urlpatterns = [path("write/", write)]
+""")
+    app = """
+import base64, json
+from email.parser import BytesParser
+from email.policy import default
+def result(raw, content_type):
+    if content_type.startswith("multipart/form-data"):
+        message = BytesParser(policy=default).parsebytes(
+            b"Content-Type: " + content_type.encode() + b"\\r\\n\\r\\n" + raw)
+        part = next(message.iter_parts())
+        return {"bytes": base64.b64encode(part.get_payload(decode=True)).decode()}
+    return {"count": len(json.loads(raw)["records"])}
+"""
+    app += (
+        """
+from fastapi import FastAPI, Request
+app = FastAPI()
+@app.post("/write/")
+async def write(request: Request):
+    return result(await request.body(), request.headers["content-type"])
+"""
+        if target == "fastapi"
+        else """
+from flask import Flask, request
+app = Flask(__name__)
+@app.post("/write/")
+def write():
+    return result(request.get_data(), request.content_type)
+"""
+    )
+    candidate = tmp_path / "candidate"
+    shutil.copytree(project, candidate)
+    (candidate / "crud_config/serving_settings.py").write_text('MARKER = "candidate"\n')
+    (candidate / "target_app.py").write_text(
+        app + '\nfrom crud_config.serving_settings import MARKER\nassert MARKER == "candidate"\n'
+    )
+    supplied = [
+        {"id": "nested", "method": "POST", "path": "/write/", "body": {"records": [{"code": "a"}]}},
+        {
+            "id": "upload",
+            "method": "POST",
+            "path": "/write/",
+            "multipart": {
+                "boundary": "Sample-73",
+                "files": [{"field": "blob", "filename": "a.bin", "content_b64": "YQ=="}],
+            },
+        },
+    ]
+    probes = [
+        p
+        for p in edge_probes_from_scan(
+            {"routes": [{"method": "POST", "path": "/write/"}]}, supplied
+        )
+        if p.get("probe_kind")
+    ]
+    report = replay(
+        project,
+        [*supplied, *probes],
+        candidate_root=candidate,
+        settings_module="crud_config.settings",
+        python=Path(sys.executable),
+        target=target,
+    )
+    rows = {r["id"]: r for r in report["scenarios"]}
+    assert rows["nested"]["match"] and rows["upload"]["match"]
+    assert rows["edge:upload-binary:upload"]["match"]
+    assert not rows["edge:upload-boundary:upload"]["body_match"]
+    assert not rows["edge:duplicate-record-0:nested"]["status_match"]
+    assert not report["ok"]
+
+
 def test_load_scenarios_accepts_the_bench_format_and_rejects_duplicates(tmp_path: Path) -> None:
     path = tmp_path / "scenarios.json"
     path.write_text(

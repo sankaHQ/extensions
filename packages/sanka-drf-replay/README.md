@@ -39,3 +39,10 @@ Reports retain every scenario. The extension response contains counts, up to
 check; it does not replace the independent benchmark's native compliance gate.
 
 Scan-derived replay probes also check declared serializer read-only fields, malformed Token credentials, and missing session CSRF headers when caller-supplied requests provide that context. These bounded probes reuse source behavior as the reference; an intentional authentication rejection counts as coverage only after its original source request succeeds.
+
+Supplied write requests also receive binary and boundary-token upload probes and
+duplicate-record probes for two collection depths in JSON objects. They preserve
+the original route, fields, filenames, authentication and setup. Expected responses
+come from executing the source, including its parser and validation behavior;
+neither successful writes nor rejection statuses are assumed. All contract probes
+share a 12-request cap. Use explicit scenarios for deeper or additional contexts.

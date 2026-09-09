@@ -214,14 +214,14 @@ def edge_probes_from_scan(
 def _contract_probes(
     scan: Mapping[str, Any], scenarios: Sequence[Mapping[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Mutate caller-supplied requests using declared source contracts only."""
+    """Mutate supplied requests; the source, never an invented status, is the oracle."""
     serializers = {
         s["name"]: s
         for s in (scan.get("serializer_details") or [])
         if isinstance(s, dict) and isinstance(s.get("name"), str)
     }
     probes: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     for scenario in scenarios:
         method = str(scenario.get("method", "GET")).upper()
         route = next(
@@ -251,6 +251,8 @@ def _contract_probes(
             and isinstance(scenario.get("body"), dict)
         ):
             changes.append(("read-only", {"body": {**scenario["body"], **readonly}}))
+        if method in {"POST", "PUT", "PATCH"}:
+            changes.extend(_write_probes(scenario))
         authenticators = [
             name for name in (route.get("authentication") or []) if isinstance(name, str)
         ]
@@ -272,7 +274,7 @@ def _contract_probes(
                 )
             )
         for kind, change in changes:
-            key = (route["path"], kind)
+            key = (method, route["path"], kind)
             if key in seen:
                 continue
             seen.add(key)
@@ -290,6 +292,42 @@ def _contract_probes(
             if len(probes) == 12:
                 return probes
     return probes
+
+
+def _write_probes(scenario: Mapping[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    changes: list[tuple[str, dict[str, Any]]] = []
+    multipart = scenario.get("multipart")
+    if isinstance(multipart, dict):
+        files = multipart.get("files")
+        if isinstance(files, list) and files and isinstance(files[0], dict):
+            boundary = str(multipart.get("boundary") or _MULTIPART_BOUNDARY)
+            for kind, content in (
+                ("upload-binary", b"\x00\xff\r\n sample\t\r\n"),
+                ("upload-boundary", b"sample--" + boundary.encode() + b"-fragment\r\n"),
+            ):
+                mutated = copy.deepcopy(multipart)
+                mutated["files"][0]["content_b64"] = base64.b64encode(content).decode()
+                changes.append((kind, {"multipart": mutated}))
+    body = scenario.get("body")
+    if isinstance(body, dict):
+        # ponytail: two collection depths cover common nested writes; deeper graphs stay explicit.
+        for depth in (0, 1):
+            mutated = copy.deepcopy(body)
+            if _duplicate_record(mutated, depth):
+                changes.append((f"duplicate-record-{depth}", {"body": mutated}))
+    return changes
+
+
+def _duplicate_record(value: object, depth: int) -> bool:
+    if isinstance(value, dict):
+        for item in value.values():
+            if isinstance(item, list) and item and isinstance(item[-1], dict):
+                if depth == 0:
+                    item.append(copy.deepcopy(item[-1]))
+                    return True
+                if _duplicate_record(item[-1], depth - 1):
+                    return True
+    return False
 
 
 def _probe_context(route: str, scenarios: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
@@ -421,9 +459,8 @@ _CANDIDATE_SCRIPT = r"""
 import base64, importlib.util, inspect, json, os, sys
 payload = json.load(sys.stdin)
 candidate_root = payload["candidate_root"]
-for entry in (candidate_root, payload["project_root"]):
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
+# A complete candidate tree must win over same-named source packages.
+sys.path[:0] = [candidate_root, payload["project_root"]]
 os.environ[payload["db_env"]] = payload["database"]
 entrypoint_path = os.path.join(candidate_root, payload["entrypoint"])
 spec = importlib.util.spec_from_file_location("_sanka_replay_candidate", entrypoint_path)
