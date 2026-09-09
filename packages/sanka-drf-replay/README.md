@@ -37,3 +37,5 @@ do not inherit the original expected status, since their methods differ.
 Reports retain every scenario. The extension response contains counts, up to
 20 failing scenario descriptions, and the report path. Replay is a development
 check; it does not replace the independent benchmark's native compliance gate.
+
+Scan-derived replay probes also check declared serializer read-only fields, malformed Token credentials, and missing session CSRF headers when caller-supplied requests provide that context. These bounded probes reuse source behavior as the reference; an intentional authentication rejection counts as coverage only after its original source request succeeds.

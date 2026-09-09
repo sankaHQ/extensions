@@ -208,6 +208,87 @@ def edge_probes_from_scan(
         missing = _concrete_path(path)
         if "{" in path and missing is not None:
             probes.append(_edge("missing-object", "GET", missing, path, context))
+    return probes + _contract_probes(scan, scenarios)
+
+
+def _contract_probes(
+    scan: Mapping[str, Any], scenarios: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Mutate caller-supplied requests using declared source contracts only."""
+    serializers = {
+        s["name"]: s
+        for s in (scan.get("serializer_details") or [])
+        if isinstance(s, dict) and isinstance(s.get("name"), str)
+    }
+    probes: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for scenario in scenarios:
+        method = str(scenario.get("method", "GET")).upper()
+        route = next(
+            (
+                r
+                for r in scan.get("routes", [])
+                if isinstance(r, dict)
+                and r.get("method") == method
+                and isinstance(r.get("path"), str)
+                and _probe_context(r["path"], [scenario])
+            ),
+            None,
+        )
+        if route is None:
+            continue
+        headers = {k.lower(): v for k, v in (scenario.get("headers") or {}).items()}
+        changes: list[tuple[str, dict[str, Any]]] = []
+        fields = serializers.get(route.get("serializer"), {}).get("fields", [])
+        readonly = {
+            f["name"]: {"sanka_read_only_probe": True}
+            for f in fields
+            if isinstance(f, dict) and f.get("read_only") and isinstance(f.get("name"), str)
+        }
+        if (
+            readonly
+            and method in {"POST", "PUT", "PATCH"}
+            and isinstance(scenario.get("body"), dict)
+        ):
+            changes.append(("read-only", {"body": {**scenario["body"], **readonly}}))
+        authenticators = [
+            name for name in (route.get("authentication") or []) if isinstance(name, str)
+        ]
+        if headers.get("authorization", "").startswith("Token ") and any(
+            "TokenAuthentication" in name for name in authenticators
+        ):
+            changes.append(
+                ("credential-rejection", {"headers": {**headers, "authorization": "Token"}})
+            )
+        if (
+            method in {"POST", "PUT", "PATCH", "DELETE"}
+            and "x-csrftoken" in headers
+            and any(name.endswith("SessionAuthentication") for name in authenticators)
+        ):
+            changes.append(
+                (
+                    "csrf-rejection",
+                    {"headers": {k: v for k, v in headers.items() if k != "x-csrftoken"}},
+                )
+            )
+        for kind, change in changes:
+            key = (route["path"], kind)
+            if key in seen:
+                continue
+            seen.add(key)
+            probe = copy.deepcopy(dict(scenario))
+            probe.pop("expected_source_status", None)
+            probe.update(
+                change,
+                id=f"edge:{kind}:{scenario['id']}",
+                probe_kind=kind,
+                generated_from=route["path"],
+                context_from=scenario["id"],
+            )
+            probes.append(probe)
+            # ponytail: cap extra replay work; make configurable if large suites need more.
+            if len(probes) == 12:
+                return probes
     return probes
 
 
@@ -759,7 +840,13 @@ def replay(
             env=base_environment,
         )
         for index, scenario in enumerate(replay_scenarios):
-            if scenario.get("generated_from") and scenario.get("context_from"):
+            if scenario.get("probe_kind"):
+                baseline = next((r for r in reports if r["id"] == scenario["context_from"]), None)
+                # Keep the mutated credentials/body. Never replace them with a positive context.
+                scenario["baseline_source_status"] = (
+                    baseline["source"]["status"] if baseline else None
+                )
+            elif scenario.get("generated_from") and scenario.get("context_from"):
                 original = next(
                     (
                         s
@@ -863,6 +950,10 @@ def replay(
         for scenario, r in zip(replay_scenarios, reports, strict=True)
         if r.get("generated_from")
         and r["source"]["status"] in {401, 403}
+        and not (
+            r.get("probe_kind") in {"credential-rejection", "csrf-rejection"}
+            and r.get("baseline_source_status") in range(200, 400)
+        )
         and (r["source"]["status"], {key: scenario.get(key) for key in context_fields})
         not in intentional_auth
     ]
@@ -1065,6 +1156,9 @@ def _replay_one(
         report["generated_from"] = scenario["generated_from"]
     if scenario.get("context_from"):
         report["context_from"] = scenario["context_from"]
+    if scenario.get("probe_kind"):
+        report["probe_kind"] = scenario["probe_kind"]
+        report["baseline_source_status"] = scenario.get("baseline_source_status")
     return report
 
 
