@@ -221,6 +221,32 @@ def test_gap_report_renders_notes_for_routes_needing_adaptation(tmp_path: Path) 
         (project / ".sanka" / "gap-report" / "gap-report.json").read_text(encoding="utf-8")
     )
     assert all("parity_notes" in route for route in inventory["unsupported_routes"])
+    # Every route retains exactly its facts, while identical facts appear once.
+    definitions = {}
+    for line in text.splitlines():
+        if line.startswith("- **G"):
+            reference, detail = line.removeprefix("- **").split("** ", 1)
+            assert detail not in definitions.values()
+            definitions[reference] = detail
+    for route in inventory["unsupported_routes"]:
+        prefix = f"- `{route['method']} {route['path']}` — "
+        line = next(line for line in text.splitlines() if line.startswith(prefix))
+        references = line.split("; ", 1)[1].split(", ")
+        actual = {definitions[reference] for reference in references}
+        expected = {
+            f"adaptation/{reason['feature']} `{reason['code']}`: {reason['message']}"
+            for reason in route["reasons"]
+        }
+        for note in route["parity_notes"]:
+            where = f" ({note['source']})" if note["source"] else ""
+            expected.add(f"parity/{note['family']} `{note['code']}`: {note['message']}{where}")
+        assert actual == expected
+    original_occurrences = sum(
+        len(route["reasons"]) + len(route["parity_notes"])
+        for route in inventory["unsupported_routes"]
+    )
+    assert len(definitions) < original_occurrences / 2
+    assert "missing object renders the model" not in text
 
 
 def test_legacy_artifacts_without_notes_still_load() -> None:

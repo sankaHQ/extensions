@@ -336,7 +336,7 @@ def test_zero_readiness_native_apply_writes_gap_report_instead(
     text = (gap_report / "GAP-REPORT.md").read_text(encoding="utf-8")
     assert "native readiness 0%" in text
     assert "Routes needing manual adaptation" in text
-    assert "DRF parity checklist" in text
+    assert "Completing the migration" in text
     assert "legacy/redirect/" in text
     assert (gap_report / "plan-fastapi.json").is_file()
     payload = json.loads((gap_report / "gap-report.json").read_text(encoding="utf-8"))
