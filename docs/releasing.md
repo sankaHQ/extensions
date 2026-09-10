@@ -1,5 +1,18 @@
 # Releasing Sanka extension packages
 
+## Current marketplace release
+
+Publish `extensions-v0.1.0a16` from the exact reviewed merge using `publish.yml`.
+This bundle ships the merged DRF replay, verifier, and concise guidance changes.
+Its manifests must reference the new tag and match every staged wheel hash;
+`extensions-v0.1.0a15` remains immutable. Run `make check` and
+`make update-marketplace-hashes` before review. After publication, verify the
+GitHub artifact digests and install both DRF extensions with the published CLI.
+Do not describe the default marketplace migration path as verified until those
+clean installations succeed.
+
+## Historical standalone package procedure
+
 All six packages share one version and one reviewed source tag. Publishing is
 manual; merges and tags do not upload packages automatically.
 

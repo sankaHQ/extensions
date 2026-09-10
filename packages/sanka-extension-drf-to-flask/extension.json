@@ -48,17 +48,17 @@
     {
       "name": "sanka_drf_replay-0.1.0a1-py3-none-any.whl",
       "sha256": "34ee2e6f50f414f375c28b0cccb4b23f0a62603c4655bd9e5aedac9cc8b1ba71",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a15/sanka_drf_replay-0.1.0a1-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a16/sanka_drf_replay-0.1.0a1-py3-none-any.whl"
     },
     {
       "name": "sanka_extension_sdk-0.1.0a1-py3-none-any.whl",
       "sha256": "cdfeeee02415f3f83738116f633d01b470ad7e6cca3cd736e4ccae8c53dcbe1b",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a15/sanka_extension_sdk-0.1.0a1-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a16/sanka_extension_sdk-0.1.0a1-py3-none-any.whl"
     },
     {
       "name": "sanka_extension_drf_to_flask-0.1.0a2-py3-none-any.whl",
       "sha256": "f25245cbae92f60c445388b3ef708946f8722bb02810b89931a523777f688dda",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a15/sanka_extension_drf_to_flask-0.1.0a2-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a16/sanka_extension_drf_to_flask-0.1.0a2-py3-none-any.whl"
     }
   ]
 }
