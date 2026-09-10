@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a15/"
+RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a16/"
 EXPECTED = {
     "sanka/drf-to-flask": {
         "kind": "migration",

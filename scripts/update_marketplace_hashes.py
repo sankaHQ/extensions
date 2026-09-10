@@ -18,7 +18,7 @@ if __package__ in {None, ""}:  # Direct script execution keeps only scripts/ on 
 
 from scripts.build_release import LOCKED_DEPENDENCY_WHEELS  # noqa: E402
 
-RELEASE_TAG = "extensions-v0.1.0a15"
+RELEASE_TAG = "extensions-v0.1.0a16"
 LOCAL_MANIFEST_WHEELS = {
     "sanka-extension-drf-to-flask": (
         "sanka_drf_replay-0.1.0a1-py3-none-any.whl",
