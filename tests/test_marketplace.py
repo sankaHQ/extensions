@@ -31,7 +31,7 @@ EXPECTED = {
         "protocol_version": "sanka-connector/v1",
         "distribution": {
             "name": "sanka-connector-markdown",
-            "version": "0.1.0a11",
+            "version": "0.1.0a12",
             "entry_point": "markdown",
         },
         "providers": [{"name": "markdown", "roles": ["source"]}],
@@ -41,7 +41,7 @@ EXPECTED = {
         "protocol_version": "sanka-connector/v1",
         "distribution": {
             "name": "sanka-connector-csv",
-            "version": "0.1.0a11",
+            "version": "0.1.0a12",
             "entry_point": "csv",
         },
         "providers": [{"name": "csv", "roles": ["source"]}],
@@ -51,7 +51,7 @@ EXPECTED = {
         "protocol_version": "sanka-connector/v1",
         "distribution": {
             "name": "sanka-connector-sqlite",
-            "version": "0.1.0a11",
+            "version": "0.1.0a12",
             "entry_point": "sqlite",
         },
         "providers": [{"name": "sqlite", "roles": ["source", "destination"]}],
@@ -61,7 +61,7 @@ EXPECTED = {
         "protocol_version": "sanka-connector/v1",
         "distribution": {
             "name": "sanka-connector-postgres",
-            "version": "0.1.0a11",
+            "version": "0.1.0a12",
             "entry_point": "postgres",
         },
         "providers": [{"name": "postgres", "roles": ["source", "destination"]}],
@@ -71,7 +71,7 @@ EXPECTED = {
         "protocol_version": "sanka-connector/v1",
         "distribution": {
             "name": "sanka-connector-clickhouse",
-            "version": "0.1.0a11",
+            "version": "0.1.0a12",
             "entry_point": "clickhouse",
         },
         "providers": [{"name": "clickhouse", "roles": ["destination"]}],
@@ -79,7 +79,7 @@ EXPECTED = {
 }
 
 
-def test_official_marketplace_has_migration_and_connector_components() -> None:
+def test_official_marketplace_has_code_and_data_extensions() -> None:
     catalog = json.loads(Path("marketplace.json").read_text())
 
     assert catalog["schema_version"] == "sanka-marketplace/v1"

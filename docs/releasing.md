@@ -2,7 +2,7 @@
 
 ## Current marketplace release
 
-Publish `extensions-v0.1.0a16` from the exact reviewed merge using `publish.yml`.
+Publish `extensions-v0.1.0a17` from the exact reviewed merge using `publish.yml`.
 This bundle ships the merged DRF replay, verifier, and concise guidance changes.
 Its manifests must reference the new tag and match every staged wheel hash;
 `extensions-v0.1.0a15` remains immutable. Run `make check` and
@@ -28,7 +28,7 @@ only Sanka dependency.
 uv sync --frozen --all-packages
 make check
 make build-release
-uv run python scripts/check_release_tag.py v0.1.0a11 tag
+uv run python scripts/check_release_tag.py v0.1.0a12 tag
 ```
 
 `make build-release` writes per-package wheels and source distributions under
