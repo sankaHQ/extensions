@@ -7,7 +7,7 @@ Apache-2.0 extensions and the Sanka Extension SDK for the [shared Sanka CLI and 
 | Product | Work |
 | --- | --- |
 | Sanka | System and data migrations |
-| Sanka Flow | Workflow migrations and operation of the resulting workflows |
+| Sanka Flow | Reconstruction of business configurations and operation of their workflows |
 | Sanka Code | Application and code migrations |
 
 The PostgreSQL extension reads and writes database records. Application SQL or ORM changes belong to Sanka Code; a project can require both products. These responsibilities do not imply support for every database-service migration route. DRF-to-FastAPI and DRF-to-Flask are code extensions that convert applications.
@@ -23,12 +23,21 @@ Use `sanka_extensions` to build extensions. Install the SDK with `pip install sa
 | Interface | Purpose |
 | --- | --- |
 | `sanka_extensions.systems` | System readers, writers, records, capabilities, credentials, and registration |
+| `sanka_extensions.flow` | Declarative business requests with change-preservation and activation requirements |
 | `sanka_extensions.code` | Typed requests and responses for code migration |
 
 ```python
 from sanka_extensions.systems import SystemReader, SystemWriter
 from sanka_extensions.code import ExtensionRequest, ExtensionResponse
+from sanka_extensions import flow
+
+crm = flow.create(type="crm")
 ```
+
+Flow's `create` constructs an unresolved definition without modifying a system.
+The source SDK includes its versioned contract; CRM/billing packages and Flow
+execution are not in the published marketplace. See [Flow contracts](docs/flow.md)
+for reapplication, construction, verification and activation requirements.
 
 See the [SDK guide](packages/sanka-extension-sdk/README.md) for development and the [compatibility guide](docs/naming-compatibility.md) for published package identifiers. `sanka-drf-replay` supplies optional request/response replay support for code extensions.
 

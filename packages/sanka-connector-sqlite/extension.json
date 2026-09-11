@@ -24,7 +24,7 @@
   "wheels": [
     {
       "name": "sanka_extension_sdk-0.1.0a2-py3-none-any.whl",
-      "sha256": "ea7949d332d8695e245c250898dd852c20bace52a443fdcbd0fb8e67dfd601ce",
+      "sha256": "b4e8e868bf4855315c333d05b51e9e2e74f7b5ab8cddbdc36c8f947c6c8150f9",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a17/sanka_extension_sdk-0.1.0a2-py3-none-any.whl"
     },
     {

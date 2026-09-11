@@ -2,7 +2,9 @@
 
 Thank you for improving Sanka Extensions. Contributions may add or improve
 stack-specific migration support for frameworks, databases, languages,
-libraries, and files. Before opening a pull request, read [The extension
+libraries, files and business configurations. Flow contracts live in
+`sanka_extensions.flow`; see [the Flow guide](docs/flow.md) for implementation
+status and runtime requirements. Before opening a pull request, read [The extension
 model](docs/extensions.md), the [Extension SDK
 development guide](docs/extension-development.md), and the [Security
 Policy](SECURITY.md).

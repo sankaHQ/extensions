@@ -1,6 +1,9 @@
 # Building Extensions
 
 Extensions add system-access or code-conversion capabilities. They are installed independently of the shared Sanka runtime and are licensed Apache-2.0.
+The SDK also provides the declarative business contract in `sanka_extensions.flow`.
+See [Flow development](flow.md) for the supported source API and the runtime work
+required before a business configuration can be applied.
 
 ## System access
 

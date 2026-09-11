@@ -17,10 +17,14 @@ Extensions contribute capabilities such as:
   transformation capabilities for one ecosystem.
 - **File extensions** read or write formats such as CSV and Markdown inside a
   reviewed root.
+- **Business extensions** will provide reusable CRM, billing and other business
+  configurations. Their declarative SDK contract is `sanka_extensions.flow`;
+  executable packages and runtime dispatch remain future work.
 
 The Sanka Extension SDK provides one `sanka_extensions` namespace. Use
 `sanka_extensions.systems` for system readers, writers, and registration;
 use `sanka_extensions.code` for typed code-migration requests and responses.
+Use `sanka_extensions.flow` for the [declarative Flow contract](flow.md).
 Both interfaces are implemented, including executable PostgreSQL, SQLite, CSV,
 Markdown, ClickHouse, DRF-to-FastAPI, and DRF-to-Flask extensions. See the
 [generated catalog](catalog.md) and [development guide](extension-development.md).

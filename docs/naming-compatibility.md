@@ -23,6 +23,12 @@ The canonical `sanka_extensions.systems` facade and old Python imports resolve t
 
 The public SDK is named **Sanka Extension SDK**, with one `sanka_extensions` namespace. The previously proposed `sanka_data` namespace was never released and is removed. The unified SDK owns `sanka_extensions` and the published code-contract module; its system facade uses the separately owned compatibility package so wheels do not overwrite each other's files.
 
+The added `sanka_extensions.flow` namespace defines business-construction requests.
+The earlier `sanka_extensions.blueprints` suggestion was never implemented or
+published and needs no compatibility alias. `Blueprint` remains a name for Flow's
+resolved configuration artifact. See [the Flow contract](flow.md) for source API
+availability and the separate runtime implementation requirements.
+
 ## Published compatibility contracts
 
 | Contract retained | Consumer / reason | Removal condition |
