@@ -137,11 +137,11 @@ def main() -> int:
                 errors.append(f"replay must use only stdlib: {source.relative_to(ROOT)}: {module}")
 
     if errors:
-        print("Connector boundary validation failed:", file=sys.stderr)
+        print("Extension boundary validation failed:", file=sys.stderr)
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print("Connector and extension dependency boundaries: OK")
+    print("Data and code extension dependency boundaries: OK")
     return 0
 
 

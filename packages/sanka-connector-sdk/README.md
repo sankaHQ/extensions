@@ -1,13 +1,13 @@
-# Sanka Connector SDK
+# Sanka Data Extension SDK
 
-The dependency-free Apache-2.0 interface used by Sanka connector plugins.
+Dependency-free Apache-2.0 system access interfaces used by Sanka data extensions.
 
 ```python
-from sanka_connector import ConnectorRegistration, SourceConnector
+from sanka_data import DataExtensionRegistration, SystemReader, SystemWriter
 ```
 
-Providers register through the `sanka.connectors` entry-point group. The SDK
-does not import the Sanka migration runtime or any provider implementation.
-When a route declares identity fields, destination implementations must require
-the complete, non-NULL identity tuple for every record; they must never weaken
-a composite identity to the subset supplied by one record.
+A data extension supplies readers, writers, and optional capabilities for a system type. Credentials are passed per operation, keeping configured systems independent. Installing an extension does not authenticate a database or account.
+
+The SDK imports neither the Sanka runtime nor system implementations. Destination writers must require the complete non-null identity tuple when a route declares identity fields.
+
+The distribution name `sanka-connector-sdk`, the `sanka.connectors` entry-point group, and the `sanka_connector` import aliases remain published compatibility contracts. Old type imports resolve to the same canonical classes. See [the transition map](https://github.com/sankaHQ/extensions/blob/main/docs/naming-compatibility.md).

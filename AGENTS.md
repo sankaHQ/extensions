@@ -1,20 +1,21 @@
 # Sanka Extensions
 
 This repository owns Apache-2.0 extension SDKs and independently installable
-extensions used by the Sanka migration runtime. The current executable extension interface
-is the Connector SDK; new framework, language, library, or generation extension kinds
-must establish a typed interface and boundary checks before adding packages.
+extensions used by the shared Sanka CLI and migration runtime. Data extensions
+implement system access through `sanka_data`; code extensions implement the
+`sanka-extension/v1` lifecycle. Both interfaces are executable today.
+Read `docs/naming-compatibility.md` before changing published identifiers.
 
 ## Boundaries
 
-- `packages/sanka-connector-sdk` contains protocols, typed records, capability
+- `packages/sanka-connector-sdk` contains the canonical `sanka_data` interfaces and compatibility re-exports: protocols, typed records, capability
   declarations, credentials, errors, and entry-point registration only.
 - The SDK must not depend on Sanka's AGPL runtime, database drivers, framework
   runtimes, or provider clients.
-- Each `packages/sanka-connector-*` connector extension depends on the SDK and only
+- Each `packages/sanka-connector-*` data extension depends on the SDK and only
   the third-party libraries that extension needs.
-- Connector entry points use the `sanka.connectors` group and resolve to a
-  `sanka_connector.ConnectorRegistration`.
+- Published data-extension entry points use the `sanka.connectors` group and resolve to a
+  `sanka_data.DataExtensionRegistration`.
 - Extension code must never import `sanka`, `sanka.runtime`, or another extension.
 - Do not add arbitrary in-process hooks. New extension kinds need typed, versioned
   contracts, isolated execution, deterministic discovery, and fail-closed
@@ -34,7 +35,7 @@ uv run mypy packages scripts
 uv run pytest
 ```
 
-Run connector integration tests only when their documented environment variable
+Run data-extension integration tests only when their documented environment variable
 is configured. They must skip cleanly otherwise.
 
 ## Releases

@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PostgreSQL source connector.
+"""PostgreSQL system reader.
 
 Reads BASE TABLEs from one schema. Identity is the single-column primary key;
 tables with a composite, missing, or bytea primary key are inventoried with a
 warning and no identity fields so the planner skips them. ``read_records``
 keyset-paginates on the primary key (``WHERE pk > cursor ORDER BY pk``), and
-:class:`sanka_connector.SupportsSnapshotBounds` freezes a run's scope at
+:class:`sanka_data.SupportsSnapshotBounds` freezes a run's scope at
 ``MAX(pk)``. Cursors and bounds travel as JSON-safe strings; see
 ``_base.cursor_param`` for how they are cast back.
 """
@@ -18,7 +18,18 @@ from typing import TYPE_CHECKING, Any
 import psycopg
 from psycopg import sql
 
-from sanka_connector import (
+from sanka_connector_postgres._base import (
+    SKIPPED_BINARY,
+    PostgresSystemAccess,
+    cursor_param,
+    cursor_text,
+    field_family,
+    is_binary,
+    is_temporal,
+    json_safe,
+    pg_errors,
+)
+from sanka_data import (
     Credentials,
     DataError,
     FieldSchema,
@@ -29,20 +40,9 @@ from sanka_connector import (
     SourceObject,
     UnsupportedFeatureError,
 )
-from sanka_connector_postgres._base import (
-    SKIPPED_BINARY,
-    PostgresConnectorBase,
-    cursor_param,
-    cursor_text,
-    field_family,
-    is_binary,
-    is_temporal,
-    json_safe,
-    pg_errors,
-)
 
 
-class PostgresSource(PostgresConnectorBase):
+class PostgresSource(PostgresSystemAccess):
     def __init__(self) -> None:
         super().__init__()
         self._binary_warned: set[tuple[str, str]] = set()
@@ -356,8 +356,8 @@ def _reject_filter(source_filter: SourceFilter | None) -> None:
 
 
 if TYPE_CHECKING:
-    from sanka_connector import SourceConnector, SupportsRecordCounts, SupportsSnapshotBounds
+    from sanka_data import SupportsRecordCounts, SupportsSnapshotBounds, SystemReader
 
-    _protocol_source: SourceConnector = PostgresSource()
+    _protocol_source: SystemReader = PostgresSource()
     _protocol_counts: SupportsRecordCounts = PostgresSource()
     _protocol_bounds: SupportsSnapshotBounds = PostgresSource()

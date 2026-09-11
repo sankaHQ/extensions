@@ -33,12 +33,12 @@ LOCAL_WHEELS = (
     "sanka_extension_sdk-0.1.0a1-py3-none-any.whl",
     "sanka_extension_drf_to_fastapi-0.1.0a4-py3-none-any.whl",
     "sanka_extension_drf_to_flask-0.1.0a2-py3-none-any.whl",
-    "sanka_connector_sdk-0.1.0a11-py3-none-any.whl",
-    "sanka_connector_markdown-0.1.0a11-py3-none-any.whl",
-    "sanka_connector_csv-0.1.0a11-py3-none-any.whl",
-    "sanka_connector_sqlite-0.1.0a11-py3-none-any.whl",
-    "sanka_connector_postgres-0.1.0a11-py3-none-any.whl",
-    "sanka_connector_clickhouse-0.1.0a11-py3-none-any.whl",
+    "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
+    "sanka_connector_markdown-0.1.0a12-py3-none-any.whl",
+    "sanka_connector_csv-0.1.0a12-py3-none-any.whl",
+    "sanka_connector_sqlite-0.1.0a12-py3-none-any.whl",
+    "sanka_connector_postgres-0.1.0a12-py3-none-any.whl",
+    "sanka_connector_clickhouse-0.1.0a12-py3-none-any.whl",
 )
 DEPENDENCIES = (
     "backports-zstd",

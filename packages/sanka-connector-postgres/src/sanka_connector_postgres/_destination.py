@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PostgreSQL destination connector.
+"""PostgreSQL system writer.
 
 Tables are created lazily from the records written to them, with column types
 taken from the first-seen Python value (bool → boolean, int → bigint, float →
@@ -11,8 +11,8 @@ precision → text ladder with ``ALTER COLUMN … TYPE … USING`` instead of
 failing the run — SQLite's everything-fits semantics on a typed store, without
 losing rows already written. Identity columns get a
 ``CREATE UNIQUE INDEX IF NOT EXISTS``. Writes honor the identity fields and
-conflict policy from :class:`sanka_connector.WriteOptions` via an identity
-pre-SELECT, mirroring the sqlite connector.
+conflict policy from :class:`sanka_data.WriteOptions` via an identity
+pre-SELECT, mirroring the SQLite writer.
 
 ``destination_record_id`` is the identity value as a string when exactly one
 identity field is present in the record, else ``None`` — PostgreSQL has no
@@ -30,7 +30,12 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Json
 
-from sanka_connector import (
+from sanka_connector_postgres._base import (
+    PostgresSystemAccess,
+    identifier,
+    pg_errors,
+)
+from sanka_data import (
     Credentials,
     FieldSchema,
     Inventory,
@@ -39,11 +44,6 @@ from sanka_connector import (
     RelationshipWriteResult,
     WriteOptions,
     WriteResult,
-)
-from sanka_connector_postgres._base import (
-    PostgresConnectorBase,
-    identifier,
-    pg_errors,
 )
 
 _NUMERIC_COLUMN_TYPES: Final = frozenset(
@@ -173,7 +173,7 @@ def _promotion_cast(current: str, target: str, column: sql.Identifier) -> sql.Co
     return sql.SQL("{column}::{type}").format(column=column, type=sql.SQL(target))
 
 
-class PostgresDestination(PostgresConnectorBase):
+class PostgresDestination(PostgresSystemAccess):
     def __init__(self) -> None:
         super().__init__()
         self._schemas_ensured: set[tuple[str, str]] = set()
@@ -432,6 +432,6 @@ class PostgresDestination(PostgresConnectorBase):
 
 
 if TYPE_CHECKING:
-    from sanka_connector import DestinationConnector
+    from sanka_data import SystemWriter
 
-    _protocol_destination: DestinationConnector = PostgresDestination()
+    _protocol_destination: SystemWriter = PostgresDestination()

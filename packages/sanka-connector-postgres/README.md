@@ -1,6 +1,6 @@
-# PostgreSQL connector
+# PostgreSQL data extension
 
-PostgreSQL connector for Sanka, registering both roles under the `postgres`
+PostgreSQL data extension for Sanka, registering both roles under the `postgres`
 type. The DSN arrives in `settings["connection"]` (`postgres://…`,
 `postgresql://…`, or a libpq keyword string); `settings["schema"]` selects the
 schema (default `public`). Uses psycopg 3's async API with one cached

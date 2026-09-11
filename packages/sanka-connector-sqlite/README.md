@@ -1,4 +1,4 @@
-# SQLite connector
+# SQLite data extension
 
 SQLite as either side of a Sanka run.
 
