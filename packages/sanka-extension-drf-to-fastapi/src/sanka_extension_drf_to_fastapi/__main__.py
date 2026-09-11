@@ -7,7 +7,7 @@ import json
 import sys
 
 from sanka_extension_drf_to_fastapi.adapter import handle
-from sanka_extension_sdk import (
+from sanka_extensions.code import (
     SCHEMA_VERSION,
     ExtensionRequest,
     decode_request,

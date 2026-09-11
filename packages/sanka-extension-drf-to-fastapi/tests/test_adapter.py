@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from sanka_extension_drf_to_fastapi import __main__, adapter
-from sanka_extension_sdk import ExtensionRequest, JsonValue, encode_request, success_response
+from sanka_extensions.code import ExtensionRequest, JsonValue, encode_request, success_response
 
 
 def request_for(

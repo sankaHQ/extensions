@@ -9,6 +9,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_TYPES = {
+    "DataExtensionRegistration",
+    "DataExtensionRegistry",
+    "DataExtensionHostClient",
     "ConnectorRegistration",
     "SourceConnector",
     "DestinationConnector",
@@ -23,13 +26,15 @@ def check(root: Path) -> list[str]:
     errors = []
     for source in sorted((root / "packages").glob("*/src/**/*.py")):
         # SDK storage and facade are the documented shared compatibility boundary.
-        if "sanka-connector-sdk" in source.parts:
+        if "sanka-connector-sdk" in source.parts or "sanka-extension-sdk" in source.parts:
             continue
         tree = ast.parse(source.read_text(), filename=str(source))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
                 if node.module == "sanka_connector" or node.module.startswith("sanka_connector."):
-                    errors.append(f"{source.relative_to(root)}:{node.lineno}: use sanka_data")
+                    errors.append(
+                        f"{source.relative_to(root)}:{node.lineno}: use sanka_extensions.systems"
+                    )
                 for alias in node.names:
                     if alias.name in LEGACY_TYPES:
                         errors.append(
@@ -46,7 +51,7 @@ def main() -> int:
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
-    print("Data-extension terminology: OK")
+    print("Extension terminology: OK")
     return 0
 
 

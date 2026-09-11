@@ -5,7 +5,7 @@ Reads BASE TABLEs from one schema. Identity is the single-column primary key;
 tables with a composite, missing, or bytea primary key are inventoried with a
 warning and no identity fields so the planner skips them. ``read_records``
 keyset-paginates on the primary key (``WHERE pk > cursor ORDER BY pk``), and
-:class:`sanka_data.SupportsSnapshotBounds` freezes a run's scope at
+:class:`sanka_extensions.systems.SupportsSnapshotBounds` freezes a run's scope at
 ``MAX(pk)``. Cursors and bounds travel as JSON-safe strings; see
 ``_base.cursor_param`` for how they are cast back.
 """
@@ -29,7 +29,7 @@ from sanka_connector_postgres._base import (
     json_safe,
     pg_errors,
 )
-from sanka_data import (
+from sanka_extensions.systems import (
     Credentials,
     DataError,
     FieldSchema,
@@ -356,7 +356,7 @@ def _reject_filter(source_filter: SourceFilter | None) -> None:
 
 
 if TYPE_CHECKING:
-    from sanka_data import SupportsRecordCounts, SupportsSnapshotBounds, SystemReader
+    from sanka_extensions.systems import SupportsRecordCounts, SupportsSnapshotBounds, SystemReader
 
     _protocol_source: SystemReader = PostgresSource()
     _protocol_counts: SupportsRecordCounts = PostgresSource()

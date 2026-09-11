@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Shared internals for the PostgreSQL data extension.
+"""Shared internals for the PostgreSQL extension.
 
 Connection management (one cached ``psycopg.AsyncConnection`` per DSN per
 event loop, autocommit), identifier sanitization, source type-family mapping,
@@ -22,7 +22,7 @@ from typing import Any, Final
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 
-from sanka_data import (
+from sanka_extensions.systems import (
     AuthenticationError,
     ConfigurationError,
     ConflictError,

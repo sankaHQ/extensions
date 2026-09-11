@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from sanka_extension_sdk import ExtensionRequest, encode_request
+from sanka_extensions.code import ExtensionRequest, encode_request
 
 
 def project(root: Path) -> None:

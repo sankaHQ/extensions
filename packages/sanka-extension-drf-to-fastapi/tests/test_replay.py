@@ -24,7 +24,7 @@ from sanka_drf_replay.replay import (
     snapshot_database,
 )
 from sanka_extension_drf_to_fastapi import adapter
-from sanka_extension_sdk import ExtensionRequest
+from sanka_extensions.code import ExtensionRequest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

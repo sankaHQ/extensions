@@ -30,9 +30,9 @@ MARKETPLACE_PACKAGES = (
 )
 LOCAL_WHEELS = (
     "sanka_drf_replay-0.1.0a1-py3-none-any.whl",
-    "sanka_extension_sdk-0.1.0a1-py3-none-any.whl",
-    "sanka_extension_drf_to_fastapi-0.1.0a4-py3-none-any.whl",
-    "sanka_extension_drf_to_flask-0.1.0a2-py3-none-any.whl",
+    "sanka_extension_sdk-0.1.0a2-py3-none-any.whl",
+    "sanka_extension_drf_to_fastapi-0.1.0a5-py3-none-any.whl",
+    "sanka_extension_drf_to_flask-0.1.0a3-py3-none-any.whl",
     "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
     "sanka_connector_markdown-0.1.0a12-py3-none-any.whl",
     "sanka_connector_csv-0.1.0a12-py3-none-any.whl",

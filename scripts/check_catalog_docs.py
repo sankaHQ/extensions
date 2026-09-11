@@ -23,13 +23,13 @@ def catalog_document(root: Path) -> str:
     for item in sorted(catalog["extensions"], key=lambda item: item["id"]):
         manifest = json.loads((root / item["manifest"]).read_text())
         if manifest["kind"] == "connector":
-            capability = "Data"
+            capability = "System access"
             support = "; ".join(
                 f"{system['name']} ({', '.join(system['roles'])})"
                 for system in manifest["providers"]
             )
         else:
-            capability = "Code"
+            capability = "Code conversion"
             support = ", ".join(manifest["targets"])
         lines.append(f"| `{manifest['id']}` | {capability} | {support} |")
     return "\n".join(lines) + "\n"

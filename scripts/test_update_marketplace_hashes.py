@@ -198,15 +198,15 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
     packages = {
         "sanka-drf-replay": ("0.1.0a1", "sanka_drf_replay-0.1.0a1-py3-none-any.whl", ""),
         "sanka-extension-drf-to-flask": (
-            "0.1.0a2",
-            "sanka_extension_drf_to_flask-0.1.0a2-py3-none-any.whl",
+            "0.1.0a3",
+            "sanka_extension_drf_to_flask-0.1.0a3-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-flask = sanka_extension_drf_to_flask.__main__:main\n",
         ),
-        "sanka-extension-sdk": ("0.1.0a1", "sanka_extension_sdk-0.1.0a1-py3-none-any.whl", ""),
+        "sanka-extension-sdk": ("0.1.0a2", "sanka_extension_sdk-0.1.0a2-py3-none-any.whl", ""),
         "sanka-extension-drf-to-fastapi": (
-            "0.1.0a4",
-            "sanka_extension_drf_to_fastapi-0.1.0a4-py3-none-any.whl",
+            "0.1.0a5",
+            "sanka_extension_drf_to_fastapi-0.1.0a5-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-fastapi = sanka_extension_drf_to_fastapi.__main__:main\n",
         ),
@@ -244,9 +244,11 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
             f'[project]\nname = "{package}"\nversion = "{version}"\n'
         )
         requirements = (
-            ("sanka-extension-sdk==0.1.0a1", "sanka-drf-replay==0.1.0a1")
+            ("sanka-extension-sdk==0.1.0a2", "sanka-drf-replay==0.1.0a1")
             if package in {"sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask"}
             else ("sanka-connector-sdk==0.1.0a12",)
+            if package == "sanka-extension-sdk"
+            else ("sanka-extension-sdk==0.1.0a2",)
             if package.startswith("sanka-connector-") and package != "sanka-connector-sdk"
             else ()
         )
@@ -276,7 +278,7 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
     ("case", "expected"),
     [
         ("connector_entry_point", "exact connector entry point"),
-        ("dependency", "does not depend on its exact connector SDK"),
+        ("dependency", "does not depend on the exact Extension SDK"),
         ("hash", "manifest hash does not match release artifact"),
         ("path", "outside the marketplace snapshot"),
     ],
@@ -292,7 +294,7 @@ def test_release_validator_rejects_invalid_release_boundaries(
             name="sanka-connector-markdown",
             version="0.1.0a12",
             filename=markdown.name,
-            requirements=("sanka-connector-sdk==0.1.0a12",),
+            requirements=("sanka-extension-sdk==0.1.0a2",),
             entry_points="[sanka.connectors]\nmarkdown = attacker:CONNECTOR\n",
         )
         _set_manifest_hash(root, "sanka-connector-markdown", markdown)

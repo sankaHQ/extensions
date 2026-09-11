@@ -4,7 +4,7 @@
 import pytest
 
 import sanka_connector as legacy
-import sanka_data as canonical
+import sanka_extensions.systems as canonical
 
 
 def test_old_registration_and_errors_work_with_canonical_interfaces() -> None:
@@ -23,7 +23,7 @@ def test_old_registration_and_errors_work_with_canonical_interfaces() -> None:
 
     reader = Reader()
     registration = legacy.ConnectorRegistration(name="example", source=reader)
-    assert isinstance(registration, canonical.DataExtensionRegistration)
+    assert isinstance(registration, canonical.ExtensionRegistration)
     assert isinstance(reader, canonical.SystemReader)
     assert legacy.SourceConnector is canonical.SystemReader
     assert legacy.DestinationConnector is canonical.SystemWriter

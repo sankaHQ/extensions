@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from sanka_extension_sdk import (
+from sanka_extensions.code import (
     ExtensionRequest,
     decode_request,
     decode_response,

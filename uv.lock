@@ -1079,13 +1079,13 @@ version = "0.1.0a12"
 source = { editable = "packages/sanka-connector-clickhouse" }
 dependencies = [
     { name = "clickhouse-connect" },
-    { name = "sanka-connector-sdk" },
+    { name = "sanka-extension-sdk" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "clickhouse-connect", specifier = ">=0.8" },
-    { name = "sanka-connector-sdk", editable = "packages/sanka-connector-sdk" },
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
 ]
 
 [[package]]
@@ -1093,11 +1093,11 @@ name = "sanka-connector-csv"
 version = "0.1.0a12"
 source = { editable = "packages/sanka-connector-csv" }
 dependencies = [
-    { name = "sanka-connector-sdk" },
+    { name = "sanka-extension-sdk" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sanka-connector-sdk", editable = "packages/sanka-connector-sdk" }]
+requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
 
 [[package]]
 name = "sanka-connector-markdown"
@@ -1105,13 +1105,13 @@ version = "0.1.0a12"
 source = { editable = "packages/sanka-connector-markdown" }
 dependencies = [
     { name = "pyyaml" },
-    { name = "sanka-connector-sdk" },
+    { name = "sanka-extension-sdk" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
-    { name = "sanka-connector-sdk", editable = "packages/sanka-connector-sdk" },
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
 ]
 
 [[package]]
@@ -1120,13 +1120,13 @@ version = "0.1.0a12"
 source = { editable = "packages/sanka-connector-postgres" }
 dependencies = [
     { name = "psycopg", extra = ["binary"] },
-    { name = "sanka-connector-sdk" },
+    { name = "sanka-extension-sdk" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-    { name = "sanka-connector-sdk", editable = "packages/sanka-connector-sdk" },
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
 ]
 
 [[package]]
@@ -1139,11 +1139,11 @@ name = "sanka-connector-sqlite"
 version = "0.1.0a12"
 source = { editable = "packages/sanka-connector-sqlite" }
 dependencies = [
-    { name = "sanka-connector-sdk" },
+    { name = "sanka-extension-sdk" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sanka-connector-sdk", editable = "packages/sanka-connector-sdk" }]
+requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
 
 [[package]]
 name = "sanka-drf-replay"
@@ -1152,7 +1152,7 @@ source = { editable = "packages/sanka-drf-replay" }
 
 [[package]]
 name = "sanka-extension-drf-to-fastapi"
-version = "0.1.0a4"
+version = "0.1.0a5"
 source = { editable = "packages/sanka-extension-drf-to-fastapi" }
 dependencies = [
     { name = "sanka-drf-replay" },
@@ -1167,7 +1167,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-extension-drf-to-flask"
-version = "0.1.0a2"
+version = "0.1.0a3"
 source = { editable = "packages/sanka-extension-drf-to-flask" }
 dependencies = [
     { name = "sanka-drf-replay" },
@@ -1182,8 +1182,14 @@ requires-dist = [
 
 [[package]]
 name = "sanka-extension-sdk"
-version = "0.1.0a1"
+version = "0.1.0a2"
 source = { editable = "packages/sanka-extension-sdk" }
+dependencies = [
+    { name = "sanka-connector-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sanka-connector-sdk", editable = "packages/sanka-connector-sdk" }]
 
 [[package]]
 name = "sanka-extensions-workspace"

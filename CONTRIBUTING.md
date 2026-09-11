@@ -3,14 +3,15 @@
 Thank you for improving Sanka Extensions. Contributions may add or improve
 stack-specific migration support for frameworks, databases, languages,
 libraries, and files. Before opening a pull request, read [The extension
-model](docs/extensions.md), the current [connector-extension
-boundaries](docs/connector-development.md), and the [Security
+model](docs/extensions.md), the [Extension SDK
+development guide](docs/extension-development.md), and the [Security
 Policy](SECURITY.md).
 
-Use Python 3.12 and `uv`, keep shared SDKs dependency-free, and put each extension's
+Use Python 3.12 and `uv`. Keep the Extension SDK free of drivers and framework
+dependencies, and put each extension's
 optional dependencies in that extension package only. A new extension kind must first add a
 typed, versioned interface and boundary validation; do not couple extension code to
-the AGPL runtime. Hosted SaaS and managed-system connectors do not belong in
+the AGPL runtime. Hosted SaaS and managed-system implementations do not belong in
 this repository.
 
 ```bash

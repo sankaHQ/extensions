@@ -1,6 +1,6 @@
 # Sanka Extensions
 
-Apache-2.0 extensions and SDKs for the [shared Sanka CLI and migration runtime](https://github.com/sankaHQ/sanka). This is a Python 3.12+ `uv` workspace.
+Apache-2.0 extensions and the Sanka Extension SDK for the [shared Sanka CLI and migration runtime](https://github.com/sankaHQ/sanka). This is a Python 3.12+ `uv` workspace.
 
 **Extensions add capabilities. Systems identify the databases, files, and SaaS accounts used in a migration.** One PostgreSQL extension can serve several independently configured PostgreSQL systems.
 
@@ -10,19 +10,27 @@ Apache-2.0 extensions and SDKs for the [shared Sanka CLI and migration runtime](
 | Sanka Flow | Workflow migrations and operation of the resulting workflows |
 | Sanka Code | Application and code migrations |
 
-The PostgreSQL data extension reads and writes database records. Application SQL or ORM changes belong to Sanka Code; a project can require both products. These responsibilities do not imply support for every database-service migration route. DRF-to-FastAPI and DRF-to-Flask are code extensions that convert applications.
+The PostgreSQL extension reads and writes database records. Application SQL or ORM changes belong to Sanka Code; a project can require both products. These responsibilities do not imply support for every database-service migration route. DRF-to-FastAPI and DRF-to-Flask are code extensions that convert applications.
 
 ## Available extensions
 
-The current catalog is documented in [catalog.md](docs/catalog.md), generated and checked against `marketplace.json` and each manifest. It contains data and code extensions.
+The current catalog is documented in [catalog.md](docs/catalog.md), generated and checked against `marketplace.json` and each manifest. It covers system access and code conversion.
 
-| SDK / supporting package | Responsibility |
+## Sanka Extension SDK
+
+Use `sanka_extensions` to build extensions. Install the SDK with `pip install sanka-extension-sdk`.
+
+| Interface | Purpose |
 | --- | --- |
-| `sanka-connector-sdk` | Data Extension SDK: `sanka_data` system readers, writers, records, capabilities, credentials, errors, and registration |
-| `sanka-extension-sdk` | Code Extension SDK: typed `sanka-extension/v1` subprocess messages |
-| `sanka-drf-replay` | Framework-independent request/response replay support for code extensions |
+| `sanka_extensions.systems` | System readers, writers, records, capabilities, credentials, and registration |
+| `sanka_extensions.code` | Typed requests and responses for code migration |
 
-Package distribution names are exact installation identities. The data SDK distribution and data-extension distributions retain their published names during the [compatibility transition](docs/naming-compatibility.md). New developer examples use `sanka_data`, `DataExtensionRegistration`, `SystemReader`, and `SystemWriter`.
+```python
+from sanka_extensions.systems import SystemReader, SystemWriter
+from sanka_extensions.code import ExtensionRequest, ExtensionResponse
+```
+
+See the [SDK guide](packages/sanka-extension-sdk/README.md) for development and the [compatibility guide](docs/naming-compatibility.md) for published package identifiers. `sanka-drf-replay` supplies optional request/response replay support for code extensions.
 
 HubSpot, Salesforce, SendGrid, and other hosted SaaS implementations remain private Sanka API capabilities. They are systems; users do not install them as local extensions.
 
@@ -51,7 +59,7 @@ The published manifest values `kind="connector"` (Data) and `kind="migration"` (
 
 ## Execution and trust
 
-Sanka owns discovery, planning, execution, and verification. Data extensions expose typed system readers and writers through the isolated data-extension host. Code extensions exchange validated JSON over standard input/output using `sanka-extension/v1`; diagnostics go to standard error.
+Sanka owns discovery, planning, execution, and verification. Extensions expose typed system readers and writers through the isolated extension host. Code extensions exchange validated JSON over standard input/output using `sanka-extension/v1`; diagnostics go to standard error.
 
 A code-extension request contains:
 
@@ -86,8 +94,8 @@ make build-release
 
 `make check` runs formatting, type checks, dependency boundaries, terminology/catalog checks, package tests, and catalog updater tests. Database integration tests require their documented test endpoints and skip when absent.
 
-`make build-release` builds and validates artifacts; it does not publish. After intentional wheel changes, run `make update-marketplace-hashes`, review the manifest diff, and validate again. Publish the Data Extension SDK before its implementing extensions, and publish SDK changes before advancing runtime dependency pins. Release publication requires a reviewed release and separate authorization.
+`make build-release` builds and validates artifacts; it does not publish. After intentional wheel changes, run `make update-marketplace-hashes`, review the manifest diff, and validate again. Publish the SDK compatibility dependency, then the Sanka Extension SDK, then implementing extensions, and publish SDK changes before advancing runtime dependency pins. Release publication requires a reviewed release and separate authorization.
 
-See [data-extension development](docs/data-extension-development.md) and [AGENTS.md](AGENTS.md) for ownership and licensing boundaries.
+See [extension development](docs/extension-development.md) and [AGENTS.md](AGENTS.md) for ownership and licensing boundaries.
 
 The converter benchmark gate pins a reviewed benchmark revision and covers DRF-to-FastAPI and DRF-to-Flask. Fully generated candidates must pass the generated-scope tests and independent benchmark gates. Partial candidates disclose route gaps. Private benchmark fixtures and reports remain outside this repository.

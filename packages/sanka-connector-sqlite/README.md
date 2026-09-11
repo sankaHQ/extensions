@@ -1,4 +1,4 @@
-# SQLite data extension
+# SQLite extension
 
 SQLite as either side of a Sanka run.
 

@@ -1,7 +1,7 @@
 [project]
 name = "sanka-connector-sdk"
 version = "0.1.0a12"
-description = "Typed system access interfaces for Sanka data extensions"
+description = "Typed system access interfaces for Sanka extensions"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -24,4 +24,4 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/sanka_data", "src/sanka_connector"]
+packages = ["src/sanka_connector"]

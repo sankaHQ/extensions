@@ -9,7 +9,7 @@ As a source, every user table is a migratable object: fields come from
 As a destination, tables are created lazily from the records written to them
 (TEXT-affinity columns; complex values JSON-encoded), and widened with
 ``ALTER TABLE`` when new fields appear. Writes honor the identity fields and
-conflict policy from :class:`sanka_data.WriteOptions`.
+conflict policy from :class:`sanka_extensions.systems.WriteOptions`.
 """
 
 from __future__ import annotations
@@ -21,11 +21,11 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from sanka_data import (
+from sanka_extensions.systems import (
     ConfigurationError,
     Credentials,
     DataError,
-    DataExtensionRegistration,
+    ExtensionRegistration,
     FieldSchema,
     Inventory,
     ObjectSchema,
@@ -60,7 +60,7 @@ def _reject_filter(source_filter: SourceFilter | None) -> None:
     if source_filter is not None:
         raise UnsupportedFeatureError(
             "sqlite source filters are not supported",
-            remediation="remove the source filter or use a data extension that supports it",
+            remediation="remove the source filter or use an extension that supports it",
         )
 
 
@@ -434,9 +434,9 @@ def _to_sql(value: Any) -> Any:
     return json.dumps(value, ensure_ascii=False)
 
 
-DATA_EXTENSION = DataExtensionRegistration(
+EXTENSION = ExtensionRegistration(
     name="sqlite", source=SqliteSource(), destination=SqliteDestination()
 )
 
 # Compatibility target for existing sanka.connectors entry points.
-CONNECTOR = DATA_EXTENSION
+CONNECTOR = EXTENSION

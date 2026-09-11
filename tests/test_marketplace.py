@@ -13,7 +13,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-flask",
-            "version": "0.1.0a2",
+            "version": "0.1.0a3",
             "executable": "sanka-extension-drf-to-flask",
         },
     },
@@ -22,7 +22,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-fastapi",
-            "version": "0.1.0a4",
+            "version": "0.1.0a5",
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },
@@ -79,7 +79,7 @@ EXPECTED = {
 }
 
 
-def test_official_marketplace_has_code_and_data_extensions() -> None:
+def test_official_marketplace_has_system_access_and_code_conversion() -> None:
     catalog = json.loads(Path("marketplace.json").read_text())
 
     assert catalog["schema_version"] == "sanka-marketplace/v1"

@@ -10,7 +10,7 @@ ClickHouse forbids ``Nullable`` ORDER BY columns. Fields that appear later are
 added with ``ALTER TABLE … ADD COLUMN IF NOT EXISTS`` as ``Nullable``.
 
 Engine choice is deliberate: when the run's
-:class:`sanka_data.WriteOptions` declare identity fields, tables are
+:class:`sanka_extensions.systems.WriteOptions` declare identity fields, tables are
 created as ``ReplacingMergeTree ORDER BY (<identity columns>)``. Sanka's
 engine guarantees at-least-once writes reconciled against an identity ledger,
 so a re-applied migration inserts a fresh *version* of each row rather than
@@ -53,14 +53,14 @@ import clickhouse_connect
 from clickhouse_connect.driver.client import Client
 from clickhouse_connect.driver.exceptions import InterfaceError, OperationalError
 
-from sanka_data import (
+from sanka_extensions.systems import (
     AuthenticationError,
     BatchWriteInput,
     BatchWriteResult,
     ConfigurationError,
     Credentials,
     DataError,
-    DataExtensionRegistration,
+    ExtensionRegistration,
     FieldSchema,
     Inventory,
     ObjectSchema,
@@ -495,7 +495,7 @@ class ClickHouseDestination:
             raise _map_error(exc, action=action) from exc
 
 
-DATA_EXTENSION = DataExtensionRegistration(name="clickhouse", destination=ClickHouseDestination())
+EXTENSION = ExtensionRegistration(name="clickhouse", destination=ClickHouseDestination())
 
 # Compatibility target for existing sanka.connectors entry points.
-CONNECTOR = DATA_EXTENSION
+CONNECTOR = EXTENSION

@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Sanka, Inc." }]
-dependencies = ["pyyaml>=6", "sanka-connector-sdk==0.1.0a12"]
+dependencies = ["pyyaml>=6", "sanka-extension-sdk==0.1.0a2"]
 
 [project.entry-points."sanka.connectors"]
 markdown = "sanka_connector_markdown:CONNECTOR"

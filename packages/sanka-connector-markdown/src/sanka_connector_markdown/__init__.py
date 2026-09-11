@@ -16,11 +16,11 @@ from typing import Any
 
 import yaml
 
-from sanka_data import (
+from sanka_extensions.systems import (
     ConfigurationError,
     Credentials,
     DataError,
-    DataExtensionRegistration,
+    ExtensionRegistration,
     FieldSchema,
     Inventory,
     ObjectSchema,
@@ -318,11 +318,11 @@ def _reject_filter(source_filter: SourceFilter | None) -> None:
     if source_filter is not None:
         raise UnsupportedFeatureError(
             "markdown source filters are not supported",
-            remediation="remove the source filter or use a data extension that supports it",
+            remediation="remove the source filter or use an extension that supports it",
         )
 
 
-DATA_EXTENSION = DataExtensionRegistration(name="markdown", source=MarkdownSource())
+EXTENSION = ExtensionRegistration(name="markdown", source=MarkdownSource())
 
 # Compatibility target for existing sanka.connectors entry points.
-CONNECTOR = DATA_EXTENSION
+CONNECTOR = EXTENSION

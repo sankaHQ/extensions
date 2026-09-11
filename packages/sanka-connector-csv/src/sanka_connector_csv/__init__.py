@@ -19,11 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sanka_data import (
+from sanka_extensions.systems import (
     ConfigurationError,
     Credentials,
     DataError,
-    DataExtensionRegistration,
+    ExtensionRegistration,
     FieldSchema,
     Inventory,
     ObjectSchema,
@@ -244,11 +244,11 @@ def _reject_filter(source_filter: SourceFilter | None) -> None:
     if source_filter is not None:
         raise UnsupportedFeatureError(
             "csv source filters are not supported",
-            remediation="remove the source filter or use a data extension that supports it",
+            remediation="remove the source filter or use an extension that supports it",
         )
 
 
-DATA_EXTENSION = DataExtensionRegistration(name="csv", source=CsvSource())
+EXTENSION = ExtensionRegistration(name="csv", source=CsvSource())
 
 # Compatibility target for existing sanka.connectors entry points.
-CONNECTOR = DATA_EXTENSION
+CONNECTOR = EXTENSION

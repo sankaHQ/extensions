@@ -22,13 +22,18 @@
   "version": "0.1.0a12",
   "wheels": [
     {
+      "name": "sanka_extension_sdk-0.1.0a2-py3-none-any.whl",
+      "sha256": "ea7949d332d8695e245c250898dd852c20bace52a443fdcbd0fb8e67dfd601ce",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a17/sanka_extension_sdk-0.1.0a2-py3-none-any.whl"
+    },
+    {
       "name": "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-      "sha256": "ec207e95fe0cd6fd17e8b92f8111d70f73b1f367a26f8e725d1d00b46918638e",
+      "sha256": "747b63f4bd48b0a554eb01ff3936ebbdd62e032286dd0d0431233a206fabd670",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a17/sanka_connector_sdk-0.1.0a12-py3-none-any.whl"
     },
     {
       "name": "sanka_connector_markdown-0.1.0a12-py3-none-any.whl",
-      "sha256": "7a30d3f7820cfeef5479eea8c3362918447cd0a98e842a867a67c9b47123b2bf",
+      "sha256": "0c1edb4a401cf8679d4f0350c18d3d70a1a680f83feb458a9c08fa5b8deb0d58",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a17/sanka_connector_markdown-0.1.0a12-py3-none-any.whl"
     },
     {
