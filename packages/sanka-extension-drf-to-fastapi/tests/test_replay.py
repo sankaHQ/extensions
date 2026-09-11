@@ -252,7 +252,16 @@ def write():
     rows = {r["id"]: r for r in report["scenarios"]}
     assert rows["nested"]["match"] and rows["upload"]["match"]
     assert rows["edge:upload-binary:upload"]["match"]
-    assert not rows["edge:upload-boundary:upload"]["body_match"]
+    boundary = rows["edge:upload-boundary:upload"]
+    assert not boundary["body_match"]
+    assert boundary["mismatch_kind"] == "multipart_boundary_parity"
+    assert "legacy truncation" in boundary["repair_hint"]
+    compact = __import__("sanka_drf_replay.replay", fromlist=["save_report"]).save_report(
+        report, tmp_path / "reports"
+    )
+    assert any(
+        item.get("mismatch_kind") == "multipart_boundary_parity" for item in compact["failures"]
+    )
     assert not rows["edge:duplicate-record-0:nested"]["status_match"]
     assert not report["ok"]
 

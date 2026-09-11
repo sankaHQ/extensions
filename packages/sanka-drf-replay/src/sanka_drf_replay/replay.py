@@ -1189,6 +1189,36 @@ def _replay_one(
         "database_differences": database_diffs,
         "native": {**native, "compliant": native_compliant},
     }
+    multipart_spec = scenario.get("multipart")
+    if isinstance(multipart_spec, dict) and not report["match"]:
+        delimiter = b"--" + str(multipart_spec.get("boundary") or _MULTIPART_BOUNDARY).encode()
+        if any(
+            delimiter in base64.b64decode(item.get("content_b64", ""))
+            for item in multipart_spec.get("files", [])
+        ):
+            report["mismatch_kind"] = "multipart_boundary_parity"
+            report["repair_hint"] = (
+                "The uploaded bytes contain the multipart boundary token. Compare source and "
+                "candidate parsing before changing validation: source compatibility may include "
+                "legacy truncation, not full file preservation. "
+                + (
+                    "Reuse generated sanka_form.parse_form(request), then rerun verify."
+                    if target == "flask"
+                    else "Preserve the source parser behavior, then rerun verify."
+                )
+            )
+            report["media_sizes"] = [
+                {
+                    "path": name,
+                    "source": (source_media / name).stat().st_size
+                    if name in source_files
+                    else None,
+                    "candidate": (candidate_media / name).stat().st_size
+                    if name in candidate_files
+                    else None,
+                }
+                for name in report["media_differences"][:5]
+            ]
     if scenario.get("generated_from"):
         report["generated_from"] = scenario["generated_from"]
     if scenario.get("context_from"):
@@ -1283,7 +1313,15 @@ def save_report(report: Mapping[str, Any], artifact_root: Path) -> dict[str, Any
         "coverage_issues": report.get("coverage_issues", []),
         "report_path": str(path),
         "failures": [
-            {"id": item["id"], "message": line[:2000]}
+            {
+                "id": item["id"],
+                "message": line[:2000],
+                **{
+                    key: item[key]
+                    for key in ("mismatch_kind", "repair_hint", "media_sizes")
+                    if key in item
+                },
+            }
             for item, line in zip(failures[:20], report["summary_lines"][1:21], strict=True)
         ],
         "omitted_failures": max(0, len(failures) - 20),

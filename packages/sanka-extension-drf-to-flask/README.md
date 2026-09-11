@@ -68,3 +68,17 @@ The independent benchmark's acceptance and native-compliance gates still apply.
 Unmatched URLs use the source Django built-in 404 page, rendered as a native Flask
 response. Custom `handler404`, `404.html` templates, and debug error pages still
 require manual adaptation and differential verification.
+
+### Form and upload parsing
+
+`apply` includes `sanka_form.py`. Recognized APIView handlers with stock FormParser
+or MultiPartParser use it automatically. For routes that still need manual
+adaptation, use `parse_form(request)` to obtain source-compatible fields and
+Django UploadedFile objects; catch `FormError` and retain its `detail` and `status`.
+Flask still owns routing and serving; the helper does not import DRF.
+
+Compatibility includes the source Django parser's boundary-token behavior, which
+can truncate file contents. `verify` reports these mismatches as
+`multipart_boundary_parity`, with repair guidance and differing saved-file sizes.
+A parity pass does not establish that the source preserves all uploaded bytes.
+Custom view/rendering behavior remains an explicit migration gap.
