@@ -305,10 +305,6 @@ class Blueprint(WireRecord):
                 reference = references[reference_id]
                 if reference.binding == "resource" and reference.key not in resource.depends_on:
                     raise ValueError("planned resource references require an explicit dependency")
-        if not graphs and not self.unsupported:
-            raise ValueError(
-                "a Flow Blueprint requires a workflow or explicit unsupported findings"
-            )
         for scenario in self.scenarios:
             scenario_graph = graphs.get(scenario.workflow_id)
             if scenario_graph is None:

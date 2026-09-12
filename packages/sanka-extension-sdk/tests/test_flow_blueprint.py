@@ -299,6 +299,14 @@ def test_explicit_unsupported_artifact_can_be_inspected_but_not_accepted(payload
         blueprint.require_supported()
 
 
+def test_empty_desired_blueprint_allows_explicit_removal_plans(payload):
+    payload.update(resources=[], references=[], scenarios=[])
+    blueprint = flow.Blueprint.from_dict(payload)
+    assert blueprint.resources == ()
+    blueprint.require_supported()
+    assert blueprint.to_dict() == payload
+
+
 def test_template_cannot_claim_source_mapping(payload):
     payload["references"].append(
         flow.Reference("source.deal", "object", "source.deal", scope="source").to_dict()

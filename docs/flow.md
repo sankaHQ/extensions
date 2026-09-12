@@ -99,6 +99,10 @@ serialized configuration, scenarios, policies and provenance. Lists that represe
 sets are sorted by logical identity; event ordering remains significant. Input
 mutation and modification of returned dictionaries cannot change either artifact.
 
+An empty desired resource set is valid. It lets a runtime plan omission-only
+preservation or an explicitly requested uninstall. Empty desired configuration
+alone never authorizes deletion; only reviewed removal operations do that.
+
 Each `Reference` has a logical `id`, `kind`, exact `key`, `scope`, `binding`,
 `parent_id` and `related_object_id`. Properties, records and relationships require
 an object parent in the same scope; relationships also require their related
