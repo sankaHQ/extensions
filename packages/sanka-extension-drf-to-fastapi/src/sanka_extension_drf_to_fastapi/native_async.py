@@ -518,6 +518,11 @@ from __future__ import annotations
 from typing import Any
 
 from tortoise import Tortoise
+from tortoise.transactions import in_transaction
+
+
+def transaction():
+    return in_transaction()
 
 """
     + _URL_HELPER
@@ -1967,6 +1972,24 @@ def _forbidden(auth: dict[str, Any], allow: str) -> Response:
     )
 
 
+class NestedCreateRejected(Exception):
+    def __init__(self, detail: dict[str, Any]) -> None:
+        self.detail = detail
+
+
+async def _create_nested(
+    spec: dict[str, Any], validated: dict[str, Any], nested: dict[str, Any]
+) -> Any:
+    instance = await store.create_row(spec, validated)
+    for field in spec["fields"]:
+        if field["kind"] == "nested_many" and field["name"] in nested:
+            fk = field.get("attname") or field["name"]
+            parent_id = _attr(instance, spec.get("pk_attname") or "id")
+            for child in nested[field["name"]]:
+                await store.create_row(field["child"], {**child, fk: parent_id})
+    return instance
+
+
 async def handle(
     spec: dict[str, Any],
     operation: str,
@@ -2047,15 +2070,30 @@ async def handle(
             instance, carryover_error = await store.create_with_user_logic(spec, validated)
             if carryover_error is not None:
                 return JSONResponse(carryover_error, status_code=400, headers={"Allow": allow})
-        else:
+        elif create["style"] == "nested":
+            try:
+                async with store.transaction():
+                    instance = await _create_nested(spec, validated, nested)
+                    rule = create.get("rule")
+                    if rule is not None:
+                        field = next(
+                            field for field in spec["fields"] if field["name"] == rule["field"]
+                        )
+                        children = await store.fetch_children(field, _instance_pk(instance))
+                        total = sum(_attr(child, rule["attribute"]) for child in children)
+                        import operator
+                        compare = {
+                            "Gt": operator.gt, "GtE": operator.ge, "Lt": operator.lt,
+                            "LtE": operator.le, "Eq": operator.eq, "NotEq": operator.ne,
+                        }[rule["operator"]]
+                        if compare(total, rule["limit"]):
+                            raise NestedCreateRejected(rule["detail"])
+            except NestedCreateRejected as error:
+                return JSONResponse(error.detail, status_code=400, headers={"Allow": allow})
+        elif create["style"] == "default":
             instance = await store.create_row(spec, validated)
-            for field in spec["fields"]:
-                if field["kind"] == "nested_many" and field["name"] in nested:
-                    fk = field.get("attname") or field["name"]
-                    parent_id = _attr(instance, spec.get("pk_attname") or "id")
-                    for child in nested[field["name"]]:
-                        child[fk] = parent_id
-                        await store.create_row(field["child"], child)
+        else:
+            raise RuntimeError("Custom create contract requires manual adaptation")
         return JSONResponse(
             await _serialize(spec, instance), status_code=201, headers={"Allow": allow}
         )

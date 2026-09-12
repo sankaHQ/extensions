@@ -40,6 +40,9 @@ dev = [
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.format]
+exclude = ["packages/sanka-extension-drf-to-fastapi/tests/fixtures/order_tracker/**"]
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
 

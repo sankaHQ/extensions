@@ -559,6 +559,7 @@ def test_verify_with_scenarios_dispatches_to_replay_without_a_plan(tmp_path: Pat
         {
             "scenarios": "public-tests/scenarios.json",
             "db_env": "BENCH_DB_PATH",
+            "candidate_db_env": "SANKA_TEST_DB",
             "entrypoint": "target_app.py",
             "settings_module": "config.settings",
             "ignore_tables": ["django_session"],
@@ -583,6 +584,7 @@ def test_verify_with_scenarios_dispatches_to_replay_without_a_plan(tmp_path: Pat
     kwargs = run.call_args.kwargs
     assert kwargs["settings_module"] == "config.settings"
     assert kwargs["db_env"] == "BENCH_DB_PATH"
+    assert kwargs["candidate_db_env"] == "SANKA_TEST_DB"
     assert kwargs["entrypoint"] == "target_app.py"
     assert kwargs["ignored_tables"] == ("django_session",)
     assert kwargs["all_headers"] is True

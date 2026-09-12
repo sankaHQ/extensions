@@ -1,6 +1,6 @@
 [project]
 name = "sanka-drf-replay"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Shared isolated DRF differential replay for Sanka migration extensions"
 readme = "README.md"
 requires-python = ">=3.12"

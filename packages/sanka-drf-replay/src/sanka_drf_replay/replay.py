@@ -461,6 +461,7 @@ payload = json.load(sys.stdin)
 candidate_root = payload["candidate_root"]
 # A complete candidate tree must win over same-named source packages.
 sys.path[:0] = [candidate_root, payload["project_root"]]
+os.environ[payload["candidate_db_env"]] = payload["database"]
 os.environ[payload["db_env"]] = payload["database"]
 entrypoint_path = os.path.join(candidate_root, payload["entrypoint"])
 spec = importlib.util.spec_from_file_location("_sanka_replay_candidate", entrypoint_path)
@@ -821,6 +822,7 @@ def replay(
     candidate_root: Path | None = None,
     entrypoint: str = DEFAULT_ENTRYPOINT,
     db_env: str = DEFAULT_DB_ENV,
+    candidate_db_env: str | None = None,
     seed: Path | None = None,
     ignored_tables: Iterable[str] = DEFAULT_IGNORED_TABLES,
     all_headers: bool = False,
@@ -848,12 +850,13 @@ def replay(
         raise ReplayError(f"candidate entrypoint not found: {candidate / entrypoint}")
     if seed is not None and not Path(seed).is_file():
         raise ReplayError(f"seed file not found: {seed}")
+    target_db_env = candidate_db_env or db_env
     ignored = tuple(dict.fromkeys(ignored_tables))
     temp = Path(tempfile.mkdtemp(prefix="sanka-replay-"))
     base_environment = {
         key: value
         for key, value in os.environ.items()
-        if key not in {"DJANGO_SETTINGS_MODULE", db_env}
+        if key not in {"DJANGO_SETTINGS_MODULE", db_env, target_db_env}
     }
     reports: list[dict[str, Any]] = []
     replay_scenarios = [dict(scenario) for scenario in scenarios]
@@ -919,6 +922,7 @@ def replay(
                     entrypoint=entrypoint,
                     settings_module=settings_module,
                     db_env=db_env,
+                    candidate_db_env=target_db_env,
                     base_db=base_db,
                     base_media=base_media,
                     temp=temp,
@@ -1009,6 +1013,7 @@ def replay(
         "settings_module": settings_module,
         "database": {
             "isolation_env": db_env,
+            "candidate_isolation_env": target_db_env,
             "ignored_tables": list(ignored),
             "seed": str(seed) if seed else None,
         },
@@ -1031,6 +1036,7 @@ def _replay_one(
     entrypoint: str,
     settings_module: str,
     db_env: str,
+    candidate_db_env: str,
     base_db: Path,
     base_media: Path,
     temp: Path,
@@ -1045,6 +1051,9 @@ def _replay_one(
     candidate_db = temp / f"candidate-{index}.sqlite3"
     shutil.copy2(base_db, source_db)
     shutil.copy2(base_db, candidate_db)
+    before_counts = {
+        table: len(data["rows"]) for table, data in snapshot_database(base_db, ignored).items()
+    }
     source_media = temp / f"source-{index}-media"
     candidate_media = temp / f"candidate-{index}-media"
     shutil.copytree(base_media, source_media)
@@ -1090,6 +1099,7 @@ def _replay_one(
             "side": f"candidate[{identifier}]",
             "project_root": str(project),
             "candidate_root": str(candidate),
+            "candidate_db_env": candidate_db_env,
             "target": target,
             "entrypoint": entrypoint,
             "database": str(candidate_db),
@@ -1172,10 +1182,16 @@ def _replay_one(
         ],
         "source": {
             "status": source_result["status"],
+            "database_before": before_counts,
+            "database_after": {table: len(data["rows"]) for table, data in source_snapshot.items()},
             "headers": {name: source_headers.get(name, "") for name in compared},
         },
         "candidate": {
             "status": candidate_result["status"],
+            "database_before": before_counts,
+            "database_after": {
+                table: len(data["rows"]) for table, data in candidate_snapshot.items()
+            },
             "headers": {name: candidate_headers.get(name, "") for name in compared},
         },
         "body_difference": None

@@ -68,7 +68,12 @@ Content-Length behaviour: the header is sent only when the source ran CommonMidd
 `verify` with `scenarios` compares the live DRF source and a repaired candidate,
 without requiring a reviewed plan. Configure the source's settings to read an
 isolated SQLite path from `SANKA_TEST_DB` (or pass `--db-env`). Replay refuses
-settings that point elsewhere, before running migrations or seeds.
+settings that point elsewhere, before running migrations or seeds. When the
+candidate uses a different variable, set `candidate_db_env` in extension
+configuration, for example `--db-env BENCH_DB_PATH --extension-config
+'{"candidate_db_env":"SANKA_TEST_DB"}'`. Both variables are set to the same
+isolated candidate database inside the candidate process; source requests still
+use their own isolated database. The report records both variable names.
 
 ```sh
 sanka verify . --scenarios public-tests/scenarios.json --candidate candidate \

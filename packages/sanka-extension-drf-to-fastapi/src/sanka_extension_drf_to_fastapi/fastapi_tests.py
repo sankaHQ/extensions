@@ -37,6 +37,7 @@ def test_fastapi_app(
     *,
     artifact_dir: str | Path = DEFAULT_ARTIFACT_DIR,
     output: str | Path | None = None,
+    candidate_python: str | Path | None = None,
 ) -> dict[str, Any]:
     """Write ``test_generated.py`` next to the applied app and run it."""
     root_path = Path(root).resolve()
@@ -56,11 +57,25 @@ def test_fastapi_app(
     if manifest.get("plan_hash") != plan.plan_hash:
         raise FrameworkMigrationError("generated output does not match the reviewed plan")
     env, allow_writes = _isolated_env(output_path, manifest)
+    if candidate_python is not None and (
+        not Path(candidate_python).is_absolute() or not Path(candidate_python).is_file()
+    ):
+        raise FrameworkMigrationError(
+            "candidate_python must name an existing absolute interpreter path"
+        )
     generated_environment = (
-        ensure_generated_environment(output_path) if plan.mode == NATIVE_STRATEGY else None
+        ensure_generated_environment(output_path)
+        if plan.mode == NATIVE_STRATEGY and candidate_python is None
+        else None
     )
     test_python = (
-        str(generated_environment.python) if generated_environment is not None else sys.executable
+        str(candidate_python)
+        if candidate_python is not None
+        else (
+            str(generated_environment.python)
+            if generated_environment is not None
+            else sys.executable
+        )
     )
     source = _render_generated_tests(manifest, allow_writes=allow_writes)
     test_path = (
@@ -105,6 +120,7 @@ def test_fastapi_app(
             str(generated_environment.root) if generated_environment is not None else None
         ),
         "python": test_python,
+        "provided_environment": candidate_python is not None,
         "pyproject": (
             str(generated_environment.pyproject)
             if generated_environment is not None and generated_environment.pyproject is not None

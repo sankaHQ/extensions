@@ -1,0 +1,28 @@
+{
+  "repository": "sankaHQ/sanka-examples",
+  "commit": "5d27fbcb6759c1fc0bfd0cc556e570851a62ab6d",
+  "path": "django/order-tracker",
+  "files": {
+    "README.md": "9901cd27176ac6ea69090f1f51814df0a5d8688c972bc328f3b89d79e1ef0899",
+    "manage.py": "2c56a0e591881e4469a137ec5a547c04957b3cd8b1a9f033a0689fc2b2e5449d",
+    "orders/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "orders/apps.py": "5bc7fc3aefb7fc0580d19745101904634a979dda9b9ca28c5401bfce120d0d13",
+    "orders/migrations/0001_initial.py": "4bd2bf66c6bc6aef647f23f410276d20418e74e47e7647b33e9da67ecd2b2f0e",
+    "orders/migrations/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "orders/models.py": "c780519c1e320e1397fca84bbca79b0988be67db09a30486a79d1580e9a1d094",
+    "orders/serializers.py": "7d0481f88750fc660b8ddf00ad10679c4c0f9922b08a5d9922542332af2d0978",
+    "orders/tests.py": "ec893ece8a875cf0d3e42805be3ae9034e132c0dd85c9379876d3925198f70d7",
+    "orders/views.py": "bfcd2a864ac42d8b163c0be1bf62cc1a8f20ca8cc5b91f0462436f7f5b119a7c",
+    "requirements.txt": "fbce021ededa67a74472f6caab2bbfbe755827c780bbf266a6b9104612325596",
+    "shop_config/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "shop_config/settings.py": "14cec7485588ac34d542d6a4f83a582894aa26cb8f6cfcb74834a471bed7b999",
+    "shop_config/urls.py": "97b41efc925a79a62368ba52207b923565a2d26c7051f44cd29940d726a4df27"
+  },
+  "excluded": [
+    "db.sqlite3"
+  ],
+  "license": {
+    "path": "LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  }
+}
