@@ -59,7 +59,7 @@ def _message(route: dict[str, object], code: str) -> str:
 def _assert_every_route_carries_derivable_notes(scan: dict[str, object]) -> None:
     routes = scan["routes"]
     assert isinstance(routes, list)
-    assert scan["schema_version"] == 7
+    assert scan["schema_version"] == 8
     for route in routes:
         notes = _notes(route)
         assert notes, route["path"]
