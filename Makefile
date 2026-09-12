@@ -8,7 +8,7 @@ check:
 	uv run python scripts/check_terminology.py
 	uv run python scripts/check_catalog_docs.py
 	uv run pytest
-	uv run python -m pytest scripts/test_update_marketplace_hashes.py -q
+	uv run python -m pytest scripts/test_update_marketplace_hashes.py scripts/test_publish_release.py -q
 
 .PHONY: build-release
 

@@ -100,28 +100,24 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
         assert all(len(wheel["sha256"]) == 64 for wheel in manifest["wheels"])
 
 
-def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> None:
+def test_release_workflow_uses_exact_source_and_the_staged_publisher() -> None:
     workflow = yaml.safe_load(Path(".github/workflows/publish.yml").read_text())
     release_steps = workflow["jobs"]["release"]["steps"]
-    staging = next(step["run"] for step in release_steps if "release-assets" in step.get("run", ""))
-
-    destinations = [
-        line.rsplit(" ", 1)[-1]
-        for line in staging.splitlines()
-        if line.startswith("cp packages/") and line.endswith(".json")
-    ]
-    assert destinations == [
-        "release-assets/sanka-extension-sales-quote.json",
-        "release-assets/sanka-extension-drf-to-fastapi.json",
-        "release-assets/sanka-extension-drf-to-flask.json",
-        "release-assets/sanka-connector-markdown.json",
-        "release-assets/sanka-connector-csv.json",
-        "release-assets/sanka-connector-sqlite.json",
-        "release-assets/sanka-connector-postgres.json",
-        "release-assets/sanka-connector-clickhouse.json",
-    ]
-    assert len(destinations) == len(set(destinations))
-    assert "cp flow-marketplace.json release-assets/flow-marketplace.json" in staging
+    assert release_steps[0]["uses"].startswith("actions/checkout@")
+    assert release_steps[0]["with"]["ref"] == "${{ github.sha }}"
+    assert release_steps[1]["with"]["python-version"] == "3.12"
+    download = next(
+        step
+        for step in release_steps
+        if step.get("uses", "").startswith("actions/download-artifact@")
+    )
+    assert download["with"]["path"] == "."
+    command = next(
+        step["run"] for step in release_steps if "scripts/publish_release.py" in step.get("run", "")
+    )
+    assert '--tag "$GITHUB_REF_NAME" --revision "$GITHUB_SHA" --dist dist --publish' in command
+    assert not any("gh release create" in step.get("run", "") for step in release_steps)
+    assert workflow["concurrency"]["cancel-in-progress"] is False
 
 
 def test_flow_supplement_uses_static_capabilities_and_a_complete_sdk_only_closure() -> None:
