@@ -14,7 +14,7 @@ The PostgreSQL extension reads and writes database records. Application SQL or O
 
 ## Available extensions
 
-The current catalog is documented in [catalog.md](docs/catalog.md), generated and checked against `marketplace.json` and each manifest. It covers data access and code conversion.
+The [catalog](docs/catalog.md) groups extensions into **Data**, **Workflow**, and **Code**, generated and checked against `marketplace.json` and each manifest. Data and Code packages are available; Workflow currently has an SDK definition contract and no executable marketplace packages.
 
 ## Sanka Extension SDK
 
