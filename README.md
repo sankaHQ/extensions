@@ -14,7 +14,7 @@ The PostgreSQL extension reads and writes database records. Application SQL or O
 
 ## Available extensions
 
-The [catalog](docs/catalog.md) groups extensions into **Data**, **Workflow**, and **Code**, generated and checked against `marketplace.json` and each manifest. Data and Code packages are available; Workflow currently has an SDK definition contract and no executable marketplace packages.
+The [catalog](docs/catalog.md) groups extensions into **Data**, **Workflow**, and **Code**, generated and checked against `marketplace.json`, the Flow supplement `flow-marketplace.json` and each manifest. Data and Code packages are available. The Sales Quote Flow package is a release candidate for isolated Blueprint generation; publication and native runtime acceptance are separate release gates.
 
 ## Sanka Extension SDK
 
@@ -23,7 +23,7 @@ Use `sanka_extensions` to build extensions. Install the SDK with `pip install sa
 | Interface | Purpose |
 | --- | --- |
 | `sanka_extensions.data` | Data readers, writers, records, capabilities, credentials, and registration |
-| `sanka_extensions.flow` | Declarative business requests with change-preservation and activation requirements |
+| `sanka_extensions.flow` | Declarative requests, resolved Blueprints and isolated generation protocol |
 | `sanka_extensions.code` | Typed requests and responses for code migration |
 
 ```python
@@ -35,9 +35,11 @@ crm = flow.create(type="crm")
 ```
 
 Flow's `create` constructs an unresolved definition without modifying a data endpoint.
-The source SDK includes its versioned contract; CRM/billing packages and Flow
-execution are not in the published marketplace. See [Flow contracts](docs/flow.md)
-for reapplication, construction, verification and activation requirements.
+The source SDK includes its versioned contract and the
+[Sales Quote generator](packages/sanka-extension-sales-quote/README.md) candidate.
+Generated Blueprints require a Flow-capable host for native execution. See
+[Flow contracts](docs/flow.md) for reapplication, construction, verification and
+activation requirements. SourceSnapshot import is not a v1 generator capability.
 
 See the [SDK guide](packages/sanka-extension-sdk/README.md) for development and the [compatibility guide](docs/naming-compatibility.md) for published package identifiers. `sanka-drf-replay` supplies optional request/response replay support for code extensions.
 
@@ -64,7 +66,7 @@ Installation makes a capability available. It does not authenticate any data end
 - code lifecycle commands and project matching, or supported endpoint types and read/write roles;
 - wheel filenames, immutable release URLs, and SHA-256 digests.
 
-The published manifest values `kind="connector"` (Data) and `kind="migration"` (Code), the `providers` field, and `sanka.connectors` entry points remain wire compatibility contracts. Keep the two typed execution protocols distinct. See [the transition map](docs/naming-compatibility.md).
+The published manifest values `kind="connector"` (Data) and `kind="migration"` (Code), the `providers` field, and `sanka.connectors` entry points remain wire compatibility contracts. The separate `flow-marketplace.json` supplement uses `kind="flow"` and static typed capabilities. Older clients continue reading the Data/Code catalog. Keep all three typed execution protocols distinct. See [the transition map](docs/naming-compatibility.md).
 
 ## Execution and trust
 

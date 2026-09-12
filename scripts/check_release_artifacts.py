@@ -47,6 +47,56 @@ CATALOG: dict[str, Any] = {
         },
     ],
 }
+FLOW_CATALOG: dict[str, Any] = {
+    "schema_version": "sanka-marketplace/v1",
+    "extensions": [
+        {
+            "id": "sanka/sales-quote",
+            "manifest": "packages/sanka-extension-sales-quote/extension.json",
+        }
+    ],
+}
+SALES_QUOTE_MANIFEST: dict[str, Any] = {
+    "schema_version": "sanka-extension-manifest/v2",
+    "kind": "flow",
+    "id": "sanka/sales-quote",
+    "version": "0.1.0a1",
+    "protocol_version": "sanka-flow-extension/v1",
+    "distribution": {
+        "name": "sanka-extension-sales-quote",
+        "version": "0.1.0a1",
+        "executable": "sanka-extension-sales-quote",
+    },
+    "commands": ["blueprint"],
+    "runtime": {"sanka_cli": ">=0.2.10,<0.3"},
+    "capabilities": [
+        {
+            "type": "sanka/sales-quote",
+            "output_schema": "sanka-flow-blueprint/v1",
+            "references": [
+                {
+                    "id": role,
+                    "kind": kind,
+                    "parent_id": parent,
+                    "related_object_id": related,
+                }
+                for role, kind, parent, related in (
+                    ("deal", "object", None, None),
+                    ("deal.stage", "property", "deal", None),
+                    ("deal.title", "property", "deal", None),
+                    ("quote", "object", None, None),
+                    ("quote.deal", "relationship", "quote", "deal"),
+                    ("quote.status", "property", "quote", None),
+                    ("quote.title", "property", "quote", None),
+                )
+            ],
+            "values": [
+                {"id": value, "types": ["string"]}
+                for value in ("draft_status", "other_stage", "quote_stage")
+            ],
+        }
+    ],
+}
 MIGRATION_MANIFEST: dict[str, Any] = {
     "schema_version": "sanka-extension-manifest/v2",
     "kind": "migration",
@@ -157,6 +207,7 @@ FLASK_MANIFEST = {
     },
 }
 MANIFESTS = {
+    "sanka-extension-sales-quote": SALES_QUOTE_MANIFEST,
     "sanka-extension-drf-to-fastapi": MIGRATION_MANIFEST,
     "sanka-extension-drf-to-flask": FLASK_MANIFEST,
     **CONNECTOR_MANIFESTS,
@@ -209,21 +260,26 @@ def _hash(path: Path) -> str:
 
 
 def _catalog_errors(root: Path, release: Path) -> list[str]:
-    try:
-        catalog = json.loads((root / "marketplace.json").read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as error:
-        return [f"marketplace.json is invalid: {error}"]
-    extensions = catalog.get("extensions") if isinstance(catalog, dict) else None
-    if isinstance(extensions, list):
-        for entry in extensions:
-            if isinstance(entry, dict) and isinstance(entry.get("manifest"), str):
-                candidate = (root / entry["manifest"]).resolve()
-                if not candidate.is_relative_to(root.resolve()):
-                    return [
-                        f"catalog manifest path is outside the marketplace snapshot: {candidate}"
-                    ]
-    if catalog != CATALOG:
-        return ["marketplace.json does not match the official sanka-marketplace/v1 catalog"]
+    for filename, expected_catalog in (
+        ("marketplace.json", CATALOG),
+        ("flow-marketplace.json", FLOW_CATALOG),
+    ):
+        try:
+            catalog = json.loads((root / filename).read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as error:
+            return [f"{filename} is invalid: {error}"]
+        extensions = catalog.get("extensions") if isinstance(catalog, dict) else None
+        if isinstance(extensions, list):
+            for entry in extensions:
+                if isinstance(entry, dict) and isinstance(entry.get("manifest"), str):
+                    candidate = (root / entry["manifest"]).resolve()
+                    if not candidate.is_relative_to(root.resolve()):
+                        return [
+                            "catalog manifest path is outside the marketplace snapshot: "
+                            f"{candidate}"
+                        ]
+        if catalog != expected_catalog:
+            return [f"{filename} does not match the official sanka-marketplace/v1 catalog"]
     errors: list[str] = []
     for package, expected in MANIFESTS.items():
         manifest_path = root / "packages" / package / "extension.json"
@@ -236,8 +292,10 @@ def _catalog_errors(root: Path, release: Path) -> list[str]:
         if manifest != expected:
             errors.append(f"{package} extension.json does not match its v2 marketplace manifest")
             continue
-        if not isinstance(wheels, list) or [wheel.get("name") for wheel in wheels] != list(
-            MANIFEST_WHEELS[package]
+        if (
+            not isinstance(wheels, list)
+            or not all(isinstance(wheel, dict) for wheel in wheels)
+            or [wheel.get("name") for wheel in wheels] != list(MANIFEST_WHEELS[package])
         ):
             errors.append(
                 f"{package} manifest does not contain its complete wheel dependency closure"
@@ -295,6 +353,18 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
         elif name in {"sanka-connector-sdk", "sanka-drf-replay"}:
             if requirements or entries:
                 errors.append(f"{name} SDK wheel must have no dependencies or entry points")
+        elif name == "sanka-extension-sales-quote":
+            if requirements != ["sanka-extension-sdk==0.1.0a3"]:
+                errors.append("Sales Quote must depend only on its exact Extension SDK")
+            parser = _EntryPointParser(interpolation=None)
+            try:
+                parser.read_string(entries)
+                if parser.sections() != ["console_scripts"] or dict(parser["console_scripts"]) != {
+                    name: "sanka_extension_sales_quote.__main__:main"
+                }:
+                    errors.append("Sales Quote wheel must have only its exact executable")
+            except configparser.Error:
+                errors.append("Sales Quote wheel has invalid entry points")
         elif name.startswith("sanka-connector-"):
             connector_entries = _entry_points(entries, "sanka.connectors")
             if "sanka-extension-sdk==0.1.0a3" not in requirements:

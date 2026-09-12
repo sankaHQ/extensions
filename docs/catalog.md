@@ -5,7 +5,7 @@ Database engines, file formats and frameworks describe what an extension works w
 Hosting a database yourself or using a managed service does not change its category.
 
 The available packages and their supported operations are generated from
-`marketplace.json` and the extension manifests.
+`marketplace.json`, `flow-marketplace.json` and the extension manifests.
 
 ## Data
 
@@ -25,9 +25,18 @@ Readers supply migration sources; writers supply migration destinations.
 
 Migrate or reconstruct automations, triggers, actions and conditions.
 
-There are no executable Workflow extensions in this marketplace yet.
-The SDK provides the [Flow definition contract](flow.md); creating a definition
-does not construct or activate a workflow.
+The Flow supplement declares isolated generators for a Flow-capable host.
+The current Sales Quote entry is a release candidate, pending publication.
+Generating a [Blueprint](flow.md) does not construct or activate a workflow.
+The target host must plan, construct inactive, verify native behavior in
+isolation and obtain separate approval before activation.
+
+| Extension | Request type | Operation |
+| --- | --- | --- |
+| `sanka/sales-quote` | `sanka/sales-quote` | Blueprint generation |
+
+See the [Sales Quote package](../packages/sanka-extension-sales-quote/README.md)
+for exact input roles, supported behavior and native acceptance requirements.
 
 ## Code
 

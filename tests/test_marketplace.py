@@ -111,6 +111,7 @@ def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> No
         if line.startswith("cp packages/") and line.endswith(".json")
     ]
     assert destinations == [
+        "release-assets/sanka-extension-sales-quote.json",
         "release-assets/sanka-extension-drf-to-fastapi.json",
         "release-assets/sanka-extension-drf-to-flask.json",
         "release-assets/sanka-connector-markdown.json",
@@ -120,3 +121,34 @@ def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> No
         "release-assets/sanka-connector-clickhouse.json",
     ]
     assert len(destinations) == len(set(destinations))
+    assert "cp flow-marketplace.json release-assets/flow-marketplace.json" in staging
+
+
+def test_flow_supplement_uses_static_capabilities_and_a_complete_sdk_only_closure() -> None:
+    from sanka_extension_sales_quote.metadata import CAPABILITY
+
+    from sanka_extensions.flow import FlowCapability
+
+    catalog = json.loads(Path("flow-marketplace.json").read_text())
+    assert catalog == {
+        "schema_version": "sanka-marketplace/v1",
+        "extensions": [
+            {
+                "id": "sanka/sales-quote",
+                "manifest": "packages/sanka-extension-sales-quote/extension.json",
+            }
+        ],
+    }
+    manifest = json.loads(Path(catalog["extensions"][0]["manifest"]).read_text())
+    assert manifest["kind"] == "flow"
+    assert manifest["protocol_version"] == "sanka-flow-extension/v1"
+    assert manifest["commands"] == ["blueprint"]
+    assert manifest["runtime"] == {"sanka_cli": ">=0.2.10,<0.3"}
+    assert [FlowCapability.from_dict(item) for item in manifest["capabilities"]] == [CAPABILITY]
+    assert {wheel["name"] for wheel in manifest["wheels"]} == {
+        "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
+        "sanka_extension_sdk-0.1.0a3-py3-none-any.whl",
+        "sanka_extension_sales_quote-0.1.0a1-py3-none-any.whl",
+    }
+    assert all(wheel["url"].startswith(RELEASE_PREFIX) for wheel in manifest["wheels"])
+    assert all(len(wheel["sha256"]) == 64 for wheel in manifest["wheels"])

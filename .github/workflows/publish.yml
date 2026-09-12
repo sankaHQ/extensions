@@ -28,6 +28,7 @@ jobs:
           path: |
             dist/*.whl
             marketplace.json
+            flow-marketplace.json
             packages/*/extension.json
           if-no-files-found: error
           retention-days: 14
@@ -47,6 +48,8 @@ jobs:
         run: |
           mkdir release-assets
           cp marketplace.json release-assets/marketplace.json
+          cp flow-marketplace.json release-assets/flow-marketplace.json
+          cp packages/sanka-extension-sales-quote/extension.json release-assets/sanka-extension-sales-quote.json
           cp packages/sanka-extension-drf-to-fastapi/extension.json release-assets/sanka-extension-drf-to-fastapi.json
           cp packages/sanka-extension-drf-to-flask/extension.json release-assets/sanka-extension-drf-to-flask.json
           cp packages/sanka-connector-markdown/extension.json release-assets/sanka-connector-markdown.json
