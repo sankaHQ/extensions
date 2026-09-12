@@ -52,7 +52,7 @@
     },
     {
       "name": "sanka_drf_replay-0.1.0a1-py3-none-any.whl",
-      "sha256": "34ee2e6f50f414f375c28b0cccb4b23f0a62603c4655bd9e5aedac9cc8b1ba71",
+      "sha256": "fe61579a997b6b054f47e5764b8675e7c38512e58e2ecc9beafd5a6b6891f8c2",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a17/sanka_drf_replay-0.1.0a1-py3-none-any.whl"
     },
     {
@@ -62,7 +62,7 @@
     },
     {
       "name": "sanka_extension_drf_to_flask-0.1.0a3-py3-none-any.whl",
-      "sha256": "81b7a8378db952cc85dd71612114a28d647e377e406dbffd206226704bb8f04e",
+      "sha256": "d6bac2aefac784a811bde38d8878cbb24f6a90016a3d70615a6889c52332bb4b",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a17/sanka_extension_drf_to_flask-0.1.0a3-py3-none-any.whl"
     }
   ]
