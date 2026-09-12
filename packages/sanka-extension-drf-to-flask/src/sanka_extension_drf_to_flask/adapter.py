@@ -34,7 +34,7 @@ from sanka_drf_replay.replay import (
     save_report,
 )
 from sanka_extension_drf_to_flask.native import authentication, isolated_module, serializer
-from sanka_extension_sdk import (
+from sanka_extensions.code import (
     ExtensionRequest,
     ExtensionResponse,
     JsonValue,

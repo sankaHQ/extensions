@@ -7,22 +7,29 @@ the engine.
 
 ## Extension families
 
-The repository is intended to support these families:
+Extensions contribute capabilities such as:
 
 - **Framework extensions** detect and inspect frameworks such as Django or Flask
-  and can later expose typed generation strategies.
+  and provide typed conversion lifecycles.
 - **Database extensions** inspect or write databases such as PostgreSQL, SQLite, and
   ClickHouse.
 - **Language and library extensions** contribute bounded analysis or
   transformation capabilities for one ecosystem.
 - **File extensions** read or write formats such as CSV and Markdown inside a
   reviewed root.
+- **Business extensions** will provide reusable CRM, billing and other business
+  configurations. Their declarative SDK contract is `sanka_extensions.flow`;
+  executable packages and runtime dispatch remain future work.
 
-The Connector SDK is the first implemented extension interface. Its existing
-`sanka-connector-*` distributions, `sanka_connector` import, and
-`sanka.connectors` entry-point group remain compatibility contracts. New extension
-families require a reviewed, typed SDK interface before executable packages are
-accepted; repository membership alone is not an execution contract.
+The Sanka Extension SDK provides one `sanka_extensions` namespace. Use
+`sanka_extensions.data` for data readers, writers, and registration;
+use `sanka_extensions.code` for typed code-migration requests and responses.
+Use `sanka_extensions.flow` for the [declarative Flow contract](flow.md).
+Both interfaces are implemented, including executable PostgreSQL, SQLite, CSV,
+Markdown, ClickHouse, DRF-to-FastAPI, and DRF-to-Flask extensions. See the
+[generated catalog](catalog.md) and [development guide](extension-development.md).
+New capabilities require reviewed, typed contracts and boundary validation.
+Published identifiers are documented in the [compatibility guide](naming-compatibility.md).
 
 ## Resolver direction
 
@@ -51,6 +58,6 @@ extension, hosted Sanka code, or private credentials. Interfaces use validated s
 inputs and outputs, declare capabilities explicitly, and fail closed when a
 requested capability is unsupported.
 
-Hosted SaaS and managed-system migrations remain Sanka API capabilities. Their
+Hosted SaaS and managed-data migrations remain Sanka API capabilities. Their
 credentials, long-running jobs, rate controls, and audit evidence do not belong
 in local extensions.

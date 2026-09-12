@@ -1,4 +1,4 @@
-# CSV connector
+# CSV extension
 
 Reads a single CSV or TSV file as a Sanka **source**: the header
 row defines the fields, every data row becomes one record, and the sanitized

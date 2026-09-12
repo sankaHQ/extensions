@@ -1,25 +1,30 @@
 # Sanka Extensions
 
-This repository owns Apache-2.0 extension SDKs and independently installable
-extensions used by the Sanka migration runtime. The current executable extension interface
-is the Connector SDK; new framework, language, library, or generation extension kinds
-must establish a typed interface and boundary checks before adding packages.
+This repository owns the Apache-2.0 Sanka Extension SDK and independently installable
+extensions used by the shared Sanka CLI and migration runtime. Extensions
+implement data access through `sanka_extensions.data`; code extensions implement the
+`sanka-extension/v1` lifecycle. Both interfaces are executable today.
+Read `docs/naming-compatibility.md` before changing published identifiers.
 
 ## Boundaries
 
-- `packages/sanka-connector-sdk` contains protocols, typed records, capability
-  declarations, credentials, errors, and entry-point registration only.
+- `packages/sanka-extension-sdk` owns the canonical `sanka_extensions.data` and `sanka_extensions.code` interfaces. `packages/sanka-connector-sdk` preserves the dependency-free published data-access types; it is the unified SDK's only dependency.
+- `sanka_extensions.flow` owns declarative business requests. `flow.create` has no
+  execution side effects. Read `docs/flow.md` before changing its fixed reapplication
+  and activation requirements; runtime enforcement and runnable Flow packages are
+  separate from the SDK contract.
+- Keep existing class identity across canonical and compatibility imports.
 - The SDK must not depend on Sanka's AGPL runtime, database drivers, framework
   runtimes, or provider clients.
-- Each `packages/sanka-connector-*` connector extension depends on the SDK and only
+- Each `packages/sanka-connector-*` extension depends on the SDK and only
   the third-party libraries that extension needs.
-- Connector entry points use the `sanka.connectors` group and resolve to a
-  `sanka_connector.ConnectorRegistration`.
+- Published extension entry points use the `sanka.connectors` group and resolve to a
+  `sanka_extensions.data.ExtensionRegistration`.
 - Extension code must never import `sanka`, `sanka.runtime`, or another extension.
 - Do not add arbitrary in-process hooks. New extension kinds need typed, versioned
   contracts, isolated execution, deterministic discovery, and fail-closed
   capability validation.
-- SaaS and managed-system providers such as HubSpot, Salesforce, and SendGrid
+- SaaS and managed-service providers such as HubSpot, Salesforce, and SendGrid
   are hosted Sanka API capabilities. Do not add their credentials, clients,
   adapters, or entry points to this repository.
 - Keep all source files Apache-2.0 and retain SPDX headers.
@@ -34,7 +39,7 @@ uv run mypy packages scripts
 uv run pytest
 ```
 
-Run connector integration tests only when their documented environment variable
+Run extension integration tests only when their documented environment variable
 is configured. They must skip cleanly otherwise.
 
 ## Releases

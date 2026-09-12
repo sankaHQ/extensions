@@ -1,13 +1,5 @@
-# Sanka Connector SDK
+# Sanka Extension SDK compatibility package
 
-The dependency-free Apache-2.0 interface used by Sanka connector plugins.
+This Apache-2.0 package preserves the published `sanka_connector` imports and shared data-access types used by existing extension wheels. It has no runtime dependencies.
 
-```python
-from sanka_connector import ConnectorRegistration, SourceConnector
-```
-
-Providers register through the `sanka.connectors` entry-point group. The SDK
-does not import the Sanka migration runtime or any provider implementation.
-When a route declares identity fields, destination implementations must require
-the complete, non-NULL identity tuple for every record; they must never weaken
-a composite identity to the subset supplied by one record.
+New extensions use the [Sanka Extension SDK](../sanka-extension-sdk/README.md) and import `sanka_extensions.data`. The SDK installs this compatibility dependency automatically. See [the compatibility guide](../../docs/naming-compatibility.md) for retained identifiers and removal conditions.

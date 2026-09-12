@@ -1,26 +1,27 @@
 # Dependency license review
 
-Reviewed against the locked connector workspace. CI builds and tests every
+Reviewed against the locked Extensions workspace. CI builds and tests every
 distribution independently so provider dependencies cannot leak into the SDK
-or another connector.
+or another extension.
 
-## Published connector dependencies
+## Published extension dependencies
 
 | Dependency family | License | Used by | Review note |
 |---|---|---|---|
-| `sanka-connector-sdk` | Apache-2.0 | every connector | Sanka-owned dependency-free interface package |
-| PyYAML | MIT | Markdown connector | permissive |
+| `sanka-extension-sdk` | Apache-2.0 | every extension | Sanka-owned data-access and code-conversion interfaces |
+| `sanka-connector-sdk` | Apache-2.0 | SDK compatibility dependency | Sanka-owned dependency-free interface package |
+| PyYAML | MIT | Markdown extension | permissive |
 | urllib3 | MIT | ClickHouse transitive dependency | permissive |
 | certifi | MPL-2.0 | ClickHouse transitive dependency | file-level copyleft; consumed unmodified as a separate package |
-| clickhouse-connect | Apache-2.0 | ClickHouse connector | permissive |
+| clickhouse-connect | Apache-2.0 | ClickHouse extension | permissive |
 | lz4 | BSD | ClickHouse transitive dependency | permissive; upstream metadata uses the generic BSD classifier |
 | backports.zstd | PSF-2.0 | ClickHouse transitive dependency | permissive |
-| psycopg, psycopg-binary | LGPL-3.0-only | PostgreSQL connector | dynamically consumed, unmodified, and installed as separate third-party distributions; retain notices and re-review before vendoring or static linking |
+| psycopg, psycopg-binary | LGPL-3.0-only | PostgreSQL extension | dynamically consumed, unmodified, and installed as separate third-party distributions; retain notices and re-review before vendoring or static linking |
 | typing-extensions | PSF-2.0 | PostgreSQL transitive dependency | permissive |
 
 Development-only dependencies resolve to MIT, Apache-2.0, BSD, MPL-2.0,
 PSF-2.0, dual MIT/PSF terms (SQLAlchemy's `greenlet`), or dual Apache/BSD
-terms. They are not included in published connector metadata.
+terms. They are not included in published extension metadata.
 
 ## Review boundary
 

@@ -33,7 +33,7 @@ from sanka_extension_drf_to_fastapi.django_fastapi import (
     write_gap_report,
 )
 from sanka_extension_drf_to_fastapi.fastapi_tests import test_fastapi_app
-from sanka_extension_sdk import (
+from sanka_extensions.code import (
     ExtensionRequest,
     ExtensionResponse,
     JsonValue,

@@ -1,4 +1,4 @@
-# Markdown connector
+# Markdown extension
 
 Reads a directory of Markdown files as a Sanka **source**: YAML
 frontmatter becomes structured fields, the body becomes `content`, the

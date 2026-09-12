@@ -5,6 +5,8 @@ check:
 	uv run ruff format --check .
 	uv run mypy packages scripts
 	uv run python scripts/check_boundaries.py
+	uv run python scripts/check_terminology.py
+	uv run python scripts/check_catalog_docs.py
 	uv run pytest
 	uv run python -m pytest scripts/test_update_marketplace_hashes.py -q
 
@@ -18,7 +20,7 @@ build-release:
 
 update-marketplace-hashes:
 	uv run python scripts/build_release.py --output-dir dist
-	uv run python scripts/update_marketplace_hashes.py --dist dist --release-tag extensions-v0.1.0a16
+	uv run python scripts/update_marketplace_hashes.py --dist dist --release-tag extensions-v0.1.0a17
 	uv run python scripts/check_release_artifacts.py dist
 
 .PHONY: converter-bench

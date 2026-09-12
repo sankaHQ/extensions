@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Markdown directory source connector.
+"""Markdown directory system reader.
 
 Each ``*.md`` file becomes one record: ``path`` (relative, the identity),
 ``slug``, ``content`` (the body), plus every frontmatter key. Files are
@@ -16,11 +16,11 @@ from typing import Any
 
 import yaml
 
-from sanka_connector import (
+from sanka_extensions.data import (
     ConfigurationError,
-    ConnectorRegistration,
     Credentials,
     DataError,
+    ExtensionRegistration,
     FieldSchema,
     Inventory,
     ObjectSchema,
@@ -318,8 +318,11 @@ def _reject_filter(source_filter: SourceFilter | None) -> None:
     if source_filter is not None:
         raise UnsupportedFeatureError(
             "markdown source filters are not supported",
-            remediation="remove the source filter or use a connector that supports it",
+            remediation="remove the source filter or use an extension that supports it",
         )
 
 
-CONNECTOR = ConnectorRegistration(name="markdown", source=MarkdownSource())
+EXTENSION = ExtensionRegistration(name="markdown", source=MarkdownSource())
+
+# Compatibility target for existing sanka.connectors entry points.
+CONNECTOR = EXTENSION

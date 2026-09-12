@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CSV file source connector.
+"""CSV file system reader.
 
 One ``.csv`` (or ``.tsv``) file is one migratable object: the sanitized file
 stem is the object key, the header row defines the fields, and every data row
@@ -19,11 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sanka_connector import (
+from sanka_extensions.data import (
     ConfigurationError,
-    ConnectorRegistration,
     Credentials,
     DataError,
+    ExtensionRegistration,
     FieldSchema,
     Inventory,
     ObjectSchema,
@@ -244,8 +244,11 @@ def _reject_filter(source_filter: SourceFilter | None) -> None:
     if source_filter is not None:
         raise UnsupportedFeatureError(
             "csv source filters are not supported",
-            remediation="remove the source filter or use a connector that supports it",
+            remediation="remove the source filter or use an extension that supports it",
         )
 
 
-CONNECTOR = ConnectorRegistration(name="csv", source=CsvSource())
+EXTENSION = ExtensionRegistration(name="csv", source=CsvSource())
+
+# Compatibility target for existing sanka.connectors entry points.
+CONNECTOR = EXTENSION

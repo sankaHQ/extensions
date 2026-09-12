@@ -20,7 +20,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from sanka_extension_sdk import (
+from sanka_extensions.code import (
     ExtensionRequest,
     ExtensionResponse,
     decode_response,

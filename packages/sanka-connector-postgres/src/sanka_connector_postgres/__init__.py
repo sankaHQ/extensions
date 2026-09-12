@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PostgreSQL connector: source + destination roles for Sanka migrations.
+"""PostgreSQL extension: source + destination roles for Sanka migrations.
 
 The DSN arrives in ``settings["connection"]`` (``postgres://``,
 ``postgresql://``, or a libpq keyword string); ``settings["schema"]`` picks
@@ -11,14 +11,17 @@ detailed typing, pagination, and identity semantics.
 
 from __future__ import annotations
 
-from sanka_connector import ConnectorRegistration
 from sanka_connector_postgres._destination import PostgresDestination
 from sanka_connector_postgres._source import PostgresSource
+from sanka_extensions.data import ExtensionRegistration
 
-__all__ = ["CONNECTOR", "PostgresDestination", "PostgresSource"]
+__all__ = ["CONNECTOR", "EXTENSION", "PostgresDestination", "PostgresSource"]
 
-CONNECTOR = ConnectorRegistration(
+EXTENSION = ExtensionRegistration(
     name="postgres",
     source=PostgresSource(),
     destination=PostgresDestination(),
 )
+
+# Compatibility target for existing sanka.connectors entry points.
+CONNECTOR = EXTENSION

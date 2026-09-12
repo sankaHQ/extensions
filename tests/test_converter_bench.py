@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from sanka_extension_sdk import ExtensionRequest, encode_response, success_response
+from sanka_extensions.code import ExtensionRequest, encode_response, success_response
 
 # The pytest executable need not add the repository root to sys.path.
 gate = SimpleNamespace(

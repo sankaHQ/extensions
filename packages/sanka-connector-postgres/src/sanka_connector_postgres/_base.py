@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Shared internals for the PostgreSQL connector.
+"""Shared internals for the PostgreSQL extension.
 
 Connection management (one cached ``psycopg.AsyncConnection`` per DSN per
 event loop, autocommit), identifier sanitization, source type-family mapping,
 JSON-safe value conversion, cursor handling, and the psycopg → Sanka error
-mapping. Both roles subclass :class:`PostgresConnectorBase`.
+mapping. Both roles subclass :class:`PostgresSystemAccess`.
 """
 
 from __future__ import annotations
@@ -22,17 +22,17 @@ from typing import Any, Final
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 
-from sanka_connector import (
+from sanka_extensions.data import (
     AuthenticationError,
     ConfigurationError,
     ConflictError,
-    ConnectorError,
     Credentials,
+    DataAccessError,
     DataError,
+    DataTimeoutError,
     ErrorCategory,
     PermissionDeniedError,
-    ProviderTimeoutError,
-    TransientProviderError,
+    TransientDataError,
 )
 
 _IDENTIFIER = re.compile(r"[^a-z0-9_]+")
@@ -55,7 +55,7 @@ _TEMPORAL_TYPES: Final = frozenset(
 _JSON_TYPES: Final = frozenset({"json", "jsonb"})
 _BINARY_TYPES: Final = frozenset({"bytea"})
 
-#: Sentinel returned by :func:`json_safe` for binary values the connector skips.
+#: Sentinel returned by :func:`json_safe` for binary values the reader skips.
 SKIPPED_BINARY: Final = object()
 
 
@@ -151,7 +151,7 @@ def cursor_param(data_type: str, text: str) -> Any:
     return text
 
 
-def mapped_error(error: psycopg.Error, *, context: str) -> ConnectorError:
+def mapped_error(error: psycopg.Error, *, context: str) -> DataAccessError:
     """Map a psycopg exception onto the Sanka error taxonomy."""
     message = f"{context}: {error}"
     sqlstate = error.sqlstate or ""
@@ -164,18 +164,18 @@ def mapped_error(error: psycopg.Error, *, context: str) -> ConnectorError:
     if sqlstate == "23505":
         return ConflictError(message)
     if sqlstate == "57014":
-        return ProviderTimeoutError(message)
+        return DataTimeoutError(message)
     if sqlstate.startswith(("08", "53", "57", "58")):
-        return TransientProviderError(message)
+        return TransientDataError(message)
     if isinstance(error, psycopg.OperationalError):
         # Connection refused / DNS / timeouts / broken connections.
-        return TransientProviderError(message)
-    return ConnectorError(message, category=ErrorCategory.UNKNOWN)
+        return TransientDataError(message)
+    return DataAccessError(message, category=ErrorCategory.UNKNOWN)
 
 
 @asynccontextmanager
 async def pg_errors(context: str) -> AsyncIterator[None]:
-    """Re-raise psycopg failures as Sanka connector errors."""
+    """Re-raise psycopg failures as Sanka data access errors."""
     try:
         yield
     except psycopg.Error as error:
@@ -215,7 +215,7 @@ ORDER BY kcu.ordinal_position
 """
 
 
-class PostgresConnectorBase:
+class PostgresSystemAccess:
     """Connection and information_schema plumbing shared by both roles."""
 
     provider = "postgres"
@@ -239,7 +239,7 @@ class PostgresConnectorBase:
         raw = credentials.settings.get("connection")
         if raw is None or not str(raw).strip():
             raise ConfigurationError(
-                "postgres connector needs a DSN in settings['connection']"
+                "postgres system needs a DSN in settings['connection']"
                 " (postgres://…, postgresql://…, or a libpq keyword string)"
             )
         dsn = str(raw).strip()

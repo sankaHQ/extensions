@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from sanka_extension_drf_to_fastapi.adapter import handle
-from sanka_extension_sdk import ExtensionRequest, JsonValue, encode_request, encode_response
+from sanka_extensions.code import ExtensionRequest, JsonValue, encode_request, encode_response
 
 
 def _value(arguments: list[str], name: str, default: str | None = None) -> str | None:

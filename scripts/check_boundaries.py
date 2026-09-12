@@ -65,8 +65,8 @@ def main() -> int:
         own_module = f"sanka_connector_{provider.replace('-', '_')}"
         project = _project(package)
         dependencies = [str(item).lower() for item in project.get("dependencies", [])]
-        if not any(item.startswith(SDK_NAME) for item in dependencies):
-            errors.append(f"{package.name} must depend on {SDK_NAME}")
+        if not any(item.startswith(EXTENSION_SDK_NAME) for item in dependencies):
+            errors.append(f"{package.name} must depend on {EXTENSION_SDK_NAME}")
 
         entry_points = project.get("entry-points")
         connector_entries = (
@@ -94,15 +94,15 @@ def main() -> int:
 
     extension_sdk = PACKAGES / EXTENSION_SDK_NAME
     extension_sdk_project = _project(extension_sdk)
-    if extension_sdk_project.get("dependencies") != []:
-        errors.append(f"{EXTENSION_SDK_NAME} must have zero runtime dependencies")
+    if extension_sdk_project.get("dependencies") != [f"{SDK_NAME}=={sdk_project['version']}"]:
+        errors.append(f"{EXTENSION_SDK_NAME} may depend only on the pinned compatibility SDK")
     extension_version = str(extension_sdk_project["version"])
     for package in (extension_sdk, *(PACKAGES / name for name in EXTENSION_NAMES)):
         own_module = package.name.replace("-", "_")
         allowed_modules: tuple[str, ...] = (own_module,)
         project = _project(package)
         if package.name in EXTENSION_NAMES:
-            allowed_modules += ("sanka_extension_sdk",)
+            allowed_modules += ("sanka_extension_sdk", "sanka_extensions")
             expected_dependency = f"{EXTENSION_SDK_NAME}=={extension_version}"
             if project.get("dependencies") != [expected_dependency, "sanka-drf-replay==0.1.0a1"]:
                 errors.append(f"{package.name} must depend exactly on {expected_dependency}")
@@ -137,11 +137,11 @@ def main() -> int:
                 errors.append(f"replay must use only stdlib: {source.relative_to(ROOT)}: {module}")
 
     if errors:
-        print("Connector boundary validation failed:", file=sys.stderr)
+        print("Extension boundary validation failed:", file=sys.stderr)
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print("Connector and extension dependency boundaries: OK")
+    print("Extension dependency boundaries: OK")
     return 0
 
 

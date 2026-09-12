@@ -32,14 +32,14 @@ def test_hash_updater_records_each_manifest_dependency_closure(tmp_path: Path) -
         for name in names:
             _wheel(tmp_path, name)
 
-    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a16")
+    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a17")
 
     assert set(manifests) == set(MANIFEST_WHEELS)
     for package, payload in manifests.items():
         assert [wheel["name"] for wheel in payload["wheels"]] == list(MANIFEST_WHEELS[package])
         assert all(
             wheel["url"].startswith(
-                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a16/"
+                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a17/"
             )
             and len(wheel["sha256"]) == 64
             for wheel in payload["wheels"]
@@ -130,10 +130,10 @@ def test_dependency_download_rejects_hash_mismatch(
 
 
 def test_hash_updater_rejects_an_incomplete_or_wrongly_tagged_wheel_set(tmp_path: Path) -> None:
-    _wheel(tmp_path, "sanka_connector_sdk-0.1.0a11-py3-none-any.whl")
+    _wheel(tmp_path, "sanka_connector_sdk-0.1.0a12-py3-none-any.whl")
 
     with pytest.raises(RuntimeError, match="complete marketplace wheel set"):
-        update_manifests(tmp_path, release_tag="extensions-v0.1.0a16")
+        update_manifests(tmp_path, release_tag="extensions-v0.1.0a17")
     with pytest.raises(RuntimeError, match=r"extensions-v0\.1\.0a16"):
         update_manifests(tmp_path, release_tag="extensions-v0.1.0a16")
 
@@ -142,7 +142,7 @@ def test_build_release_cleanup_is_limited_to_known_wheels(tmp_path: Path) -> Non
     root = tmp_path / "repo"
     output = root / "dist"
     output.mkdir(parents=True)
-    stale_wheel = output / "sanka_connector_csv-0.1.0a11-py3-none-any.whl"
+    stale_wheel = output / "sanka_connector_csv-0.1.0a12-py3-none-any.whl"
     stale_wheel.write_bytes(b"stale")
     keep = output / "operator-notes.txt"
     keep.write_text("keep")
@@ -198,42 +198,42 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
     packages = {
         "sanka-drf-replay": ("0.1.0a1", "sanka_drf_replay-0.1.0a1-py3-none-any.whl", ""),
         "sanka-extension-drf-to-flask": (
-            "0.1.0a2",
-            "sanka_extension_drf_to_flask-0.1.0a2-py3-none-any.whl",
+            "0.1.0a3",
+            "sanka_extension_drf_to_flask-0.1.0a3-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-flask = sanka_extension_drf_to_flask.__main__:main\n",
         ),
-        "sanka-extension-sdk": ("0.1.0a1", "sanka_extension_sdk-0.1.0a1-py3-none-any.whl", ""),
+        "sanka-extension-sdk": ("0.1.0a2", "sanka_extension_sdk-0.1.0a2-py3-none-any.whl", ""),
         "sanka-extension-drf-to-fastapi": (
-            "0.1.0a4",
-            "sanka_extension_drf_to_fastapi-0.1.0a4-py3-none-any.whl",
+            "0.1.0a5",
+            "sanka_extension_drf_to_fastapi-0.1.0a5-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-fastapi = sanka_extension_drf_to_fastapi.__main__:main\n",
         ),
-        "sanka-connector-sdk": ("0.1.0a11", "sanka_connector_sdk-0.1.0a11-py3-none-any.whl", ""),
+        "sanka-connector-sdk": ("0.1.0a12", "sanka_connector_sdk-0.1.0a12-py3-none-any.whl", ""),
         "sanka-connector-markdown": (
-            "0.1.0a11",
-            "sanka_connector_markdown-0.1.0a11-py3-none-any.whl",
+            "0.1.0a12",
+            "sanka_connector_markdown-0.1.0a12-py3-none-any.whl",
             "[sanka.connectors]\nmarkdown = sanka_connector_markdown:CONNECTOR\n",
         ),
         "sanka-connector-csv": (
-            "0.1.0a11",
-            "sanka_connector_csv-0.1.0a11-py3-none-any.whl",
+            "0.1.0a12",
+            "sanka_connector_csv-0.1.0a12-py3-none-any.whl",
             "[sanka.connectors]\ncsv = sanka_connector_csv:CONNECTOR\n",
         ),
         "sanka-connector-sqlite": (
-            "0.1.0a11",
-            "sanka_connector_sqlite-0.1.0a11-py3-none-any.whl",
+            "0.1.0a12",
+            "sanka_connector_sqlite-0.1.0a12-py3-none-any.whl",
             "[sanka.connectors]\nsqlite = sanka_connector_sqlite:CONNECTOR\n",
         ),
         "sanka-connector-postgres": (
-            "0.1.0a11",
-            "sanka_connector_postgres-0.1.0a11-py3-none-any.whl",
+            "0.1.0a12",
+            "sanka_connector_postgres-0.1.0a12-py3-none-any.whl",
             "[sanka.connectors]\npostgres = sanka_connector_postgres:CONNECTOR\n",
         ),
         "sanka-connector-clickhouse": (
-            "0.1.0a11",
-            "sanka_connector_clickhouse-0.1.0a11-py3-none-any.whl",
+            "0.1.0a12",
+            "sanka_connector_clickhouse-0.1.0a12-py3-none-any.whl",
             "[sanka.connectors]\nclickhouse = sanka_connector_clickhouse:CONNECTOR\n",
         ),
     }
@@ -244,9 +244,11 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
             f'[project]\nname = "{package}"\nversion = "{version}"\n'
         )
         requirements = (
-            ("sanka-extension-sdk==0.1.0a1", "sanka-drf-replay==0.1.0a1")
+            ("sanka-extension-sdk==0.1.0a2", "sanka-drf-replay==0.1.0a1")
             if package in {"sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask"}
-            else ("sanka-connector-sdk==0.1.0a11",)
+            else ("sanka-connector-sdk==0.1.0a12",)
+            if package == "sanka-extension-sdk"
+            else ("sanka-extension-sdk==0.1.0a2",)
             if package.startswith("sanka-connector-") and package != "sanka-connector-sdk"
             else ()
         )
@@ -276,7 +278,7 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
     ("case", "expected"),
     [
         ("connector_entry_point", "exact connector entry point"),
-        ("dependency", "does not depend on its exact connector SDK"),
+        ("dependency", "does not depend on the exact Extension SDK"),
         ("hash", "manifest hash does not match release artifact"),
         ("path", "outside the marketplace snapshot"),
     ],
@@ -285,14 +287,14 @@ def test_release_validator_rejects_invalid_release_boundaries(
     tmp_path: Path, case: str, expected: str
 ) -> None:
     root, release = _release_snapshot(tmp_path)
-    markdown = release / "sanka_connector_markdown-0.1.0a11-py3-none-any.whl"
+    markdown = release / "sanka_connector_markdown-0.1.0a12-py3-none-any.whl"
     if case == "connector_entry_point":
         _metadata_wheel(
             release,
             name="sanka-connector-markdown",
-            version="0.1.0a11",
+            version="0.1.0a12",
             filename=markdown.name,
-            requirements=("sanka-connector-sdk==0.1.0a11",),
+            requirements=("sanka-extension-sdk==0.1.0a2",),
             entry_points="[sanka.connectors]\nmarkdown = attacker:CONNECTOR\n",
         )
         _set_manifest_hash(root, "sanka-connector-markdown", markdown)
@@ -300,7 +302,7 @@ def test_release_validator_rejects_invalid_release_boundaries(
         _metadata_wheel(
             release,
             name="sanka-connector-markdown",
-            version="0.1.0a11",
+            version="0.1.0a12",
             filename=markdown.name,
             requirements=("requests==2.0",),
             entry_points="[sanka.connectors]\nmarkdown = sanka_connector_markdown:CONNECTOR\n",

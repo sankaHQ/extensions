@@ -21,7 +21,7 @@ policy.
 
 ## Security boundaries
 
-This repository contains extension SDKs and local or offline extension packages.
+This repository contains the Extension SDK and local or offline extension packages.
 Credentials and endpoint configuration are trusted operator inputs; source
 code, records, file trees, schema names, and database contents are untrusted.
 

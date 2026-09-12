@@ -1,4 +1,4 @@
-# ClickHouse connector
+# ClickHouse extension
 
 Writes Sanka records into a ClickHouse database as a migration
 **destination**: one table per target object, created on first write with
