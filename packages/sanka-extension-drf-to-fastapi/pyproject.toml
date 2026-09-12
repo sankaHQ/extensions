@@ -1,13 +1,13 @@
 [project]
 name = "sanka-extension-drf-to-fastapi"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "Isolated DRF-to-FastAPI migration extension for Sanka"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Sanka, Inc." }]
-dependencies = ["sanka-extension-sdk==0.1.0a3", "sanka-drf-replay==0.1.0a1"]
+dependencies = ["sanka-extension-sdk==0.1.0a3", "sanka-drf-replay==0.1.0a2"]
 
 [project.scripts]
 sanka-extension-drf-to-fastapi = "sanka_extension_drf_to_fastapi.__main__:main"

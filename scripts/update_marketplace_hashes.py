@@ -18,7 +18,7 @@ if __package__ in {None, ""}:  # Direct script execution keeps only scripts/ on 
 
 from scripts.build_release import LOCKED_DEPENDENCY_WHEELS  # noqa: E402
 
-RELEASE_TAG = "extensions-v0.1.0a18"
+RELEASE_TAG = "extensions-v0.1.0a19"
 LOCAL_MANIFEST_WHEELS = {
     "sanka-extension-sales-quote": (
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
@@ -27,15 +27,15 @@ LOCAL_MANIFEST_WHEELS = {
     ),
     "sanka-extension-drf-to-flask": (
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_drf_replay-0.1.0a1-py3-none-any.whl",
+        "sanka_drf_replay-0.1.0a2-py3-none-any.whl",
         "sanka_extension_sdk-0.1.0a3-py3-none-any.whl",
-        "sanka_extension_drf_to_flask-0.1.0a4-py3-none-any.whl",
+        "sanka_extension_drf_to_flask-0.1.0a5-py3-none-any.whl",
     ),
     "sanka-extension-drf-to-fastapi": (
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_drf_replay-0.1.0a1-py3-none-any.whl",
+        "sanka_drf_replay-0.1.0a2-py3-none-any.whl",
         "sanka_extension_sdk-0.1.0a3-py3-none-any.whl",
-        "sanka_extension_drf_to_fastapi-0.1.0a6-py3-none-any.whl",
+        "sanka_extension_drf_to_fastapi-0.1.0a7-py3-none-any.whl",
     ),
     "sanka-connector-markdown": (
         "sanka_extension_sdk-0.1.0a3-py3-none-any.whl",

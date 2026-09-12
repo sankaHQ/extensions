@@ -2,7 +2,7 @@
 
 ## Current candidate
 
-Publish one `extensions-v0.1.0a18` GitHub prerelease from the exact reviewed merged
+Publish one `extensions-v0.1.0a19` GitHub prerelease from the exact reviewed merged
 source, after both the Flow contracts and Sales generator changes have landed.
 The candidate includes these independently versioned packages:
 
@@ -12,9 +12,9 @@ The candidate includes these independently versioned packages:
 | Unified SDK: `sanka-extension-sdk` | 0.1.0a3 |
 | Sales Quote generator | 0.1.0a1 |
 | Five Data extensions | 0.1.0a13 |
-| DRF-to-FastAPI | 0.1.0a6 |
-| DRF-to-Flask | 0.1.0a4 |
-| DRF replay dependency | 0.1.0a1, unchanged |
+| DRF-to-FastAPI | 0.1.0a7 |
+| DRF-to-Flask | 0.1.0a5 |
+| DRF replay dependency | 0.1.0a2, unchanged |
 
 Do not publish the intermediate Flow-contract SDK a3 and then change its bytes
 when Sales lands. Review and publish their final combined SDK once. Existing
@@ -39,7 +39,7 @@ contacting GitHub or creating a release:
 
 ```bash
 uv run python scripts/publish_release.py \
-  --tag extensions-v0.1.0a18 --revision <full-reviewed-source-sha> --dist dist
+  --tag extensions-v0.1.0a19 --revision <full-reviewed-source-sha> --dist dist
 ```
 
 The plan contains 194 wheels and ten JSON assets: two catalogs and eight uniquely
@@ -55,11 +55,11 @@ for the reviewed release, pin the final merged source SHA, and confirm the new
 tag/release do not already exist. If they exist, inspect their exact identities
 and partial state; do not replace them or blindly repeat tag creation.
 
-Create the annotated a18 tag at that selected SHA and push it without force.
+Create the annotated a19 tag at that selected SHA and push it without force.
 Dispatch the canonical workflow at the tag, with no additional inputs:
 
 ```bash
-gh workflow run publish.yml --repo sankaHQ/extensions --ref extensions-v0.1.0a18
+gh workflow run publish.yml --repo sankaHQ/extensions --ref extensions-v0.1.0a19
 ```
 
 The workflow checks out the exact selected commit, runs locked validation and

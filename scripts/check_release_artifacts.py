@@ -101,11 +101,11 @@ MIGRATION_MANIFEST: dict[str, Any] = {
     "schema_version": "sanka-extension-manifest/v2",
     "kind": "migration",
     "id": "sanka/drf-to-fastapi",
-    "version": "0.1.0a6",
+    "version": "0.1.0a7",
     "protocol_version": "sanka-extension/v1",
     "distribution": {
         "name": "sanka-extension-drf-to-fastapi",
-        "version": "0.1.0a6",
+        "version": "0.1.0a7",
         "executable": "sanka-extension-drf-to-fastapi",
     },
     "commands": ["apply", "plan", "scan", "test", "verify"],
@@ -197,12 +197,12 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
 FLASK_MANIFEST = {
     **MIGRATION_MANIFEST,
     "id": "sanka/drf-to-flask",
-    "version": "0.1.0a4",
+    "version": "0.1.0a5",
     "commands": ["apply", "plan", "scan", "test", "verify"],
     "targets": ["flask"],
     "distribution": {
         "name": "sanka-extension-drf-to-flask",
-        "version": "0.1.0a4",
+        "version": "0.1.0a5",
         "executable": "sanka-extension-drf-to-flask",
     },
 }
@@ -373,7 +373,7 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
                 errors.append(f"{name} wheel has no exact connector entry point")
         elif name in {"sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask"}:
             if sorted(requirements) != [
-                "sanka-drf-replay==0.1.0a1",
+                "sanka-drf-replay==0.1.0a2",
                 "sanka-extension-sdk==0.1.0a3",
             ]:
                 errors.append(f"{name} must depend exactly on sanka-extension-sdk==0.1.0a3")

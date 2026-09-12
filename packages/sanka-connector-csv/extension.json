@@ -24,17 +24,17 @@
     {
       "name": "sanka_extension_sdk-0.1.0a3-py3-none-any.whl",
       "sha256": "8f172e7aae0afc8bbde81d050ce2baa5e7a86fb2beccee70ec4f00da3b5d682a",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a18/sanka_extension_sdk-0.1.0a3-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a19/sanka_extension_sdk-0.1.0a3-py3-none-any.whl"
     },
     {
       "name": "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
       "sha256": "34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a18/sanka_connector_sdk-0.1.0a12-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a19/sanka_connector_sdk-0.1.0a12-py3-none-any.whl"
     },
     {
       "name": "sanka_connector_csv-0.1.0a13-py3-none-any.whl",
       "sha256": "acd779353acdb8aa48f92e3cc843a2694e50c74a2aa076a14d3e9e88af464132",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a18/sanka_connector_csv-0.1.0a13-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a19/sanka_connector_csv-0.1.0a13-py3-none-any.whl"
     }
   ]
 }

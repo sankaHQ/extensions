@@ -284,6 +284,7 @@ def _handle_test(request: ExtensionRequest) -> ExtensionResponse:
         request.project_root,
         artifact_dir=request.artifact_root,
         output=_optional_string(request.configuration, "output"),
+        candidate_python=_optional_string(request.configuration, "candidate_python"),
     )
     artifacts = [
         str(Path(value).resolve())
@@ -367,6 +368,7 @@ def _handle_replay(request: ExtensionRequest) -> ExtensionResponse:
             candidate_root=candidate_root,
             entrypoint=_optional_string(configuration, "entrypoint") or DEFAULT_ENTRYPOINT,
             db_env=_optional_string(configuration, "db_env") or DEFAULT_DB_ENV,
+            candidate_db_env=_optional_string(configuration, "candidate_db_env"),
             seed=_project_path(request, seed_value) if seed_value else None,
             ignored_tables=tuple(ignored) if ignored is not None else DEFAULT_IGNORED_TABLES,
             all_headers=_boolean(configuration, "all_headers"),

@@ -6,14 +6,14 @@ from pathlib import Path
 
 import yaml
 
-RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a18/"
+RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a19/"
 EXPECTED = {
     "sanka/drf-to-flask": {
         "kind": "migration",
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-flask",
-            "version": "0.1.0a4",
+            "version": "0.1.0a5",
             "executable": "sanka-extension-drf-to-flask",
         },
     },
@@ -22,7 +22,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-fastapi",
-            "version": "0.1.0a6",
+            "version": "0.1.0a7",
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },

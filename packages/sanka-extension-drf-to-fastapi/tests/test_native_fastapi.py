@@ -706,15 +706,18 @@ def test_native_plan_explains_middleware_in_legacy_scan(crud_project: Path) -> N
         view.pop("listing", None)
         view.pop("carryover", None)
 
-    def strip_timezone(fields: list[dict[str, object]]) -> None:
+    def strip_new_serializer_fields(serializer: dict[str, object]) -> None:
+        serializer.pop("create_contract", None)
+        fields = serializer.get("fields", [])
+        assert isinstance(fields, list)
         for item in fields:
             item.pop("timezone", None)
             child = item.get("child")
             if isinstance(child, dict):
-                strip_timezone(child.get("fields", []))  # type: ignore[arg-type]
+                strip_new_serializer_fields(child)
 
     for serializer in payload.get("serializer_details", []):
-        strip_timezone(serializer.get("fields", []))
+        strip_new_serializer_fields(serializer)
     hash_payload = dict(payload)
     hash_payload.pop("scan_hash", None)
     payload["scan_hash"] = content_hash(hash_payload)
