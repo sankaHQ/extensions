@@ -52,7 +52,7 @@
     },
     {
       "name": "sanka_drf_replay-0.1.0a2-py3-none-any.whl",
-      "sha256": "4b485adc00a240fe7a99235404d021c821b69fbb4b42815d30cf2f5bc655ae69",
+      "sha256": "2daeb62be69d1489097351b409fa32dda1713aaf8d39933037be101438757dde",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a18/sanka_drf_replay-0.1.0a2-py3-none-any.whl"
     },
     {
@@ -62,7 +62,7 @@
     },
     {
       "name": "sanka_extension_drf_to_fastapi-0.1.0a6-py3-none-any.whl",
-      "sha256": "55b4d68309baf48114089fc86f6f65d328bf2312f99174f3e40c1a708e0fe88b",
+      "sha256": "cb223d2e18a217e76e8f526cc1e8131975b808680a0db660df945de5de54092e",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a18/sanka_extension_drf_to_fastapi-0.1.0a6-py3-none-any.whl"
     }
   ]
