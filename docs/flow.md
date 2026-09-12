@@ -94,7 +94,7 @@ are not executable Flow semantics. An unsupported node requires an explicit
 Use `Blueprint.to_dict()` / `Blueprint.from_dict()` and the equivalent
 `SourceSnapshot` methods for JSON boundaries. `ArtifactIdentity.digest` requires
 `sha256:<64 lowercase hex characters>`. `artifact_digest(value)` hashes canonical
-finite JSON with sorted object keys. A Blueprint's `digest` includes its complete
+finite UTF-8 JSON with sorted object keys, without ASCII escaping. A Blueprint's `digest` includes its complete
 serialized configuration, scenarios, policies and provenance. Lists that represent
 sets are sorted by logical identity; event ordering remains significant. Input
 mutation and modification of returned dictionaries cannot change either artifact.

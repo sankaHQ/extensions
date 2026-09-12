@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 from dataclasses import replace
@@ -136,6 +137,11 @@ def test_json_cycles_rejected_but_shared_acyclic_values_supported():
 def test_canonical_digest_does_not_coerce_boolean_number_or_string():
     assert len({flow.artifact_digest(v) for v in [True, 1, 1.0, "1", None]}) == 5
     assert flow.artifact_digest({"a": 1, "b": 2}) == flow.artifact_digest({"b": 2, "a": 1})
+
+
+def test_digest_uses_utf8_json_without_ascii_escaping():
+    expected = "sha256:" + hashlib.sha256('{"label":"見積書"}'.encode()).hexdigest()
+    assert flow.artifact_digest({"label": "見積書"}) == expected
 
 
 @pytest.mark.parametrize("operation", ["record.deleted", "http.request", "record.create"])

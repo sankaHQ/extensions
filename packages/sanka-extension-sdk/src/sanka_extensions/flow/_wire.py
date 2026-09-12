@@ -101,7 +101,9 @@ def _validate_json(value: object, ancestors: set[int]) -> None:
 
 def canonical_json(value: object) -> str:
     _validate_json(value, set())
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    )
 
 
 def artifact_digest(value: object) -> str:
