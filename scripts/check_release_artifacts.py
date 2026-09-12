@@ -51,11 +51,11 @@ MIGRATION_MANIFEST: dict[str, Any] = {
     "schema_version": "sanka-extension-manifest/v2",
     "kind": "migration",
     "id": "sanka/drf-to-fastapi",
-    "version": "0.1.0a5",
+    "version": "0.1.0a6",
     "protocol_version": "sanka-extension/v1",
     "distribution": {
         "name": "sanka-extension-drf-to-fastapi",
-        "version": "0.1.0a5",
+        "version": "0.1.0a6",
         "executable": "sanka-extension-drf-to-fastapi",
     },
     "commands": ["apply", "plan", "scan", "test", "verify"],
@@ -77,10 +77,10 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
         "schema_version": "sanka-extension-manifest/v2",
         "kind": "connector",
         "id": "sanka/markdown",
-        "version": "0.1.0a12",
+        "version": "0.1.0a13",
         "distribution": {
             "name": "sanka-connector-markdown",
-            "version": "0.1.0a12",
+            "version": "0.1.0a13",
             "entry_point": "markdown",
         },
         "protocol_version": "sanka-connector/v1",
@@ -91,10 +91,10 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
         "schema_version": "sanka-extension-manifest/v2",
         "kind": "connector",
         "id": "sanka/csv",
-        "version": "0.1.0a12",
+        "version": "0.1.0a13",
         "distribution": {
             "name": "sanka-connector-csv",
-            "version": "0.1.0a12",
+            "version": "0.1.0a13",
             "entry_point": "csv",
         },
         "protocol_version": "sanka-connector/v1",
@@ -105,10 +105,10 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
         "schema_version": "sanka-extension-manifest/v2",
         "kind": "connector",
         "id": "sanka/sqlite",
-        "version": "0.1.0a12",
+        "version": "0.1.0a13",
         "distribution": {
             "name": "sanka-connector-sqlite",
-            "version": "0.1.0a12",
+            "version": "0.1.0a13",
             "entry_point": "sqlite",
         },
         "protocol_version": "sanka-connector/v1",
@@ -119,10 +119,10 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
         "schema_version": "sanka-extension-manifest/v2",
         "kind": "connector",
         "id": "sanka/postgres",
-        "version": "0.1.0a12",
+        "version": "0.1.0a13",
         "distribution": {
             "name": "sanka-connector-postgres",
-            "version": "0.1.0a12",
+            "version": "0.1.0a13",
             "entry_point": "postgres",
         },
         "protocol_version": "sanka-connector/v1",
@@ -133,10 +133,10 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
         "schema_version": "sanka-extension-manifest/v2",
         "kind": "connector",
         "id": "sanka/clickhouse",
-        "version": "0.1.0a12",
+        "version": "0.1.0a13",
         "distribution": {
             "name": "sanka-connector-clickhouse",
-            "version": "0.1.0a12",
+            "version": "0.1.0a13",
             "entry_point": "clickhouse",
         },
         "protocol_version": "sanka-connector/v1",
@@ -147,12 +147,12 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
 FLASK_MANIFEST = {
     **MIGRATION_MANIFEST,
     "id": "sanka/drf-to-flask",
-    "version": "0.1.0a3",
+    "version": "0.1.0a4",
     "commands": ["apply", "plan", "scan", "test", "verify"],
     "targets": ["flask"],
     "distribution": {
         "name": "sanka-extension-drf-to-flask",
-        "version": "0.1.0a3",
+        "version": "0.1.0a4",
         "executable": "sanka-extension-drf-to-flask",
     },
 }
@@ -297,16 +297,16 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
                 errors.append(f"{name} SDK wheel must have no dependencies or entry points")
         elif name.startswith("sanka-connector-"):
             connector_entries = _entry_points(entries, "sanka.connectors")
-            if "sanka-extension-sdk==0.1.0a2" not in requirements:
+            if "sanka-extension-sdk==0.1.0a3" not in requirements:
                 errors.append(f"{name} wheel does not depend on the exact Extension SDK")
             if connector_entries != CONNECTOR_ENTRY_POINTS[name]:
                 errors.append(f"{name} wheel has no exact connector entry point")
         elif name in {"sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask"}:
             if sorted(requirements) != [
                 "sanka-drf-replay==0.1.0a1",
-                "sanka-extension-sdk==0.1.0a2",
+                "sanka-extension-sdk==0.1.0a3",
             ]:
-                errors.append(f"{name} must depend exactly on sanka-extension-sdk==0.1.0a2")
+                errors.append(f"{name} must depend exactly on sanka-extension-sdk==0.1.0a3")
             if _entry_points(entries, "console_scripts") != {
                 name: f"{name.replace('-', '_')}.__main__:main"
             }:
