@@ -6,14 +6,14 @@ from pathlib import Path
 
 import yaml
 
-RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a18/"
+RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a19/"
 EXPECTED = {
     "sanka/drf-to-flask": {
         "kind": "migration",
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-flask",
-            "version": "0.1.0a4",
+            "version": "0.1.0a5",
             "executable": "sanka-extension-drf-to-flask",
         },
     },
@@ -22,7 +22,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-fastapi",
-            "version": "0.1.0a6",
+            "version": "0.1.0a7",
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },
@@ -31,7 +31,7 @@ EXPECTED = {
         "protocol_version": "sanka-connector/v1",
         "distribution": {
             "name": "sanka-connector-markdown",
-            "version": "0.1.0a12",
+            "version": "0.1.0a13",
             "entry_point": "markdown",
         },
         "providers": [{"name": "markdown", "roles": ["source"]}],
@@ -41,7 +41,7 @@ EXPECTED = {
         "protocol_version": "sanka-connector/v1",
         "distribution": {
             "name": "sanka-connector-csv",
-            "version": "0.1.0a12",
+            "version": "0.1.0a13",
             "entry_point": "csv",
         },
         "providers": [{"name": "csv", "roles": ["source"]}],
@@ -51,7 +51,7 @@ EXPECTED = {
         "protocol_version": "sanka-connector/v1",
         "distribution": {
             "name": "sanka-connector-sqlite",
-            "version": "0.1.0a12",
+            "version": "0.1.0a13",
             "entry_point": "sqlite",
         },
         "providers": [{"name": "sqlite", "roles": ["source", "destination"]}],
@@ -61,7 +61,7 @@ EXPECTED = {
         "protocol_version": "sanka-connector/v1",
         "distribution": {
             "name": "sanka-connector-postgres",
-            "version": "0.1.0a12",
+            "version": "0.1.0a13",
             "entry_point": "postgres",
         },
         "providers": [{"name": "postgres", "roles": ["source", "destination"]}],
@@ -71,7 +71,7 @@ EXPECTED = {
         "protocol_version": "sanka-connector/v1",
         "distribution": {
             "name": "sanka-connector-clickhouse",
-            "version": "0.1.0a12",
+            "version": "0.1.0a13",
             "entry_point": "clickhouse",
         },
         "providers": [{"name": "clickhouse", "roles": ["destination"]}],
