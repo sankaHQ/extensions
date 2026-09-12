@@ -1147,12 +1147,12 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 
 [[package]]
 name = "sanka-drf-replay"
-version = "0.1.0a1"
+version = "0.1.0a2"
 source = { editable = "packages/sanka-drf-replay" }
 
 [[package]]
 name = "sanka-extension-drf-to-fastapi"
-version = "0.1.0a6"
+version = "0.1.0a7"
 source = { editable = "packages/sanka-extension-drf-to-fastapi" }
 dependencies = [
     { name = "sanka-drf-replay" },
@@ -1167,7 +1167,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-extension-drf-to-flask"
-version = "0.1.0a4"
+version = "0.1.0a5"
 source = { editable = "packages/sanka-extension-drf-to-flask" }
 dependencies = [
     { name = "sanka-drf-replay" },

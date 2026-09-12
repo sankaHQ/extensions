@@ -2,10 +2,13 @@
 
 ## Current marketplace release
 
-Publish `extensions-v0.1.0a17` from the exact reviewed merge using `publish.yml`.
-This bundle introduces `sanka_extensions` as the unified Sanka Extension SDK.
-It includes SDK 0.1.0a2, compatibility SDK 0.1.0a12, data-access extensions
-0.1.0a12, DRF-to-FastAPI 0.1.0a5, and DRF-to-Flask 0.1.0a3.
+Publish `extensions-v0.1.0a19` from the exact reviewed merge using `publish.yml`.
+This bundle preserves admitted nested-create validation and rollback in native
+DRF-to-FastAPI output and adds database row counts to replay evidence. Replay
+can bind a separate candidate database variable without editing either application. It includes
+SDK 0.1.0a2, compatibility SDK 0.1.0a12, data-access extensions 0.1.0a12,
+DRF-to-FastAPI 0.1.0a6, shared DRF replay 0.1.0a2, and DRF-to-Flask 0.1.0a4.
+The Flask version changes only to consume the updated shared replay package.
 Its manifests must reference the new tag and match every staged wheel hash;
 All previously published release tags remain immutable. Run `make check` and
 `make update-marketplace-hashes` before review. After publication, verify the
