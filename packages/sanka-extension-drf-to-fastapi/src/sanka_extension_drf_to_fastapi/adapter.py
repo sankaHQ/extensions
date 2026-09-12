@@ -284,6 +284,7 @@ def _handle_test(request: ExtensionRequest) -> ExtensionResponse:
         request.project_root,
         artifact_dir=request.artifact_root,
         output=_optional_string(request.configuration, "output"),
+        candidate_python=_optional_string(request.configuration, "candidate_python"),
     )
     artifacts = [
         str(Path(value).resolve())

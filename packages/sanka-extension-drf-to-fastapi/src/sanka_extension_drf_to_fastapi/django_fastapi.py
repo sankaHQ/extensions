@@ -174,7 +174,7 @@ def scan_django(
     permissions = sorted({value for route in routes for value in route.permissions})
     authentication = sorted({value for route in routes for value in route.authentication})
     scan = FrameworkScan(
-        schema_version=7,
+        schema_version=8,
         source=".",
         language="python",
         framework="django-rest-framework",
@@ -508,6 +508,37 @@ def plan_fastapi(
         raise FrameworkMigrationError(
             f"unsupported generated package manager: {selected_package_manager}"
         )
+    if strategy == NATIVE_STRATEGY:
+        serializers_by_name = {
+            serializer.name: serializer for serializer in scan.serializer_details
+        }
+        scanned_by_key = {route.key: route for route in scan.routes}
+        restricted = []
+        for route in routes:
+            scanned = scanned_by_key[route.key]
+            serializer = serializers_by_name.get(scanned.serializer or "")
+            if (
+                route.automatic
+                and route.operation == "create"
+                and serializer is not None
+                and serializer.create_style == "carryover"
+                and (serializer.create_contract is None or engine != "tortoise")
+            ):
+                route = replace_dataclass(
+                    route,
+                    automatic=False,
+                    strategy=ROUTE_STRATEGY_MANUAL,
+                    adaptation_reasons=(
+                        _adaptation_reason(
+                            "SANKA_DRF_NESTED_TRANSACTION_UNSUPPORTED",
+                            "nested-create",
+                            "This custom create requires a supported declarative contract and "
+                            "Tortoise transaction; rescan or adapt this route manually.",
+                        ),
+                    ),
+                )
+            restricted.append(route)
+        routes = tuple(restricted)
     expected_files = _planned_output_files(
         layout=layout,
         strategy=strategy,
@@ -947,7 +978,7 @@ def _create_payload(ir: SerializerIR, *, preserve_carryover: bool = False) -> di
     if ir.create_style == "carryover":
         if preserve_carryover:
             return {"style": "carryover", "function": _carryover_function_name(ir)}
-        return {"style": "nested"}
+        return dict(ir.create_contract or {"style": "unsupported"})
     return {"style": "default"}
 
 
@@ -2921,7 +2952,10 @@ def _analyze_create_carryover(
     module_globals = vars(importlib.import_module(serializer_class.__module__))
     imports: list[tuple[str, str, str | None]] = []
     for name in sorted(loaded - bound):
-        if name in vars(builtins):
+        if (
+            name in vars(builtins)
+            and module_globals.get(name, vars(builtins)[name]) is vars(builtins)[name]
+        ):
             continue
         if name not in module_globals:
             return None
@@ -3092,7 +3126,8 @@ def _build_serializer_ir(
         supported = False
     fields: list[SerializerFieldIR] = []
     has_writable_nested = False
-    for field_name, field in serializer_class().fields.items():
+    serializer_fields = serializer_class().fields
+    for field_name, field in serializer_fields.items():
         field_ir = _serializer_field_ir(str(field_name), field, model)
         fields.append(field_ir)
         supported = supported and field_ir.supported
@@ -3101,6 +3136,7 @@ def _build_serializer_ir(
 
     create_style = "default"
     create_source: str | None = None
+    create_contract: dict[str, Any] | None = None
     create_imports: tuple[tuple[str, str, str | None], ...] = ()
     update_drops: tuple[str, ...] | None = None
     if analyze_writes:
@@ -3113,6 +3149,64 @@ def _build_serializer_ir(
             else:
                 create_style = "carryover"
                 create_source, create_imports = carryover
+                from sanka_extension_drf_to_fastapi.nested_create import (
+                    lower_nested_create,
+                    supports_default_model_writes,
+                )
+
+                nested_fields = [
+                    field for field in fields if field.kind == "nested_many" and not field.read_only
+                ]
+                if len(nested_fields) == 1 and nested_fields[0].child is not None:
+                    nested_field = nested_fields[0]
+                    child_ir = nested_field.child
+                    assert child_ir is not None
+                    child_model = serializer_fields[nested_field.name].child.Meta.model
+                    nested_supported = (
+                        nested_field.required
+                        and not nested_field.allow_null
+                        and not any(
+                            field.kind == "nested_many" and not field.read_only
+                            for field in child_ir.fields
+                        )
+                        and supports_default_model_writes(model, child_model)
+                    )
+                    create_contract = (
+                        lower_nested_create(
+                            create_source,
+                            parent_aliases={
+                                alias
+                                for alias, module, attr in create_imports
+                                if (module, attr) == (model.__module__, model.__qualname__)
+                            },
+                            child_aliases={
+                                alias
+                                for alias, module, attr in create_imports
+                                if (module, attr) == (child_ir.model_module, child_ir.model_class)
+                            },
+                            transaction_aliases={
+                                alias
+                                for alias, module, _attr in create_imports
+                                if module == "django.db.transaction"
+                            },
+                            error_aliases={
+                                alias + ".ValidationError" if attr == "serializers" else alias
+                                for alias, module, attr in create_imports
+                                if module == "__sanka_shim__"
+                            },
+                            field=nested_field.name,
+                            foreign_key=(nested_field.attname or "").removesuffix("_id"),
+                            integer_fields={
+                                (field.attname or field.name)
+                                for field in child_ir.fields
+                                if field.kind == "integer" and not field.read_only
+                            },
+                        )
+                        if nested_supported
+                        else None
+                    )
+                if create_contract is None:
+                    supported = False
         elif has_writable_nested:
             # DRF's default create() raises on writable nested fields; an
             # honest native migration needs the author's own create logic.
@@ -3143,6 +3237,7 @@ def _build_serializer_ir(
         fields=tuple(fields),
         create_style=create_style,
         create_source=create_source,
+        create_contract=create_contract,
         create_imports=create_imports,
         update_drops=update_drops,
         supported=supported,

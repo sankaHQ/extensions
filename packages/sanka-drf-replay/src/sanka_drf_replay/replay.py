@@ -1045,6 +1045,9 @@ def _replay_one(
     candidate_db = temp / f"candidate-{index}.sqlite3"
     shutil.copy2(base_db, source_db)
     shutil.copy2(base_db, candidate_db)
+    before_counts = {
+        table: len(data["rows"]) for table, data in snapshot_database(base_db, ignored).items()
+    }
     source_media = temp / f"source-{index}-media"
     candidate_media = temp / f"candidate-{index}-media"
     shutil.copytree(base_media, source_media)
@@ -1172,10 +1175,16 @@ def _replay_one(
         ],
         "source": {
             "status": source_result["status"],
+            "database_before": before_counts,
+            "database_after": {table: len(data["rows"]) for table, data in source_snapshot.items()},
             "headers": {name: source_headers.get(name, "") for name in compared},
         },
         "candidate": {
             "status": candidate_result["status"],
+            "database_before": before_counts,
+            "database_after": {
+                table: len(data["rows"]) for table, data in candidate_snapshot.items()
+            },
             "headers": {name: candidate_headers.get(name, "") for name in compared},
         },
         "body_difference": None

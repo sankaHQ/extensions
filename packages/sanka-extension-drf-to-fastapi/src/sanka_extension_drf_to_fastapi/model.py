@@ -198,6 +198,7 @@ class SerializerIR:
     fields: tuple[SerializerFieldIR, ...] = ()
     create_style: str = "default"
     create_source: str | None = None
+    create_contract: dict[str, Any] | None = None
     create_imports: tuple[tuple[str, str, str | None], ...] = ()
     update_drops: tuple[str, ...] | None = None
     supported: bool = True
@@ -296,6 +297,13 @@ def _strip_field_keys(fields: list[dict[str, Any]], keys: tuple[str, ...]) -> No
             _strip_field_keys(child.get("fields", []), keys)
 
 
+def _strip_create_contract(serializer: dict[str, Any]) -> None:
+    serializer.pop("create_contract", None)
+    for item in serializer.get("fields", []):
+        if isinstance(item.get("child"), dict):
+            _strip_create_contract(item["child"])
+
+
 @dataclass(frozen=True, slots=True)
 class FrameworkScan:
     schema_version: int
@@ -346,6 +354,9 @@ class FrameworkScan:
                 view.pop("carryover", None)
             for serializer in payload.get("serializer_details", []):
                 _strip_field_keys(serializer.get("fields", []), ("timezone",))
+        if self.schema_version < 8:
+            for serializer in payload.get("serializer_details", []):
+                _strip_create_contract(serializer)
         return payload
 
     def with_hash(self) -> FrameworkScan:
