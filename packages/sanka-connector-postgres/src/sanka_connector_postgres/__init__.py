@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from sanka_connector_postgres._destination import PostgresDestination
 from sanka_connector_postgres._source import PostgresSource
-from sanka_extensions.systems import ExtensionRegistration
+from sanka_extensions.data import ExtensionRegistration
 
 __all__ = ["CONNECTOR", "EXTENSION", "PostgresDestination", "PostgresSource"]
 

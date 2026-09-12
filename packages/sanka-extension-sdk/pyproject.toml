@@ -1,7 +1,7 @@
 [project]
 name = "sanka-extension-sdk"
 version = "0.1.0a2"
-description = "Sanka Extension SDK for system access, business flows and code migration"
+description = "Sanka Extension SDK for data access, business flows and code migration"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"

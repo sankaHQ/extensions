@@ -10,7 +10,7 @@ ClickHouse forbids ``Nullable`` ORDER BY columns. Fields that appear later are
 added with ``ALTER TABLE … ADD COLUMN IF NOT EXISTS`` as ``Nullable``.
 
 Engine choice is deliberate: when the run's
-:class:`sanka_extensions.systems.WriteOptions` declare identity fields, tables are
+:class:`sanka_extensions.data.WriteOptions` declare identity fields, tables are
 created as ``ReplacingMergeTree ORDER BY (<identity columns>)``. Sanka's
 engine guarantees at-least-once writes reconciled against an identity ledger,
 so a re-applied migration inserts a fresh *version* of each row rather than
@@ -53,12 +53,13 @@ import clickhouse_connect
 from clickhouse_connect.driver.client import Client
 from clickhouse_connect.driver.exceptions import InterfaceError, OperationalError
 
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     AuthenticationError,
     BatchWriteInput,
     BatchWriteResult,
     ConfigurationError,
     Credentials,
+    DataAccessError,
     DataError,
     ExtensionRegistration,
     FieldSchema,
@@ -66,8 +67,7 @@ from sanka_extensions.systems import (
     ObjectSchema,
     RelationshipWrite,
     RelationshipWriteResult,
-    SystemAccessError,
-    TransientSystemError,
+    TransientDataError,
     WriteOptions,
     WriteResult,
 )
@@ -272,7 +272,7 @@ def _error_codes(exc: Exception) -> set[int]:
     return codes
 
 
-def _map_error(exc: Exception, *, action: str) -> SystemAccessError:
+def _map_error(exc: Exception, *, action: str) -> DataAccessError:
     """Map a clickhouse-connect exception onto the Sanka error taxonomy."""
     message = f"clickhouse {action} failed: {exc}"
     codes = _error_codes(exc)
@@ -287,8 +287,8 @@ def _map_error(exc: Exception, *, action: str) -> SystemAccessError:
         return DataError(message)
     if codes & _TRANSIENT_ERROR_CODES or isinstance(exc, OperationalError | InterfaceError):
         # Network failures, timeouts, and server overload are retryable.
-        return TransientSystemError(message)
-    return SystemAccessError(message)
+        return TransientDataError(message)
+    return DataAccessError(message)
 
 
 def _supports_final(engine: str) -> bool:
@@ -489,7 +489,7 @@ class ClickHouseDestination:
     async def _run(self, action: str, fn: Callable[[], _T]) -> _T:
         try:
             return await asyncio.to_thread(fn)
-        except SystemAccessError:
+        except DataAccessError:
             raise
         except Exception as exc:
             raise _map_error(exc, action=action) from exc

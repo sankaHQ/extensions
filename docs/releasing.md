@@ -4,7 +4,7 @@
 
 Publish `extensions-v0.1.0a17` from the exact reviewed merge using `publish.yml`.
 This bundle introduces `sanka_extensions` as the unified Sanka Extension SDK.
-It includes SDK 0.1.0a2, compatibility SDK 0.1.0a12, system-access extensions
+It includes SDK 0.1.0a2, compatibility SDK 0.1.0a12, data-access extensions
 0.1.0a12, DRF-to-FastAPI 0.1.0a5, and DRF-to-Flask 0.1.0a3.
 Its manifests must reference the new tag and match every staged wheel hash;
 All previously published release tags remain immutable. Run `make check` and

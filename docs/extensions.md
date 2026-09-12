@@ -22,7 +22,7 @@ Extensions contribute capabilities such as:
   executable packages and runtime dispatch remain future work.
 
 The Sanka Extension SDK provides one `sanka_extensions` namespace. Use
-`sanka_extensions.systems` for system readers, writers, and registration;
+`sanka_extensions.data` for data readers, writers, and registration;
 use `sanka_extensions.code` for typed code-migration requests and responses.
 Use `sanka_extensions.flow` for the [declarative Flow contract](flow.md).
 Both interfaces are implemented, including executable PostgreSQL, SQLite, CSV,
@@ -58,6 +58,6 @@ extension, hosted Sanka code, or private credentials. Interfaces use validated s
 inputs and outputs, declare capabilities explicitly, and fail closed when a
 requested capability is unsupported.
 
-Hosted SaaS and managed-system migrations remain Sanka API capabilities. Their
+Hosted SaaS and managed-data migrations remain Sanka API capabilities. Their
 credentials, long-running jobs, rate controls, and audit evidence do not belong
 in local extensions.

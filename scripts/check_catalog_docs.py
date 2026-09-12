@@ -17,13 +17,13 @@ def catalog_document(root: Path) -> str:
         "",
         "Generated from marketplace.json and extension manifests.",
         "",
-        "| Extension | Capability | Supported systems / conversion targets |",
+        "| Extension | Capability | Data endpoints / conversion targets |",
         "| --- | --- | --- |",
     ]
     for item in sorted(catalog["extensions"], key=lambda item: item["id"]):
         manifest = json.loads((root / item["manifest"]).read_text())
         if manifest["kind"] == "connector":
-            capability = "System access"
+            capability = "Data access"
             support = "; ".join(
                 f"{system['name']} ({', '.join(system['roles'])})"
                 for system in manifest["providers"]

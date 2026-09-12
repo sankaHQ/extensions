@@ -18,11 +18,11 @@ extension discovery, template loading, network access, workspace mutation or
 activation. Types are lowercase kebab-case selectors, optionally qualified as
 `publisher/name`. The SDK does not bundle CRM or billing knowledge or assert that
 an extension with that type is installed. Parameters contain JSON configuration;
-credentials belong in separately configured systems managed by the runtime.
+credentials belong in separately configured data endpoints managed by the runtime.
 
 This source change adds the definition contract and its validation tests. It does
 not add a Flow marketplace package, executable protocol/manifest kind, CLI command
-or Setup Wizard integration. Published code/system contracts remain unchanged.
+or Setup Wizard integration. Published code/data contracts remain unchanged.
 Runtimes must reject unsupported Flow execution rather than treating a definition
 as a code-migration request or ignoring its policies.
 

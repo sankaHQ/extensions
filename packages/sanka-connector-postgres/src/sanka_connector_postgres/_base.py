@@ -22,17 +22,17 @@ from typing import Any, Final
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     AuthenticationError,
     ConfigurationError,
     ConflictError,
     Credentials,
+    DataAccessError,
     DataError,
+    DataTimeoutError,
     ErrorCategory,
     PermissionDeniedError,
-    SystemAccessError,
-    SystemTimeoutError,
-    TransientSystemError,
+    TransientDataError,
 )
 
 _IDENTIFIER = re.compile(r"[^a-z0-9_]+")
@@ -151,7 +151,7 @@ def cursor_param(data_type: str, text: str) -> Any:
     return text
 
 
-def mapped_error(error: psycopg.Error, *, context: str) -> SystemAccessError:
+def mapped_error(error: psycopg.Error, *, context: str) -> DataAccessError:
     """Map a psycopg exception onto the Sanka error taxonomy."""
     message = f"{context}: {error}"
     sqlstate = error.sqlstate or ""
@@ -164,18 +164,18 @@ def mapped_error(error: psycopg.Error, *, context: str) -> SystemAccessError:
     if sqlstate == "23505":
         return ConflictError(message)
     if sqlstate == "57014":
-        return SystemTimeoutError(message)
+        return DataTimeoutError(message)
     if sqlstate.startswith(("08", "53", "57", "58")):
-        return TransientSystemError(message)
+        return TransientDataError(message)
     if isinstance(error, psycopg.OperationalError):
         # Connection refused / DNS / timeouts / broken connections.
-        return TransientSystemError(message)
-    return SystemAccessError(message, category=ErrorCategory.UNKNOWN)
+        return TransientDataError(message)
+    return DataAccessError(message, category=ErrorCategory.UNKNOWN)
 
 
 @asynccontextmanager
 async def pg_errors(context: str) -> AsyncIterator[None]:
-    """Re-raise psycopg failures as Sanka system access errors."""
+    """Re-raise psycopg failures as Sanka data access errors."""
     try:
         yield
     except psycopg.Error as error:

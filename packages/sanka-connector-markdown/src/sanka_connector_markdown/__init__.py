@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     ConfigurationError,
     Credentials,
     DataError,

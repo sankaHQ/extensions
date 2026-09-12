@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     ConfigurationError,
     Credentials,
     DataError,

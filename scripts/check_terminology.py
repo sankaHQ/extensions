@@ -12,6 +12,12 @@ LEGACY_TYPES = {
     "DataExtensionRegistration",
     "DataExtensionRegistry",
     "DataExtensionHostClient",
+    "SystemReader",
+    "SystemWriter",
+    "SystemAccessError",
+    "SystemIdentity",
+    "SystemTimeoutError",
+    "TransientSystemError",
     "ConnectorRegistration",
     "SourceConnector",
     "DestinationConnector",
@@ -31,9 +37,14 @@ def check(root: Path) -> list[str]:
         tree = ast.parse(source.read_text(), filename=str(source))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
-                if node.module == "sanka_connector" or node.module.startswith("sanka_connector."):
+                if (
+                    node.module == "sanka_connector"
+                    or node.module.startswith("sanka_connector.")
+                    or node.module == "sanka_extensions.systems"
+                    or node.module.startswith("sanka_extensions.systems.")
+                ):
                     errors.append(
-                        f"{source.relative_to(root)}:{node.lineno}: use sanka_extensions.systems"
+                        f"{source.relative_to(root)}:{node.lineno}: use sanka_extensions.data"
                     )
                 for alias in node.names:
                     if alias.name in LEGACY_TYPES:

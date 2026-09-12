@@ -11,7 +11,7 @@ precision → text ladder with ``ALTER COLUMN … TYPE … USING`` instead of
 failing the run — SQLite's everything-fits semantics on a typed store, without
 losing rows already written. Identity columns get a
 ``CREATE UNIQUE INDEX IF NOT EXISTS``. Writes honor the identity fields and
-conflict policy from :class:`sanka_extensions.systems.WriteOptions` via an identity
+conflict policy from :class:`sanka_extensions.data.WriteOptions` via an identity
 pre-SELECT, mirroring the SQLite writer.
 
 ``destination_record_id`` is the identity value as a string when exactly one
@@ -35,7 +35,7 @@ from sanka_connector_postgres._base import (
     identifier,
     pg_errors,
 )
-from sanka_extensions.systems import (
+from sanka_extensions.data import (
     Credentials,
     FieldSchema,
     Inventory,
@@ -432,6 +432,6 @@ class PostgresDestination(PostgresSystemAccess):
 
 
 if TYPE_CHECKING:
-    from sanka_extensions.systems import SystemWriter
+    from sanka_extensions.data import DataWriter
 
-    _protocol_destination: SystemWriter = PostgresDestination()
+    _protocol_destination: DataWriter = PostgresDestination()

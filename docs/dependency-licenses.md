@@ -8,7 +8,7 @@ or another extension.
 
 | Dependency family | License | Used by | Review note |
 |---|---|---|---|
-| `sanka-extension-sdk` | Apache-2.0 | every extension | Sanka-owned system-access and code-conversion interfaces |
+| `sanka-extension-sdk` | Apache-2.0 | every extension | Sanka-owned data-access and code-conversion interfaces |
 | `sanka-connector-sdk` | Apache-2.0 | SDK compatibility dependency | Sanka-owned dependency-free interface package |
 | PyYAML | MIT | Markdown extension | permissive |
 | urllib3 | MIT | ClickHouse transitive dependency | permissive |

@@ -2,12 +2,12 @@
 
 Generated from marketplace.json and extension manifests.
 
-| Extension | Capability | Supported systems / conversion targets |
+| Extension | Capability | Data endpoints / conversion targets |
 | --- | --- | --- |
-| `sanka/clickhouse` | System access | clickhouse (destination) |
-| `sanka/csv` | System access | csv (source) |
+| `sanka/clickhouse` | Data access | clickhouse (destination) |
+| `sanka/csv` | Data access | csv (source) |
 | `sanka/drf-to-fastapi` | Code conversion | fastapi |
 | `sanka/drf-to-flask` | Code conversion | flask |
-| `sanka/markdown` | System access | markdown (source) |
-| `sanka/postgres` | System access | postgres (source, destination) |
-| `sanka/sqlite` | System access | sqlite (source, destination) |
+| `sanka/markdown` | Data access | markdown (source) |
+| `sanka/postgres` | Data access | postgres (source, destination) |
+| `sanka/sqlite` | Data access | sqlite (source, destination) |

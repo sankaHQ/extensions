@@ -2,19 +2,19 @@
 
 Apache-2.0 extensions and the Sanka Extension SDK for the [shared Sanka CLI and migration runtime](https://github.com/sankaHQ/sanka). This is a Python 3.12+ `uv` workspace.
 
-**Extensions add capabilities. Systems identify the databases, files, and SaaS accounts used in a migration.** One PostgreSQL extension can serve several independently configured PostgreSQL systems.
+**Extensions add data, workflow or code capabilities. Data endpoints identify the source or destination databases, files and SaaS accounts.** One PostgreSQL extension can serve several independently configured data endpoints.
 
 | Product | Work |
 | --- | --- |
-| Sanka | System and data migrations |
-| Sanka Flow | Reconstruction of business configurations and operation of their workflows |
-| Sanka Code | Application and code migrations |
+| Sanka | Data migrations: records, schemas, relationships and attachments |
+| Sanka Flow | Workflow migrations and reconstruction: automations, triggers, actions and conditions |
+| Sanka Code | Code migrations: applications, SQL dialects, ORM and dbt models |
 
 The PostgreSQL extension reads and writes database records. Application SQL or ORM changes belong to Sanka Code; a project can require both products. These responsibilities do not imply support for every database-service migration route. DRF-to-FastAPI and DRF-to-Flask are code extensions that convert applications.
 
 ## Available extensions
 
-The current catalog is documented in [catalog.md](docs/catalog.md), generated and checked against `marketplace.json` and each manifest. It covers system access and code conversion.
+The current catalog is documented in [catalog.md](docs/catalog.md), generated and checked against `marketplace.json` and each manifest. It covers data access and code conversion.
 
 ## Sanka Extension SDK
 
@@ -22,26 +22,26 @@ Use `sanka_extensions` to build extensions. Install the SDK with `pip install sa
 
 | Interface | Purpose |
 | --- | --- |
-| `sanka_extensions.systems` | System readers, writers, records, capabilities, credentials, and registration |
+| `sanka_extensions.data` | Data readers, writers, records, capabilities, credentials, and registration |
 | `sanka_extensions.flow` | Declarative business requests with change-preservation and activation requirements |
 | `sanka_extensions.code` | Typed requests and responses for code migration |
 
 ```python
-from sanka_extensions.systems import SystemReader, SystemWriter
+from sanka_extensions.data import DataReader, DataWriter
 from sanka_extensions.code import ExtensionRequest, ExtensionResponse
 from sanka_extensions import flow
 
 crm = flow.create(type="crm")
 ```
 
-Flow's `create` constructs an unresolved definition without modifying a system.
+Flow's `create` constructs an unresolved definition without modifying a data endpoint.
 The source SDK includes its versioned contract; CRM/billing packages and Flow
 execution are not in the published marketplace. See [Flow contracts](docs/flow.md)
 for reapplication, construction, verification and activation requirements.
 
 See the [SDK guide](packages/sanka-extension-sdk/README.md) for development and the [compatibility guide](docs/naming-compatibility.md) for published package identifiers. `sanka-drf-replay` supplies optional request/response replay support for code extensions.
 
-HubSpot, Salesforce, SendGrid, and other hosted SaaS implementations remain private Sanka API capabilities. They are systems; users do not install them as local extensions.
+HubSpot, Salesforce, SendGrid, and other hosted SaaS implementations remain private Sanka API capabilities. Their data is accessed through hosted adapters; users do not install them as local extensions.
 
 ## Install and inspect
 
@@ -52,7 +52,7 @@ sanka extension add sanka/postgres --marketplace sanka --json
 sanka extension list --json
 ```
 
-Installation makes a capability available. It does not authenticate any system or verify its reachability. Configure each system with its own endpoint and credential references before planning a data migration. Code extensions operate on projects and do not require a connected-system status.
+Installation makes a capability available. It does not authenticate any data endpoint or verify its reachability. Configure each data source or destination with its own endpoint and credential references before planning a data migration. Code extensions operate on projects and do not require a authenticated data endpoint.
 
 ## Catalog and manifests
 
@@ -61,14 +61,14 @@ Installation makes a capability available. It does not authenticate any system o
 - extension ID and version;
 - compatible `sanka-cli` versions;
 - exact distribution identity and executable or data entry point;
-- code lifecycle commands and project matching, or supported system types and read/write roles;
+- code lifecycle commands and project matching, or supported endpoint types and read/write roles;
 - wheel filenames, immutable release URLs, and SHA-256 digests.
 
 The published manifest values `kind="connector"` (Data) and `kind="migration"` (Code), the `providers` field, and `sanka.connectors` entry points remain wire compatibility contracts. Keep the two typed execution protocols distinct. See [the transition map](docs/naming-compatibility.md).
 
 ## Execution and trust
 
-Sanka owns discovery, planning, execution, and verification. Extensions expose typed system readers and writers through the isolated extension host. Code extensions exchange validated JSON over standard input/output using `sanka-extension/v1`; diagnostics go to standard error.
+Sanka owns discovery, planning, execution, and verification. Extensions expose typed data readers and writers through the isolated extension host. Code extensions exchange validated JSON over standard input/output using `sanka-extension/v1`; diagnostics go to standard error.
 
 A code-extension request contains:
 
