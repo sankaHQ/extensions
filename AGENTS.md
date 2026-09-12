@@ -8,11 +8,13 @@ Read `docs/naming-compatibility.md` before changing published identifiers.
 
 ## Boundaries
 
-- `packages/sanka-extension-sdk` owns the canonical `sanka_extensions.data` and `sanka_extensions.code` interfaces. `packages/sanka-connector-sdk` preserves the dependency-free published data-access types; it is the unified SDK's only dependency.
+- `packages/sanka-extension-sdk` owns the canonical `sanka_extensions.data`, `.flow` and `.code` interfaces. `packages/sanka-connector-sdk` preserves the dependency-free published data-access types; it is the unified SDK's only dependency.
 - `sanka_extensions.flow` owns declarative business requests. `flow.create` has no
   execution side effects. Read `docs/flow.md` before changing its fixed reapplication
-  and activation requirements; runtime enforcement and runnable Flow packages are
-  separate from the SDK contract.
+  and activation requirements. Flow packages generate Blueprints through the
+  isolated `sanka-flow-extension/v1` protocol; native execution belongs to the
+  host. Keep static Flow discovery in `flow-marketplace.json` so old clients can
+  continue reading the Data/Code catalog.
 - Keep existing class identity across canonical and compatibility imports.
 - The SDK must not depend on Sanka's AGPL runtime, database drivers, framework
   runtimes, or provider clients.

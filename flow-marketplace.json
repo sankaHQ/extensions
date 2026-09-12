@@ -1,0 +1,9 @@
+{
+  "schema_version": "sanka-marketplace/v1",
+  "extensions": [
+    {
+      "id": "sanka/sales-quote",
+      "manifest": "packages/sanka-extension-sales-quote/extension.json"
+    }
+  ]
+}

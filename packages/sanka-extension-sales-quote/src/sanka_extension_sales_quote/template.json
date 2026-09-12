@@ -1,0 +1,17 @@
+{
+  "id": "sanka/sales-quote",
+  "revision": "1",
+  "workflow_id": "sales.quote",
+  "description": "Create one linked draft Quote when a Deal stage changes to the explicitly selected Quote stage.",
+  "trigger": {"operation": "record.updated", "object_role": "deal", "changed_field_role": "deal.stage"},
+  "condition": {"operator": "equals", "field_role": "deal.stage", "phase": "after", "selected_value": "quote_stage"},
+  "action": {
+    "operation": "record.create",
+    "object_role": "quote",
+    "fields": {"quote.status": {"selected_value": "draft_status"}, "quote.title": {"event_field_role": "deal.title", "phase": "after"}},
+    "association": {"relationship_role": "quote.deal", "record": "event_record", "required": true},
+    "identity": {"scope": "installation_workflow_action_event_record", "on_existing": "preserve", "on_missing": "conflict"}
+  },
+  "required_cases": ["no_match_away", "no_match_unchanged", "match", "retry"],
+  "boundaries": ["template_only", "explicit_existing_target_references", "generation_only", "no_external_delivery", "native_execution_and_isolation_required"]
+}

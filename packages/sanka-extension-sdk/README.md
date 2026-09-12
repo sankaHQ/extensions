@@ -14,7 +14,7 @@ from sanka_extensions import flow
 crm = flow.create(type="crm", parameters={"language": "ja"})
 ```
 
-`data` defines typed data access, records, capabilities, credentials, and registration. `flow` defines unresolved business-construction requests. `code` defines validated lifecycle requests and responses for application conversion. They share one SDK and retain distinct contracts.
+`data` defines typed data access, records, capabilities, credentials, and registration. `flow` defines unresolved requests, resolved Blueprints and the isolated generation protocol. `code` defines validated lifecycle requests and responses for application conversion. They share one SDK and retain distinct contracts.
 
 Flow definitions are immutable and serialize with `flow.encode_definition`;
 `flow.decode_definition` rejects unsupported schemas and weakened policies.

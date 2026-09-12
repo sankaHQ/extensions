@@ -14,6 +14,7 @@ PACKAGES = ROOT / "packages"
 SDK_NAME = "sanka-connector-sdk"
 EXTENSION_SDK_NAME = "sanka-extension-sdk"
 EXTENSION_NAMES = ("sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask")
+FLOW_EXTENSION_NAMES = ("sanka-extension-sales-quote",)
 HOSTED_SYSTEM_PROVIDERS = frozenset({"hubspot", "salesforce", "sendgrid"})
 
 
@@ -97,14 +98,20 @@ def main() -> int:
     if extension_sdk_project.get("dependencies") != [f"{SDK_NAME}=={sdk_project['version']}"]:
         errors.append(f"{EXTENSION_SDK_NAME} may depend only on the pinned compatibility SDK")
     extension_version = str(extension_sdk_project["version"])
-    for package in (extension_sdk, *(PACKAGES / name for name in EXTENSION_NAMES)):
+    for package in (
+        extension_sdk,
+        *(PACKAGES / name for name in (*EXTENSION_NAMES, *FLOW_EXTENSION_NAMES)),
+    ):
         own_module = package.name.replace("-", "_")
         allowed_modules: tuple[str, ...] = (own_module,)
         project = _project(package)
-        if package.name in EXTENSION_NAMES:
+        if package.name in (*EXTENSION_NAMES, *FLOW_EXTENSION_NAMES):
             allowed_modules += ("sanka_extension_sdk", "sanka_extensions")
             expected_dependency = f"{EXTENSION_SDK_NAME}=={extension_version}"
-            if project.get("dependencies") != [expected_dependency, "sanka-drf-replay==0.1.0a2"]:
+            expected_dependencies = [expected_dependency]
+            if package.name in EXTENSION_NAMES:
+                expected_dependencies.append("sanka-drf-replay==0.1.0a2")
+            if project.get("dependencies") != expected_dependencies:
                 errors.append(f"{package.name} must depend exactly on {expected_dependency}")
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
                 errors.append(f"{package.name} must own its exact executable entry point")
@@ -114,6 +121,28 @@ def main() -> int:
             ):
                 errors.append(f"missing Apache-2.0 SPDX header: {source.relative_to(ROOT)}")
             for module in _imports(source):
+                if (
+                    package.name in FLOW_EXTENSION_NAMES
+                    and module.split(".")[0] not in sys.stdlib_module_names
+                    and not _is_module_or_submodule(module, allowed_modules)
+                ):
+                    errors.append(
+                        f"Flow generation must use only stdlib and its SDK: "
+                        f"{source.relative_to(ROOT)}: {module}"
+                    )
+                if package.name in FLOW_EXTENSION_NAMES and module.split(".")[0] in {
+                    "socket",
+                    "urllib",
+                    "http",
+                    "ftplib",
+                    "smtplib",
+                    "sqlite3",
+                    "subprocess",
+                }:
+                    errors.append(
+                        f"Flow generation cannot call networks, databases or child processes: "
+                        f"{source.relative_to(ROOT)}: {module}"
+                    )
                 if module == "sanka" or module.startswith("sanka."):
                     errors.append(
                         f"extension imports the Sanka runtime in {source.relative_to(ROOT)}"

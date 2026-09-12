@@ -170,6 +170,38 @@ keys, record IDs and artifact identities are synthetic. It demonstrates the
 contract and its three scenario cases, without claiming a real source import,
 installed template, Sanka cloud field mapping, quote pricing or external delivery.
 
+## Isolated Blueprint generation protocol
+
+The SDK exposes `BlueprintRequest`, `BlueprintResponse`, `TargetIdentity`,
+`FlowCapability`, `ReferenceRequirement` and `ValueRequirement` for
+`sanka-flow-extension/v1`. A generator reads one UTF-8 JSON document from stdin
+and writes one response document to stdout. Requests and responses are limited
+to 4 MiB; duplicate keys, non-finite numbers, invalid Unicode, extra fields,
+trailing documents and unsupported schema versions fail validation.
+
+Static `kind="flow"` manifests declare the `blueprint` command, exact request
+types, reference roles, selected scalar types and `sanka-flow-blueprint/v1` output.
+Hosts discover these declarations from `flow-marketplace.json` without importing
+the package into the shared process. Existing Data/Code protocols remain separate.
+Version 1 accepts FlowDefinition template requests only. SourceSnapshot imports
+require an explicitly versioned capability before they can execute.
+
+Every request pins its ID, exact extension manifest identity, definition, target
+ID/revision, resolved existing target references and selected values. A response
+echoes the request digest and extension identity. `validate_for(request)` checks
+correlation, template provenance and the complete selected inputs retained in
+the Blueprint. Protocol success proves generation only, not native compatibility,
+permission to construct or successful activation. Exit codes are `0` for success,
+`1` for a correlated handled failure and `2` for malformed protocol input.
+
+The [Sales Quote package](../packages/sanka-extension-sales-quote/README.md)
+implements the first candidate generator, producing a draft Quote linked to its
+Deal after an explicitly selected stage transition. Its wheel depends only on
+SDK `0.1.0a3`; the Flow manifest requires CLI `>=0.2.10,<0.3`. These candidate
+versions must be reviewed and published before runtime dependencies advance.
+The SDK and Sales changes share one final candidate release: never publish the
+SDK candidate and later change the contents under the same version.
+
 ## Reapplication and user changes
 
 The executing runtime must keep an installation identity and stable logical IDs

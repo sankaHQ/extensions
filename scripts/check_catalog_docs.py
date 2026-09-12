@@ -14,6 +14,14 @@ def catalog_document(root: Path) -> str:
     catalog = json.loads((root / "marketplace.json").read_text())
     data_rows = []
     code_rows = []
+    flow_catalog = json.loads((root / "flow-marketplace.json").read_text())
+    flow_rows = []
+    for item in sorted(flow_catalog["extensions"], key=lambda item: item["id"]):
+        manifest = json.loads((root / item["manifest"]).read_text())
+        if manifest["kind"] != "flow":
+            raise ValueError("The Flow supplement may contain only Flow extensions")
+        capabilities = ", ".join(capability["type"] for capability in manifest["capabilities"])
+        flow_rows.append(f"| `{manifest['id']}` | `{capabilities}` | Blueprint generation |")
     for item in sorted(catalog["extensions"], key=lambda item: item["id"]):
         manifest = json.loads((root / item["manifest"]).read_text())
         # Published manifest kinds remain compatibility fields. Catalog sections
@@ -38,7 +46,7 @@ def catalog_document(root: Path) -> str:
         "Hosting a database yourself or using a managed service does not change its category.",
         "",
         "The available packages and their supported operations are generated from",
-        "`marketplace.json` and the extension manifests.",
+        "`marketplace.json`, `flow-marketplace.json` and the extension manifests.",
         "",
         "## Data",
         "",
@@ -54,9 +62,18 @@ def catalog_document(root: Path) -> str:
         "",
         "Migrate or reconstruct automations, triggers, actions and conditions.",
         "",
-        "There are no executable Workflow extensions in this marketplace yet.",
-        "The SDK provides the [Flow definition contract](flow.md); creating a definition",
-        "does not construct or activate a workflow.",
+        "The Flow supplement declares isolated generators for a Flow-capable host.",
+        "The current Sales Quote entry is a release candidate, pending publication.",
+        "Generating a [Blueprint](flow.md) does not construct or activate a workflow.",
+        "The target host must plan, construct inactive, verify native behavior in",
+        "isolation and obtain separate approval before activation.",
+        "",
+        "| Extension | Request type | Operation |",
+        "| --- | --- | --- |",
+        *flow_rows,
+        "",
+        "See the [Sales Quote package](../packages/sanka-extension-sales-quote/README.md)",
+        "for exact input roles, supported behavior and native acceptance requirements.",
         "",
         "## Code",
         "",

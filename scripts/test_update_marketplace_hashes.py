@@ -195,7 +195,14 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
     release = root / "dist"
     release.mkdir(parents=True)
     shutil.copy2(Path("marketplace.json"), root / "marketplace.json")
+    shutil.copy2(Path("flow-marketplace.json"), root / "flow-marketplace.json")
     packages = {
+        "sanka-extension-sales-quote": (
+            "0.1.0a1",
+            "sanka_extension_sales_quote-0.1.0a1-py3-none-any.whl",
+            "[console_scripts]\n"
+            "sanka-extension-sales-quote = sanka_extension_sales_quote.__main__:main\n",
+        ),
         "sanka-drf-replay": ("0.1.0a2", "sanka_drf_replay-0.1.0a2-py3-none-any.whl", ""),
         "sanka-extension-drf-to-flask": (
             "0.1.0a5",
@@ -249,7 +256,8 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
             else ("sanka-connector-sdk==0.1.0a12",)
             if package == "sanka-extension-sdk"
             else ("sanka-extension-sdk==0.1.0a3",)
-            if package.startswith("sanka-connector-") and package != "sanka-connector-sdk"
+            if (package.startswith("sanka-connector-") and package != "sanka-connector-sdk")
+            or package == "sanka-extension-sales-quote"
             else ()
         )
         _metadata_wheel(
@@ -318,5 +326,60 @@ def test_release_validator_rejects_invalid_release_boundaries(
         catalog = json.loads(catalog_path.read_text())
         catalog["extensions"][0]["manifest"] = "../outside.json"
         catalog_path.write_text(json.dumps(catalog))
+
+    assert any(expected in error for error in validate_release(root, release))
+
+
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        ("dependency", "Sales Quote must depend only on its exact Extension SDK"),
+        ("entry_point", "Sales Quote wheel must have only its exact executable"),
+        ("capability", "extension.json does not match its v2 marketplace manifest"),
+        ("legacy_catalog", "marketplace.json does not match"),
+        ("path", "outside the marketplace snapshot"),
+        ("closure", "complete wheel dependency closure"),
+    ],
+)
+def test_flow_release_validator_rejects_invalid_release_boundaries(
+    tmp_path: Path, case: str, expected: str
+) -> None:
+    root, release = _release_snapshot(tmp_path)
+    package = "sanka-extension-sales-quote"
+    filename = "sanka_extension_sales_quote-0.1.0a1-py3-none-any.whl"
+    if case in {"dependency", "entry_point"}:
+        wheel = _metadata_wheel(
+            release,
+            name=package,
+            version="0.1.0a1",
+            filename=filename,
+            requirements=("sanka-extension-sdk==0.1.0a3",)
+            + (("requests==2.0",) if case == "dependency" else ()),
+            entry_points=(
+                "[console_scripts]\n"
+                "sanka-extension-sales-quote = sanka_extension_sales_quote.__main__:main\n"
+                + ("[sanka.flows]\nsales = attacker:hook\n" if case == "entry_point" else "")
+            ),
+        )
+        _set_manifest_hash(root, package, wheel)
+    elif case in {"legacy_catalog", "path"}:
+        filename = "marketplace.json" if case == "legacy_catalog" else "flow-marketplace.json"
+        catalog_path = root / filename
+        catalog = json.loads(catalog_path.read_text())
+        if case == "legacy_catalog":
+            catalog["extensions"].append(
+                {"id": "sanka/sales-quote", "manifest": f"packages/{package}/extension.json"}
+            )
+        else:
+            catalog["extensions"][0]["manifest"] = "../outside.json"
+        catalog_path.write_text(json.dumps(catalog))
+    else:
+        manifest_path = root / "packages" / package / "extension.json"
+        manifest = json.loads(manifest_path.read_text())
+        if case == "capability":
+            manifest["capabilities"][0]["source_snapshot"] = True
+        else:
+            manifest["wheels"].pop()
+        manifest_path.write_text(json.dumps(manifest))
 
     assert any(expected in error for error in validate_release(root, release))

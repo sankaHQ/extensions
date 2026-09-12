@@ -1,83 +1,123 @@
 # Releasing Sanka extension packages
 
-## Current marketplace release
+## Current candidate
 
-Publish `extensions-v0.1.0a19` from the exact reviewed merge using `publish.yml`.
-This bundle adds executable Flow contracts while preserving admitted nested-create
-validation, rollback, and replay database evidence in native DRF-to-FastAPI output.
-It includes SDK 0.1.0a3, compatibility SDK 0.1.0a12, data-access extensions
-0.1.0a13, DRF-to-FastAPI 0.1.0a7, shared DRF replay 0.1.0a2, and
-DRF-to-Flask 0.1.0a5. The implementing package versions change to consume the
-new SDK without replacing previously published artifacts.
-Its manifests must reference the new tag and match every staged wheel hash;
-All previously published release tags remain immutable. Run `make check` and
-`make update-marketplace-hashes` before review. After publication, verify the
-GitHub artifact digests and install the SDK and all extensions with the published CLI.
-Do not describe the default marketplace migration path as verified until those
-clean installations succeed.
+Publish one `extensions-v0.1.0a19` GitHub prerelease from the exact reviewed merged
+source, after both the Flow contracts and Sales generator changes have landed.
+The candidate includes these independently versioned packages:
 
-## Historical standalone package procedure
+| Package | Version |
+| --- | --- |
+| Compatibility SDK: `sanka-connector-sdk` | 0.1.0a12, unchanged |
+| Unified SDK: `sanka-extension-sdk` | 0.1.0a3 |
+| Sales Quote generator | 0.1.0a1 |
+| Five Data extensions | 0.1.0a13 |
+| DRF-to-FastAPI | 0.1.0a7 |
+| DRF-to-Flask | 0.1.0a5 |
+| DRF replay dependency | 0.1.0a2, unchanged |
 
-All six packages share one version and one reviewed source tag. Publishing is
-manual; merges and tags do not upload packages automatically.
+Do not publish the intermediate Flow-contract SDK a3 and then change its bytes
+when Sales lands. Review and publish their final combined SDK once. Existing
+tags, package versions and asset bytes stay immutable. The current distribution
+channel is GitHub release wheels; this workflow does not publish to PyPI or
+TestPyPI, and it has no standalone publisher flags or bootstrap inputs.
 
-## Package order
+## Preparation and review
 
-Publish `sanka-connector-sdk` first, then `sanka-extension-sdk`, then implementing
-extensions. Every new extension depends on the unified SDK; its compatibility
-dependency is included in every manifest wheel set.
+Use Python 3.12 and the locked workspace. Run focused tests during development;
+finish code review, then let `sanka-pr-flow open` own the final `make check` and
+`make build-release` gates with the workspace resource guard. `make check` covers
+the staged publisher's ordering, conflicting artifacts and partial-retry tests.
 
-## Local preparation
+`make build-release` builds 194 wheels into `dist/` and validates their metadata,
+dependency closures and immutable manifest hashes. It does not publish. After
+intentional package-byte changes, prepare and review updated hashes with
+`make update-marketplace-hashes`; never rewrite reviewed hashes during publishing.
+
+From the candidate checkout, inspect the exact publication inventory without
+contacting GitHub or creating a release:
 
 ```bash
-uv sync --frozen --all-packages
-make check
-make build-release
-uv run python scripts/check_release_tag.py v0.1.0a12 tag
+uv run python scripts/publish_release.py \
+  --tag extensions-v0.1.0a19 --revision <full-reviewed-source-sha> --dist dist
 ```
 
-`make build-release` writes per-package wheels and source distributions under
-`release/packages/`, a combined set under `release/all/`, the exact source
-commit, and SHA-256 hashes. It does not publish anything.
+The plan contains 194 wheels and ten JSON assets: two catalogs and eight uniquely
+named package manifests. Its digest binds the complete asset inventory to the
+selected source commit. The historical family-version `check_release_tag.py`
+script is not the validator for this independently versioned marketplace bundle.
 
-## Trusted publishing setup
+## Authorized publication
 
-Each PyPI and TestPyPI project must trust this exact identity:
+Land the exact approved heads with the workspace `sanka-pr-flow`. Reconcile any
+stacked branch before its final review. Obtain separate publication authorization
+for the reviewed release, pin the final merged source SHA, and confirm the new
+tag/release do not already exist. If they exist, inspect their exact identities
+and partial state; do not replace them or blindly repeat tag creation.
 
-- owner: `sankaHQ`
-- repository: `extensions`
-- workflow: `publish.yml`
-- environment: `pypi` or `testpypi`
+Create the annotated a19 tag at that selected SHA and push it without force.
+Dispatch the canonical workflow at the tag, with no additional inputs:
 
-Create pending trusted publishers for projects that do not exist yet. Keep the
-GitHub environments restricted to version tags. No long-lived PyPI token
-belongs in repository secrets or local files.
+```bash
+gh workflow run publish.yml --repo sankaHQ/extensions --ref extensions-v0.1.0a19
+```
 
-Keep `SANKA_EXTENSIONS_PUBLISH_ENABLED` and
-`SANKA_EXTENSIONS_BOOTSTRAP_ENABLED` absent or `false` outside an explicitly
-approved publication window. The workflow refuses to upload without the
-matching variable set to `true`.
+The workflow checks out the exact selected commit, runs locked validation and
+builds the immutable artifacts. Its publishing job checks out the same commit
+and restores the artifacts to their original paths. The source must remain
+clean. Publishing requires the GitHub Actions tag/repository/SHA identity to
+match, and the remote tag must resolve to that same commit before each stage.
+Tag-scoped workflow concurrency prevents competing publications.
 
-## Publication gate
+## Verified publication order
 
-1. Merge the exact reviewed commit through `sanka-pr-flow`.
-2. Create and push `v<version>` only after authorized-human approval of the
-   commit and local artifact hashes.
-3. Dispatch **Publish extension packages** against that exact tag, using
-   TestPyPI first.
-4. Clean-install the SDK and every extension from TestPyPI; verify entry-point
-   discovery and provider-specific imports.
-5. Obtain explicit approval for the production artifact hashes, then dispatch
-   the PyPI target. PyPI versions are immutable.
-6. Clean-install from PyPI and verify `sanka-connector-sdk` has zero runtime
-   dependencies and each extension installs only its own client/driver stack.
+`scripts/publish_release.py --publish` runs only through the canonical tag
+workflow. It creates one public prerelease with a source/inventory marker and
+publishes in these stages:
 
-The bootstrap targets publish one package for first-project creation. Bootstrap
-the SDK before any extension and use the exact confirmation string shown by the
-workflow input.
+1. The unchanged compatibility SDK. Existing same-version SDK assets across
+   prior releases must match the reviewed bytes.
+2. Unified SDK a3. Both SDK assets are downloaded from their public URLs and
+   independently checked for exact size and SHA-256. A fresh isolated Python 3.12
+   environment installs only those downloaded, hash-pinned wheels with no index
+   or dependency fallback. Import, compatibility identity and Flow protocol
+   checks must pass before any later stage can upload.
+3. The replay package and all 183 locked third-party prerequisite wheels.
+4. The eight implementing Sales, Data and Code extension wheels.
+5. The two catalogs and eight uniquely named manifests, after every advertised
+   wheel is available.
+
+Each stage requires complete GitHub metadata readback and independent public
+download/hash verification. The completed release has exactly 204 assets. An
+unknown asset, conflicting SDK version, mismatched digest/size, changed source
+tag, changed release identity or violated dependency order stops publication.
+
+## Partial release recovery and completion
+
+An interrupted run can leave an incomplete public prerelease. Its release body
+states that completion requires the matching workflow and verified asset set.
+Retry the same workflow at the same immutable tag. The helper accepts only the
+same source/inventory marker and existing matching assets, downloads and verifies
+them again, repeats the SDK installation proof, and uploads only missing assets.
+An uncertain upload is resolved by readback on the next run. No asset is deleted
+or overwritten; `--clobber`, tag movement and release recreation are not recovery.
+
+The workflow retains `publication-evidence-<tag>-<attempt>` with the selected SHA,
+inventory digest, verified stages and SDK installation result. Only an evidence
+record with `outcome="complete"`, a successful exact-SHA workflow run and complete
+public readback establish publication. A failed or interrupted attempt can retain
+the last verified stage and must not be described as a completed release.
+
+After the workflow, independently read the exact tag/run/release, download the
+public wheels and run `scripts/check_release_artifacts.py <download-directory>`
+from the final release checkout. Compare both catalogs and all package manifests
+with the reviewed source. Fresh-install the published extension closures through
+the shared CLI and verify Data/Code entry points and the real Sales generator.
+SDK publication must precede runtime source/dependency upgrades. SDK generation
+or package publication alone does not prove native execution or activate a Flow.
 
 ## Converter changes
 
-Before releasing `sanka-extension-drf-to-fastapi`, complete the exact-commit
-[converter regression check](converter-regression.md) in the private benchmark
-repository and link its successful private run in the release review.
+For changed DRF-to-FastAPI behavior, follow the exact-commit private
+[converter regression check](converter-regression.md) and link its successful
+workflow in the release evidence. Keep benchmark fixtures and reports private.
