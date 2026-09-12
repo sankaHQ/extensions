@@ -196,7 +196,7 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
     release.mkdir(parents=True)
     shutil.copy2(Path("marketplace.json"), root / "marketplace.json")
     packages = {
-        "sanka-drf-replay": ("0.1.0a1", "sanka_drf_replay-0.1.0a2-py3-none-any.whl", ""),
+        "sanka-drf-replay": ("0.1.0a2", "sanka_drf_replay-0.1.0a2-py3-none-any.whl", ""),
         "sanka-extension-drf-to-flask": (
             "0.1.0a5",
             "sanka_extension_drf_to_flask-0.1.0a5-py3-none-any.whl",
