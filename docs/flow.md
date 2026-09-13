@@ -21,8 +21,9 @@ an extension with that type is installed. Parameters contain JSON configuration;
 credentials belong in separately configured data endpoints managed by the runtime.
 
 The SDK also describes captured sources, resolved Blueprints and required scenarios.
-These contracts do not add a Flow marketplace package, executable protocol/manifest
-kind, CLI command or Setup Wizard integration. Published code/data contracts remain unchanged.
+These contracts do not add a Flow marketplace package, CLI command or Setup Wizard
+integration. SDK a4 adds the generator protocol described below; native execution
+and manifest admission remain runtime responsibilities. Published code/data contracts remain unchanged.
 Runtimes must reject unsupported Flow execution rather than treating a definition
 as a code-migration request or ignoring its policies.
 
@@ -219,9 +220,9 @@ extension. SDK publication, runtime upgrades and cloud deployment remain separat
 release operations.
 
 
-## Creation triggers and optional conditions (v2 candidate)
+## Creation triggers and optional conditions (v2)
 
-The `0.1.0a3` SDK candidate adds `sanka-flow-blueprint/v2`. Existing v1
+The published `0.1.0a3` SDK adds `sanka-flow-blueprint/v2`. Existing v1
 artifacts and their canonical digests remain unchanged. V1 keeps its update,
 condition, action shape; v2 artifacts must not be passed to a v1-only compiler.
 V2 workflow specs carry `schema_version: sanka-flow-graph/v2` and support exactly:
@@ -264,3 +265,40 @@ Save/reload and inactive-draft behavior. No hosted credentials, provider clients
 automation executor or separate user-facing installation/history UI belongs in
 this SDK. Publish the SDK before advancing runtime pins or wiring an executable
 extension through that compiler.
+
+## Isolated generator protocol (SDK a4 candidate)
+
+`sanka_extensions.flow.protocol` defines `sanka-flow-extension/v1`: one typed
+`BlueprintRequest` on stdin and one `BlueprintResponse` on stdout. Its sole operation
+is `blueprint`. Apply, activation, source import and code migration are rejected.
+The SDK provides message types and validation; it does not start a process or
+perform native writes. `flow.create` retains its existing side-effect-free behavior.
+
+A static `FlowCapability` declares the selector, exact template artifact
+ID/revision/digest, requested Blueprint schema (v1 or v2), reference roles and
+scalar value types. Hosts validate the request against this verified manifest before
+invoking extension code. Requests contain that template identity, the verified
+extension identity, exact existing target references, explicit values, definition
+parameters, and a target ID/revision/capability snapshot. All these inputs are
+included in the canonical request digest. Capabilities must come from independent
+host validation, not from the extension or the client requesting generation.
+
+After decoding a response, hosts must call `response.validate_for(request)`.
+Constructing `BlueprintResponse.success` calls the same check. It rejects a changed
+request ID/digest, extension or template identity, schema, reference set, target,
+values or definition parameters. It also requires the target's explicit capabilities
+to cover the Blueprint and rejects blocking unsupported findings for **both**
+Blueprint versions. An error response carries a typed failure and no Blueprint.
+
+Messages are finite UTF-8 JSON objects bounded to 4 MiB. Duplicate keys, unknown or
+missing fields, invalid Unicode, nonfinite numbers, mixed success/error bodies and
+unknown versions are rejected. Selected references must be target-scoped existing
+keys; this template protocol does not create reference inputs or import a source.
+The host still validates actual native object/property/relationship types and
+rechecks target revisions before planning and mutation.
+
+Successful generation proves only that an artifact satisfies this boundary. It
+does not prove the generator is trustworthy, the target supports claimed behavior,
+or scenarios have executed. Runtime isolation, verified wheel and environment
+provenance, durable record identity and native scenario readback remain mandatory.
+Process/environment isolation must not be described as an OS or network sandbox.

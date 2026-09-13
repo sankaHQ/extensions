@@ -4,12 +4,13 @@ Apache-2.0 interfaces for building Sanka Extensions with Python 3.12+.
 
 ```bash
 python -m pip install \
-  https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a18/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
-  https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a18/sanka_extension_sdk-0.1.0a2-py3-none-any.whl
+  https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a19/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
+  https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a19/sanka_extension_sdk-0.1.0a3-py3-none-any.whl
 ```
 
-This installs released SDK `0.1.0a2`. The v2 Flow contract in this checkout is an
-unpublished `0.1.0a3` candidate; use the repository uv workspace to develop it.
+This installs released SDK `0.1.0a3` with Blueprint v2. The Flow generator protocol
+in this checkout is an unpublished `0.1.0a4` candidate; use the repository uv
+workspace to develop it.
 
 ```python
 from sanka_extensions.data import ExtensionRegistration, DataReader, DataWriter
