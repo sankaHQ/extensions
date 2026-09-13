@@ -2,11 +2,10 @@
 
 ## Current candidate
 
-`extensions-v0.1.0a22` prepares DRF-to-FastAPI 0.1.0a10 with DRF 3.17
-BigIntegerField support, including 64-bit database columns and the source
-serializer's number/string representation setting. It follows the isolated
-project Python support in PR #44 / marketplace a21; merge that dependency first.
-The SDK and other implementing packages remain unchanged.
+`extensions-v0.1.0a23` prepares DRF-to-FastAPI 0.1.0a11 with stock generic
+CRUD view support. Custom handlers, querysets, permission rules and middleware
+remain subject to explicit compatibility checks. The SDK and other implementing
+packages remain unchanged.
 
 ## Preparation and review
 
@@ -19,7 +18,7 @@ manifest URLs and hashes. All previous release tags and artifacts remain immutab
 
 Merge the exact human-approved head using `sanka-pr-flow`. Publication requires
 user authorization separately from preparing the candidate. Create and push
-`extensions-v0.1.0a22` at the reviewed merge, then dispatch `publish.yml` at that tag.
+`extensions-v0.1.0a23` at the reviewed merge, then dispatch `publish.yml` at that tag.
 The workflow rejects every other tag. This repository currently publishes GitHub
 release wheels; it does not publish these versions to PyPI.
 
@@ -30,7 +29,7 @@ that the existing `sdk-v0.1.0a4` tag still identifies its reviewed source and th
 both SDK wheels in the bundle are byte-identical to their published assets.
 The SDK verification job is read-only. It does not move the tag or re-upload
 unchanged SDK packages. Only after verification succeeds may the marketplace
-job publish implementing packages under `extensions-v0.1.0a22`.
+job publish implementing packages under `extensions-v0.1.0a23`.
 
 A changed or missing SDK tag, local wheel or public asset blocks publication.
 SDK changes require a separately reviewed version and publication before the
