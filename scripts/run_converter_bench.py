@@ -35,6 +35,7 @@ CONVERTER_SOURCES = (
     EXTENSION / "src",
     ROOT / "packages/sanka-extension-drf-to-flask/src",
     ROOT / "packages/sanka-extension-sdk/src",
+    ROOT / "packages/sanka-connector-sdk/src",
     ROOT / "packages/sanka-drf-replay/src",
 )
 

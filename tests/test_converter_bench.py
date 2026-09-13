@@ -106,7 +106,7 @@ def test_converter_imports_with_only_reviewed_source_paths(tmp_path: Path) -> No
     environment = gate.clean_environment()
     environment["PYTHONPATH"] = gate.converter_pythonpath()
     result = subprocess.run(
-        [sys.executable, "-S", "-P", "-c", "import sanka_extension_drf_to_fastapi.adapter"],
+        [sys.executable, "-S", "-P", "-c", "import sanka_extension_drf_to_fastapi.__main__"],
         cwd=tmp_path,
         env=environment,
         text=True,
