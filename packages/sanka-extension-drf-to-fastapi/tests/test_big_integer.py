@@ -116,6 +116,8 @@ def test_big_integer_generated_http_and_database_parity(
         settings.read_text().replace("models.AutoField", "models.BigAutoField")
         + f"\nREST_FRAMEWORK['COERCE_BIGINT_TO_STRING'] = {coerce_to_string!r}\n"
     )
+    apps = project / "inventory/apps.py"
+    apps.write_text(apps.read_text().replace("models.AutoField", "models.BigAutoField"))
     models = project / "inventory/models.py"
     models.write_text(
         models.read_text().replace("models.PositiveIntegerField", "models.BigIntegerField")
