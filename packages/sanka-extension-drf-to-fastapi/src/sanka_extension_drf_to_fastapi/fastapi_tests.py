@@ -208,7 +208,7 @@ def _int_sample(spec: dict[str, Any]) -> int:
 
 def _value_expr(spec: dict[str, Any]) -> str:
     kind = str(spec.get("kind") or "")
-    if kind == "integer" or kind == "related_pk":
+    if kind in {"integer", "big_integer", "related_pk"}:
         return repr(_int_sample(spec))
     if kind == "decimal":
         places = int(spec.get("decimal_places") or 2)
