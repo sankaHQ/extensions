@@ -88,6 +88,13 @@ assert reason.code == 'SANKA_DRF_GENERIC_INITKWARGS_UNSUPPORTED'
 class CustomHead(Base):
     def head(self, request): pass
 assert _generic_view_adaptation_reason(CustomHead, CustomHead.as_view()) is not None
+class CustomPagination(Base):
+    def get_paginated_response(self, data): return data
+reason = _generic_view_adaptation_reason(CustomPagination, CustomPagination.as_view())
+assert 'get_paginated_response' in reason.message
+class CustomSetup(Base):
+    def setup(self, request, *args, **kwargs): pass
+assert _generic_view_adaptation_reason(CustomSetup, CustomSetup.as_view()) is not None
 class WrongMethod(Base):
     post = generics.ListAPIView.get
 assert _generic_actions(WrongMethod) is None

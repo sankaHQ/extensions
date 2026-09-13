@@ -2350,11 +2350,26 @@ def _generic_view_adaptation_reason(
         "check_object_permissions",
         "check_throttles",
         "handle_exception",
+        "get_exception_handler",
+        "get_content_negotiator",
+        "perform_content_negotiation",
+        "determine_version",
+        "permission_denied",
+        "throttled",
+        "http_method_not_allowed",
+        "__init__",
+        "setup",
         "options",
     )
     overrides = [
         name for name in hooks if getattr(view_class, name) is not getattr(views.APIView, name)
     ]
+    generics = importlib.import_module("rest_framework.generics")
+    overrides.extend(
+        name
+        for name in ("paginate_queryset", "get_paginated_response")
+        if getattr(view_class, name) is not getattr(generics.GenericAPIView, name)
+    )
     overrides.extend(
         name for name in ("head", "trace") if callable(getattr(view_class, name, None))
     )
