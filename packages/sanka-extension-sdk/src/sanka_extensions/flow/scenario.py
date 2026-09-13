@@ -25,6 +25,7 @@ from sanka_extensions.flow.graph import AssociationMapping, FieldMapping
 class ScenarioEvent(WireRecord):
     id: str
     record_id: str
+    operation: Literal["record.updated", "record.created"]
     _before: FrozenJson = field(repr=False)
     _after: FrozenJson = field(repr=False)
 
@@ -34,15 +35,20 @@ class ScenarioEvent(WireRecord):
         record_id: str,
         before: dict[str, JsonValue],
         after: dict[str, JsonValue],
+        operation: Literal["record.updated", "record.created"] = "record.updated",
     ) -> None:
         identifier(id, "scenario event id")
         identifier(record_id, "scenario record_id")
+        choice(operation, ("record.updated", "record.created"), "event operation")
         if type(before) is not dict or type(after) is not dict:
             raise ValueError("event before and after must be property-reference objects")
         for key in before.keys() | after.keys():
             identifier(key, "scenario property reference")
+        if operation == "record.created" and before:
+            raise ValueError("record.created event cannot have before values")
         object.__setattr__(self, "id", id)
         object.__setattr__(self, "record_id", record_id)
+        object.__setattr__(self, "operation", operation)
         object.__setattr__(self, "_before", FrozenJson(before))
         object.__setattr__(self, "_after", FrozenJson(after))
 
@@ -55,16 +61,22 @@ class ScenarioEvent(WireRecord):
         return cast(dict[str, JsonValue], self._after.value)
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return {
+        result: dict[str, JsonValue] = {
             "id": self.id,
             "record_id": self.record_id,
             "before": self.before,
             "after": self.after,
         }
+        if self.operation != "record.updated":
+            result["operation"] = self.operation
+        return result
 
     @classmethod
     def from_dict(cls, value: object) -> Self:
-        return cls(**object_fields(value, {"id", "record_id", "before", "after"}, "scenario event"))
+        fields = {"id", "record_id", "before", "after"}
+        if type(value) is dict and "operation" in value:
+            fields.add("operation")
+        return cls(**object_fields(value, fields, "scenario event"))
 
 
 @dataclass(frozen=True, slots=True)
