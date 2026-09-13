@@ -1848,6 +1848,8 @@ def _walk_patterns(
             if (value := _qualified_name(item))
         )
         actions = getattr(callback, "actions", None)
+        if actions is None:
+            actions = _generic_actions(view_class)
         methods = _route_methods(view_class, actions)
         if not supported:
             result.risks.append(
@@ -2062,6 +2064,14 @@ def _native_route_support(
         if all(root.path != path for root in result.api_roots):
             result.api_roots.append(ApiRootIR(path=path, links=links))
         return True, (), {}
+    generics = importlib.import_module("rest_framework.generics")
+    generic_view = issubclass(view_class, generics.GenericAPIView) and not hasattr(
+        callback, "actions"
+    )
+    if generic_view:
+        generic_reason = _generic_view_adaptation_reason(view_class, callback)
+        if generic_reason is not None:
+            return False, (*middleware_reasons, generic_reason), {}
     if actions is None:
         return disqualify(
             "SANKA_DRF_VIEW_KIND_UNSUPPORTED",
@@ -2077,13 +2087,13 @@ def _native_route_support(
             "Custom or unsupported viewset actions are present: " + ", ".join(unsupported_actions),
         )
     viewsets = importlib.import_module("rest_framework.viewsets")
-    if not issubclass(view_class, viewsets.ModelViewSet):
+    if not generic_view and not issubclass(view_class, viewsets.ModelViewSet):
         return disqualify(
             "SANKA_DRF_VIEWSET_KIND_UNSUPPORTED",
             "view-kind",
             f"{view_class.__module__}.{view_class.__qualname__} is not a ModelViewSet.",
         )
-    overrides = _viewset_overrides(view_class)
+    overrides = _viewset_overrides(view_class, allow_missing=generic_view)
     operation_overrides = [name for name in overrides if name in _OPERATION_OVERRIDES]
     if "update" in operation_overrides and "partial_update" not in operation_overrides:
         operation_overrides.append("partial_update")
@@ -2271,7 +2281,109 @@ def _custom_lookup_adaptation_reason(
     return None
 
 
-def _viewset_overrides(view_class: type[Any]) -> tuple[str, ...]:
+def _generic_actions(view_class: type[Any]) -> dict[str, str] | None:
+    """Map only stock concrete GenericAPIView HTTP handlers to CRUD operations.
+
+    Identity checks deliberately reject custom get/post wrappers, even when a
+    method name resembles a standard DRF operation.
+    """
+    generics = importlib.import_module("rest_framework.generics")
+    concrete = {
+        "CreateAPIView": {"post": "create"},
+        "ListAPIView": {"get": "list"},
+        "RetrieveAPIView": {"get": "retrieve"},
+        "DestroyAPIView": {"delete": "destroy"},
+        "UpdateAPIView": {"put": "update", "patch": "partial_update"},
+        "ListCreateAPIView": {"get": "list", "post": "create"},
+        "RetrieveUpdateAPIView": {"get": "retrieve", "put": "update", "patch": "partial_update"},
+        "RetrieveDestroyAPIView": {"get": "retrieve", "delete": "destroy"},
+        "RetrieveUpdateDestroyAPIView": {
+            "get": "retrieve",
+            "put": "update",
+            "patch": "partial_update",
+            "delete": "destroy",
+        },
+    }
+    if not issubclass(view_class, generics.GenericAPIView):
+        return None
+    handlers = {
+        (method, getattr(getattr(generics, name), method)): action
+        for name, methods in concrete.items()
+        for method, action in methods.items()
+    }
+    actions: dict[str, str] = {}
+    for method in getattr(view_class, "http_method_names", ()):
+        handler = getattr(view_class, method, None)
+        if method in {"head", "options", "trace"} or handler is None:
+            continue
+        action = handlers.get((method, handler))
+        if action is None:
+            return None
+        actions[method] = action
+    return actions or None
+
+
+def _generic_view_adaptation_reason(
+    view_class: type[Any], callback: Any
+) -> RouteAdaptationReason | None:
+    views = importlib.import_module("rest_framework.views")
+    # Per-URL constructor overrides must not be lost when reading class-level
+    # queryset, serializer, permissions or pagination configuration.
+    if getattr(callback, "view_initkwargs", None) or getattr(callback, "initkwargs", None):
+        return _adaptation_reason(
+            "SANKA_DRF_GENERIC_INITKWARGS_UNSUPPORTED",
+            "view-configuration",
+            "Generic view as_view() overrides require manual adaptation.",
+        )
+    hooks = (
+        "dispatch",
+        "initial",
+        "initialize_request",
+        "finalize_response",
+        "get_authenticators",
+        "get_permissions",
+        "get_throttles",
+        "get_parsers",
+        "get_renderers",
+        "perform_authentication",
+        "check_permissions",
+        "check_object_permissions",
+        "check_throttles",
+        "handle_exception",
+        "get_exception_handler",
+        "get_content_negotiator",
+        "perform_content_negotiation",
+        "determine_version",
+        "permission_denied",
+        "throttled",
+        "http_method_not_allowed",
+        "__init__",
+        "setup",
+        "options",
+    )
+    overrides = [
+        name for name in hooks if getattr(view_class, name) is not getattr(views.APIView, name)
+    ]
+    generics = importlib.import_module("rest_framework.generics")
+    overrides.extend(
+        name
+        for name in ("paginate_queryset", "get_paginated_response")
+        if getattr(view_class, name) is not getattr(generics.GenericAPIView, name)
+    )
+    overrides.extend(
+        name for name in ("head", "trace") if callable(getattr(view_class, name, None))
+    )
+    if overrides or _generic_actions(view_class) is None:
+        return _adaptation_reason(
+            "SANKA_DRF_GENERIC_HANDLERS_UNSUPPORTED",
+            "view-handlers",
+            "Generic view custom request handlers require manual adaptation"
+            + (": " + ", ".join(overrides) if overrides else "."),
+        )
+    return None
+
+
+def _viewset_overrides(view_class: type[Any], *, allow_missing: bool = False) -> tuple[str, ...]:
     generics = importlib.import_module("rest_framework.generics")
     mixins = importlib.import_module("rest_framework.mixins")
     expected = {
@@ -2290,7 +2402,10 @@ def _viewset_overrides(view_class: type[Any]) -> tuple[str, ...]:
         "filter_queryset": generics.GenericAPIView.filter_queryset,
     }
     return tuple(
-        name for name, func in expected.items() if getattr(view_class, name, None) is not func
+        name
+        for name, func in expected.items()
+        if getattr(view_class, name, None) is not func
+        and not (allow_missing and not hasattr(view_class, name))
     )
 
 
@@ -2668,7 +2783,10 @@ def _view_auth_support(view_class: type[Any], model: Any) -> ViewAuthIR | None:
     permissions_module = importlib.import_module("rest_framework.permissions")
     mixins = importlib.import_module("rest_framework.mixins")
     permissions = list(view_class.permission_classes)
-    create_overridden = view_class.perform_create is not mixins.CreateModelMixin.perform_create
+    create_overridden = (
+        getattr(view_class, "perform_create", mixins.CreateModelMixin.perform_create)
+        is not mixins.CreateModelMixin.perform_create
+    )
     if all(item is permissions_module.AllowAny for item in permissions):
         if create_overridden:
             return None

@@ -58,6 +58,37 @@ the anonymous and the authorized variants from the installed DRF; the runtime ch
 between them per request. Unsupported methods answer DRF's `405 {"detail": "Method
 \"X\" not allowed."}` with the `Allow` header in `http_method_names` order.
 
+## Generic CRUD views
+
+Stock `CreateAPIView`, `ListAPIView`, `RetrieveAPIView`, `DestroyAPIView`,
+`UpdateAPIView`, `ListCreateAPIView`, `RetrieveUpdateAPIView`,
+`RetrieveDestroyAPIView`, and `RetrieveUpdateDestroyAPIView` use the same native
+CRUD generator as supported ModelViewSets. The scan maps each original HTTP method
+to its CRUD operation and preserves `http_method_names` restrictions. Serializer,
+authentication, pagination, queryset, and middleware checks still apply.
+
+Only the actual stock DRF handler functions qualify. Custom HTTP handlers,
+authentication/permission hooks, and `as_view()` configuration overrides require
+manual adaptation; they are never silently replaced with default CRUD. A view with
+custom `get_queryset`, membership permissions, session authentication, throttling,
+or serializer writes is not made compatible merely by inheriting a generic view.
+
+### Remaining compatibility work
+
+The generic-view foundation does not yet convert an application with all of these
+patterns. Each next stage requires source/generated response and database parity:
+
+1. Represent URL-scoped and member-scoped querysets, including parent/child object
+   lookups; prove cross-member requests cannot read or mutate another member's data.
+2. Preserve authentication order, token issuance, session/CSRF behavior, and rate
+   limits, including anonymous, invalid-token, forbidden, and throttled responses.
+3. Carry over membership additions/removals, serializer context writes, duplicate
+   validation, computed fields, and transaction/rollback behavior.
+4. Translate configured CORS and static-file middleware behavior explicitly. Do not
+   remove middleware from the compatibility check without implementing its behavior.
+5. Verify the complete repository flow on the released converter, then update the
+   hosted worker's immutable converter pin and test GitHub pull-request delivery.
+
 ## List semantics and datetime fields
 
 The native envelope covers DRF's generic list machinery: `CursorPagination` subclasses

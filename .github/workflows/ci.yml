@@ -51,7 +51,7 @@ jobs:
       - run: make build-release
 
   modern-drf:
-    name: Django 6 and DRF bigint conversion parity
+    name: Django 6 DRF conversion parity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,4 +64,4 @@ jobs:
       - name: Install the declared modern source framework versions
         run: uv pip install 'django==6.0.6' 'djangorestframework==3.17.1'
       - name: Compare real source and generated HTTP responses and database effects
-        run: uv run --no-sync python -m pytest packages/sanka-extension-drf-to-fastapi/tests/test_big_integer.py
+        run: uv run --no-sync python -m pytest packages/sanka-extension-drf-to-fastapi/tests/test_big_integer.py packages/sanka-extension-drf-to-fastapi/tests/test_generic_views.py
