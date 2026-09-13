@@ -217,3 +217,50 @@ existing domain services, including the current app-builder apply boundary.
 Implement and verify runtime enforcement before advertising a runnable Flow
 extension. SDK publication, runtime upgrades and cloud deployment remain separate
 release operations.
+
+
+## Creation triggers and optional conditions (v2 candidate)
+
+The `0.1.0a3` SDK candidate adds `sanka-flow-blueprint/v2`. Existing v1
+artifacts and their canonical digests remain unchanged. V1 keeps its update,
+condition, action shape; v2 artifacts must not be passed to a v1-only compiler.
+V2 workflow specs carry `schema_version: sanka-flow-graph/v2` and support exactly:
+
+- one `record.created` trigger with empty `changed_fields`, or one
+  `record.updated` trigger watching at least one exact property reference;
+- an optional `equals` condition, with false meaning skip;
+- one `record.create` action with explicit fields, associations and record identity.
+
+A direct graph has one `always` edge from trigger to action. A conditional graph
+has `always` from trigger to condition and `true` from condition to action.
+Branches, cycles, additional actions and unknown operations are rejected.
+Creation triggers cannot read before-state fields or specify watched changes.
+
+V2 Blueprints include a canonical `required_capabilities` list derived from the
+resource kinds, graph versions, operations, associations and record-identity
+policy. A caller cannot remove a capability from the serialized artifact. The
+host must call `blueprint.require_supported(capabilities=frozenset(...))` with
+its independently supported features **before planning or mutation**. Omitting
+capabilities rejects v2. This check does not establish that a claimed capability
+works: the native compiler and executor require their own acceptance evidence.
+The shared runtime's structural Blueprint port expects the host to perform this
+validation and bind the capability observation into the plan.
+
+A creation scenario event includes `operation: record.created`, empty `before`,
+and explicit `after` values. An omitted operation means `record.updated`,
+preserving existing event serialization. Match and retry events must agree with
+the trigger operation. All three required cases remain mandatory. For an
+unconditional creation workflow, no-match uses an update event as a negative
+control; it cannot claim that a creation event produces no record. Retry repeats
+the identical event and still expects exactly one created record. Verification
+must use native execution and record readback; parsing a fixture is not proof.
+
+The synthetic creation fixture in
+`packages/sanka-extension-sdk/tests/fixtures/synthetic_sales_created_estimate_blueprint.json`
+shows the two-node Deal-created → Estimate pattern. Its references and provenance
+are synthetic, not an installed extension or live native mapping. The existing
+native Workflows compiler is the intended hosted target; it must retain normal
+Save/reload and inactive-draft behavior. No hosted credentials, provider clients,
+automation executor or separate user-facing installation/history UI belongs in
+this SDK. Publish the SDK before advancing runtime pins or wiring an executable
+extension through that compiler.

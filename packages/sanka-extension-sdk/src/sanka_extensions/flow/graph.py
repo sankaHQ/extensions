@@ -172,15 +172,17 @@ class RecordIdentity(WireRecord):
 @dataclass(frozen=True, slots=True)
 class Trigger(WireRecord):
     object_ref: str
-    changed_fields: tuple[str, ...]
-    operation: Literal["record.updated"] = "record.updated"
+    changed_fields: tuple[str, ...] = ()
+    operation: Literal["record.updated", "record.created"] = "record.updated"
 
     def __post_init__(self) -> None:
-        choice(self.operation, ("record.updated",), "trigger operation")
+        choice(self.operation, ("record.updated", "record.created"), "trigger operation")
         identifier(self.object_ref, "trigger object_ref")
         fields = identifiers(self.changed_fields, "trigger changed_fields")
-        if not fields:
+        if self.operation == "record.updated" and not fields:
             raise ValueError("record.updated requires at least one changed field")
+        if self.operation == "record.created" and fields:
+            raise ValueError("record.created cannot watch changed fields")
         object.__setattr__(self, "changed_fields", fields)
 
     def to_dict(self) -> dict[str, JsonValue]:
@@ -328,25 +330,42 @@ class WorkflowEdge(WireRecord):
 
 @dataclass(frozen=True, slots=True)
 class WorkflowGraph(WireRecord):
-    """One update trigger → equality condition → record creation; false means skip."""
+    """A trigger, optional equality condition, and one record creation action."""
 
     id: str
     nodes: tuple[WorkflowNode, ...]
     edges: tuple[WorkflowEdge, ...]
+    schema_version: str = "sanka-flow-graph/v1"
 
     def __post_init__(self) -> None:
         identifier(self.id, "workflow id")
+        choice(
+            self.schema_version,
+            ("sanka-flow-graph/v1", "sanka-flow-graph/v2"),
+            "graph schema_version",
+        )
         nodes = unique(instances(self.nodes, WorkflowNode, "nodes"), lambda n: n.id, "nodes")
         instances(self.edges, WorkflowEdge, "edges")
-        if len(nodes) != 3 or {node.kind for node in nodes} != {"trigger", "condition", "action"}:
+        kinds = {node.kind for node in nodes}
+        conditional = kinds == {"trigger", "condition", "action"} and len(nodes) == 3
+        direct = kinds == {"trigger", "action"} and len(nodes) == 2
+        if not conditional and not (direct and self.schema_version == "sanka-flow-graph/v2"):
             raise ValueError("supported graph requires exactly one trigger, condition and action")
         by_kind = {node.kind: node for node in nodes}
-        expected = {
-            (by_kind["trigger"].id, by_kind["condition"].id, "always"),
-            (by_kind["condition"].id, by_kind["action"].id, "true"),
-        }
+        trigger = by_kind["trigger"].spec
+        assert isinstance(trigger, Trigger)
+        if self.schema_version == "sanka-flow-graph/v1" and trigger.operation != "record.updated":
+            raise ValueError("record.created requires graph schema_version v2")
+        expected = (
+            {
+                (by_kind["trigger"].id, by_kind["condition"].id, "always"),
+                (by_kind["condition"].id, by_kind["action"].id, "true"),
+            }
+            if conditional
+            else {(by_kind["trigger"].id, by_kind["action"].id, "always")}
+        )
         actual = {(edge.source, edge.target, edge.when) for edge in self.edges}
-        if len(self.edges) != 2 or actual != expected:
+        if len(self.edges) != len(expected) or actual != expected:
             raise ValueError(
                 "unsupported graph edges; require trigger→condition→action without branches"
             )
@@ -356,20 +375,41 @@ class WorkflowGraph(WireRecord):
         )
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return {
+        result: dict[str, JsonValue] = {
             "id": self.id,
             "nodes": [node.to_dict() for node in self.nodes],
             "edges": [edge.to_dict() for edge in self.edges],
         }
+        if self.schema_version != "sanka-flow-graph/v1":
+            result["schema_version"] = self.schema_version
+        return result
 
     @classmethod
     def from_dict(cls, value: object) -> Self:
-        payload = object_fields(value, {"id", "nodes", "edges"}, "workflow graph")
+        versioned = type(value) is dict and "schema_version" in value
+        fields = {"id", "nodes", "edges"} | ({"schema_version"} if versioned else set())
+        payload = object_fields(value, fields, "workflow graph")
+        if versioned and payload["schema_version"] != "sanka-flow-graph/v2":
+            raise ValueError("explicit graph schema_version must be sanka-flow-graph/v2")
         return cls(
             payload["id"],
             array(payload["nodes"], WorkflowNode.from_dict, "nodes"),
             array(payload["edges"], WorkflowEdge.from_dict, "edges"),
+            payload.get("schema_version", "sanka-flow-graph/v1"),
         )
+
+    @property
+    def required_capabilities(self) -> tuple[str, ...]:
+        """Exact semantic features a native compiler must implement, never infer."""
+        capabilities = {self.schema_version, "flow.record-identity/v1"}
+        for node in self.nodes:
+            operation = (
+                node.spec.operator if isinstance(node.spec, Condition) else node.spec.operation
+            )
+            capabilities.add(f"flow.{node.kind}.{operation}/v1")
+            if isinstance(node.spec, Action) and node.spec.associations:
+                capabilities.add("flow.associations/v1")
+        return tuple(sorted(capabilities))
 
     def validate_references(self, references: dict[str, Reference]) -> None:
         trigger = next(node.spec for node in self.nodes if isinstance(node.spec, Trigger))
@@ -377,6 +417,16 @@ class WorkflowGraph(WireRecord):
         for field_ref in trigger.changed_fields:
             require_reference(references, field_ref, "property", parent=trigger.object_ref)
         for node in self.nodes:
+            if trigger.operation == "record.created":
+                bindings = (
+                    (node.spec.left, node.spec.right)
+                    if isinstance(node.spec, Condition)
+                    else tuple(mapping.value for mapping in node.spec.fields)
+                    if isinstance(node.spec, Action)
+                    else ()
+                )
+                if any(binding.to_dict().get("phase") == "before" for binding in bindings):
+                    raise ValueError("record.created cannot read before values")
             if isinstance(node.spec, Condition):
                 for binding in (node.spec.left, node.spec.right):
                     validate_binding(binding, references, trigger.object_ref)

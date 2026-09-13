@@ -41,6 +41,7 @@ from sanka_extensions.flow.identity import (
 from sanka_extensions.flow.scenario import Scenario
 
 BLUEPRINT_SCHEMA_VERSION = "sanka-flow-blueprint/v1"
+BLUEPRINT_V2_SCHEMA_VERSION = "sanka-flow-blueprint/v2"
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -170,6 +171,7 @@ class Blueprint(WireRecord):
     scenarios: tuple[Scenario, ...]
     unsupported: tuple[UnsupportedFinding, ...]
     _parameters: FrozenJson = field(repr=False)
+    schema_version: str
 
     def __init__(
         self,
@@ -183,7 +185,13 @@ class Blueprint(WireRecord):
         scenarios: tuple[Scenario, ...] = (),
         unsupported: tuple[UnsupportedFinding, ...] = (),
         parameters: dict[str, JsonValue] | None = None,
+        schema_version: str = BLUEPRINT_SCHEMA_VERSION,
     ) -> None:
+        choice(
+            schema_version,
+            (BLUEPRINT_SCHEMA_VERSION, BLUEPRINT_V2_SCHEMA_VERSION),
+            "Blueprint schema_version",
+        )
         identifier(id, "blueprint id")
         text(revision, "blueprint revision")
         if type(origin) is not BlueprintOrigin or type(extension) is not ArtifactIdentity:
@@ -200,6 +208,7 @@ class Blueprint(WireRecord):
         if parameters is not None and type(parameters) is not dict:
             raise ValueError("Blueprint parameters must be an object")
         for name, value in (
+            ("schema_version", schema_version),
             ("id", id),
             ("revision", revision),
             ("origin", origin),
@@ -229,12 +238,27 @@ class Blueprint(WireRecord):
     def digest(self) -> str:
         return artifact_digest(self.to_dict())
 
-    def require_supported(self) -> None:
+    @property
+    def required_capabilities(self) -> tuple[str, ...]:
+        capabilities = {self.schema_version}
+        for resource in self.resources:
+            capabilities.add(f"flow.resource.{resource.kind}/v1")
+            if resource.kind == "workflow":
+                capabilities.update(WorkflowGraph.from_dict(resource.spec).required_capabilities)
+        return tuple(sorted(capabilities))
+
+    def require_supported(self, *, capabilities: frozenset[str] | None = None) -> None:
         if self.unsupported:
             raise ValueError(
                 "Blueprint contains unsupported semantics: "
                 + ", ".join(f.code for f in self.unsupported)
             )
+        if self.schema_version == BLUEPRINT_V2_SCHEMA_VERSION or capabilities is not None:
+            missing = set(self.required_capabilities) - (capabilities or frozenset())
+            if missing:
+                raise ValueError(
+                    "Target lacks required Flow capabilities: " + ", ".join(sorted(missing))
+                )
 
     def _validate(self) -> None:
         _dependencies(self.resources)
@@ -287,6 +311,15 @@ class Blueprint(WireRecord):
             used: set[str] = set()
             if resource.kind == "workflow":
                 graph = WorkflowGraph.from_dict(resource.spec)
+                expected_graph = (
+                    "sanka-flow-graph/v2"
+                    if self.schema_version == BLUEPRINT_V2_SCHEMA_VERSION
+                    else "sanka-flow-graph/v1"
+                )
+                if graph.schema_version != expected_graph:
+                    raise ValueError(
+                        "workflow graph schema_version must match the Blueprint version"
+                    )
                 graph.validate_references(references)
                 graphs[resource.id] = graph
                 used = _graph_references(graph)
@@ -306,6 +339,10 @@ class Blueprint(WireRecord):
                 if reference.binding == "resource" and reference.key not in resource.depends_on:
                     raise ValueError("planned resource references require an explicit dependency")
         for scenario in self.scenarios:
+            if self.schema_version == BLUEPRINT_SCHEMA_VERSION and any(
+                event.operation != "record.updated" for event in scenario.events
+            ):
+                raise ValueError("record.created scenarios require Blueprint schema_version v2")
             scenario_graph = graphs.get(scenario.workflow_id)
             if scenario_graph is None:
                 raise ValueError("scenario must reference a workflow resource")
@@ -324,20 +361,33 @@ class Blueprint(WireRecord):
     ) -> None:
         trigger = next(node.spec for node in graph.nodes if isinstance(node.spec, Trigger))
         action = next(node.spec for node in graph.nodes if isinstance(node.spec, Action))
-        condition = next(node.spec for node in graph.nodes if isinstance(node.spec, Condition))
-        bindings = [condition.left, condition.right]
+        condition = next(
+            (node.spec for node in graph.nodes if isinstance(node.spec, Condition)), None
+        )
+        bindings = [condition.left, condition.right] if condition else []
         if scenario.case != "no_match":
             bindings += [mapping.value for mapping in action.fields]
             bindings += [mapping.value for mapping in scenario.expected_fields]
         for event in scenario.events:
+            if scenario.case != "no_match" and event.operation != trigger.operation:
+                raise ValueError("match/retry events must match the trigger operation")
+            if (
+                scenario.case == "no_match"
+                and condition is None
+                and trigger.operation == "record.created"
+                and event.operation == trigger.operation
+            ):
+                raise ValueError(
+                    "unconditional creation requires a different operation for no_match"
+                )
             for field_ref in event.before.keys() | event.after.keys():
                 require_reference(references, field_ref, "property", parent=trigger.object_ref)
-            for field_ref in trigger.changed_fields:
+            for field_ref in trigger.changed_fields if event.operation == trigger.operation else ():
                 if field_ref not in event.before or field_ref not in event.after:
                     raise ValueError(
                         "scenario must supply before and after values for watched fields"
                     )
-            for binding in bindings:
+            for binding in bindings if event.operation == trigger.operation else ():
                 value = binding.to_dict()
                 if binding.kind == "event_field":
                     phase = event.before if value["phase"] == "before" else event.after
@@ -362,8 +412,8 @@ class Blueprint(WireRecord):
             validate_association(association, references, trigger.object_ref)
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return {
-            "schema_version": BLUEPRINT_SCHEMA_VERSION,
+        result: dict[str, JsonValue] = {
+            "schema_version": self.schema_version,
             "id": self.id,
             "revision": self.revision,
             "origin": self.origin.to_dict(),
@@ -376,9 +426,20 @@ class Blueprint(WireRecord):
             "scenarios": [scenario.to_dict() for scenario in self.scenarios],
             "unsupported": [finding.to_dict() for finding in self.unsupported],
         }
+        if self.schema_version == BLUEPRINT_V2_SCHEMA_VERSION:
+            result["required_capabilities"] = list(self.required_capabilities)
+        return result
 
     @classmethod
     def from_dict(cls, value: object) -> Self:
+        if type(value) is dict and "schema_version" not in value:
+            raise ValueError("Blueprint has unexpected or missing fields: schema_version")
+        version = value.get("schema_version") if type(value) is dict else None
+        choice(
+            version,
+            (BLUEPRINT_SCHEMA_VERSION, BLUEPRINT_V2_SCHEMA_VERSION),
+            "Blueprint schema_version",
+        )
         payload = object_fields(
             value,
             {
@@ -394,16 +455,16 @@ class Blueprint(WireRecord):
                 "mappings",
                 "scenarios",
                 "unsupported",
-            },
+            }
+            | ({"required_capabilities"} if version == BLUEPRINT_V2_SCHEMA_VERSION else set()),
             "Blueprint",
         )
-        if payload["schema_version"] != BLUEPRINT_SCHEMA_VERSION:
-            raise ValueError(f"Blueprint schema_version must be {BLUEPRINT_SCHEMA_VERSION}")
         if payload["policies"] != _policies():
             raise ValueError(
                 "Blueprint policies must preserve changes and require verified activation"
             )
-        return cls(
+        result = cls(
+            schema_version=payload["schema_version"],
             id=payload["id"],
             revision=payload["revision"],
             origin=BlueprintOrigin.from_dict(payload["origin"]),
@@ -415,3 +476,8 @@ class Blueprint(WireRecord):
             scenarios=array(payload["scenarios"], Scenario.from_dict, "scenarios"),
             unsupported=array(payload["unsupported"], UnsupportedFinding.from_dict, "unsupported"),
         )
+        if version == BLUEPRINT_V2_SCHEMA_VERSION and payload["required_capabilities"] != list(
+            result.required_capabilities
+        ):
+            raise ValueError("required_capabilities must exactly describe the Blueprint semantics")
+        return result
