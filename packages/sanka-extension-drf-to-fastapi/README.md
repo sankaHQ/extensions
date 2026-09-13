@@ -109,3 +109,12 @@ environments. All fixture databases are temporary and removed after replay.
 Omit a scenario's `body` for no bytes, use `body: null` for JSON null, or
 `body_base64` for raw input. Capture required response headers explicitly.
 The independent benchmark's acceptance and native-compliance gates still apply.
+
+## DRF 3.17 large integer fields
+
+The builtin `BigIntegerField` and model `BigAutoField` IDs retain 64-bit database
+columns. The generated API preserves the field's `coerce_to_string` override or
+`REST_FRAMEWORK["COERCE_BIGINT_TO_STRING"]` setting, including values beyond
+JavaScript's exact integer range. Custom field subclasses still require adaptation.
+Django 6 / DRF 3.17 source and generated HTTP/database parity runs in Linux CI;
+this does not imply compatibility with every application using those versions.
