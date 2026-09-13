@@ -2,7 +2,12 @@
 """Declarative Sanka Flow artifacts; this module never executes a workflow."""
 
 from sanka_extensions.flow._wire import artifact_digest
-from sanka_extensions.flow.blueprint import BLUEPRINT_SCHEMA_VERSION, Blueprint, Resource
+from sanka_extensions.flow.blueprint import (
+    BLUEPRINT_SCHEMA_VERSION,
+    BLUEPRINT_V2_SCHEMA_VERSION,
+    Blueprint,
+    Resource,
+)
 from sanka_extensions.flow.definition import (
     SCHEMA_VERSION,
     FlowDefinition,
@@ -39,6 +44,7 @@ from sanka_extensions.flow.source import (
 
 __all__ = [
     "BLUEPRINT_SCHEMA_VERSION",
+    "BLUEPRINT_V2_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "SOURCE_SCHEMA_VERSION",
     "Action",

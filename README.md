@@ -18,7 +18,18 @@ The [catalog](docs/catalog.md) groups extensions into **Data**, **Workflow**, an
 
 ## Sanka Extension SDK
 
-Use `sanka_extensions` to build extensions. Install the SDK with `pip install sanka-extension-sdk`.
+Use `sanka_extensions` to build extensions. The published SDK is distributed as
+GitHub release wheels, including its exact compatibility dependency:
+
+```bash
+python -m pip install \
+  https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a18/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
+  https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a18/sanka_extension_sdk-0.1.0a2-py3-none-any.whl
+```
+
+This installs the released `0.1.0a2` SDK. The `0.1.0a3` SDK and v2 Flow contract
+on this branch are release candidates; develop them with `uv sync --frozen
+--all-packages`. They are not yet available through a published marketplace.
 
 | Interface | Purpose |
 | --- | --- |
@@ -46,11 +57,17 @@ HubSpot, Salesforce, SendGrid, and other hosted SaaS implementations remain priv
 ## Install and inspect
 
 ```bash
-sanka extension marketplace add git@github.com:sankaHQ/extensions.git --name sanka --json
+sanka extension marketplace add https://github.com/sankaHQ/extensions.git --name sanka --json
 sanka extension marketplace add PATH_OR_GIT_URL --name third-party --trust --json
 sanka extension add sanka/postgres --marketplace sanka --json
 sanka extension list --json
 ```
+
+CLI versions before the published-catalog default support follow the Git default
+branch. For those versions, clone the published `extensions-v0.1.0a18` tag and add
+that directory with `--trust`. On CLI versions supporting `--revision`, use the
+full published commit `1a8c9450243b1cc25096396244dac5ed3cf7abfd` to pin this bundle.
+Development `main` may reference wheels awaiting publication.
 
 Installation makes a capability available. It does not authenticate any data endpoint or verify its reachability. Configure each data source or destination with its own endpoint and credential references before planning a data migration. Code extensions operate on projects and do not require a authenticated data endpoint.
 
