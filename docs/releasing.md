@@ -2,12 +2,11 @@
 
 ## Published foundation and next candidate
 
-`extensions-v0.1.0a19` publishes SDK 0.1.0a3 with Blueprint v2. The next candidate,
-`extensions-v0.1.0a20`, adds SDK 0.1.0a4 with the typed Flow generator protocol.
-It includes compatibility SDK 0.1.0a12, data-access extensions 0.1.0a14,
-DRF-to-FastAPI 0.1.0a8, DRF-to-Flask 0.1.0a6 and DRF replay 0.1.0a2.
-Implementing package versions change only to consume the new SDK without replacing
-published artifacts. No runnable Flow marketplace package is included.
+`extensions-v0.1.0a20` publishes SDK 0.1.0a4 and DRF-to-FastAPI 0.1.0a8.
+The next candidate, `extensions-v0.1.0a21`, releases DRF-to-FastAPI 0.1.0a9
+with source-project Python environment discovery for isolated CLI installs.
+The SDK, compatibility SDK, DRF replay, Flask and data-access package versions
+remain unchanged. Published tags and wheel bytes are never replaced.
 
 ## Preparation and review
 
@@ -20,23 +19,22 @@ manifest URLs and hashes. All previous release tags and artifacts remain immutab
 
 Merge the exact human-approved head using `sanka-pr-flow`. Publication requires
 user authorization separately from preparing the candidate. Create and push
-`extensions-v0.1.0a20` at the reviewed merge, then dispatch `publish.yml` at that tag.
+`extensions-v0.1.0a21` at the reviewed merge, then dispatch `publish.yml` at that tag.
 The workflow rejects every other tag. This repository currently publishes GitHub
 release wheels; it does not publish these versions to PyPI.
 
 ## SDK before implementing packages
 
-The publication workflow builds and verifies the complete bundle, then publishes
-`sdk-v0.1.0a4` at the same reviewed source SHA with the SDK and its already-published
-compatibility dependency. Only after that job succeeds may the marketplace job
-publish the implementing packages and manifests under `extensions-v0.1.0a20`.
-Consumers can install the SDK independently from the SDK release. The complete
-marketplace also includes the same SDK wheel bytes for offline installation.
+The publication workflow builds and verifies the complete bundle, then checks
+that the existing `sdk-v0.1.0a4` tag still identifies its reviewed source and that
+both SDK wheels in the bundle are byte-identical to their published assets.
+The SDK verification job is read-only. It does not move the tag or re-upload
+unchanged SDK packages. Only after verification succeeds may the marketplace
+job publish implementing packages under `extensions-v0.1.0a21`.
 
-A failed marketplace upload does not authorize overwriting a published SDK or
-release. Inspect the exact release assets and run state first. Rerun only the
-failed job when the SDK job already succeeded; a full rerun intentionally refuses
-to create an existing SDK release. Resolve a partial release explicitly.
+A changed or missing SDK tag, local wheel or public asset blocks publication.
+SDK changes require a separately reviewed version and publication before the
+implementing package release. Do not replace existing assets to make this check pass.
 
 After publication, verify the selected tag SHAs and GitHub artifact hashes, install
 from the published assets in a clean environment, and exercise Data/Code and Flow

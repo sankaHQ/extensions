@@ -6,6 +6,28 @@ subprocess contract.
 
 It writes one JSON response to stdout. Diagnostics are written to stderr.
 
+## Source Python environment
+
+The source application's dependencies belong in `<project-root>/.venv`, separately
+from the CLI and the installed extension. For example:
+
+```sh
+uv tool install --python 3.12 sanka-cli
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+sanka extension add sanka/drf-to-fastapi
+sanka scan .
+```
+
+The extension runs with that project's Python, loads its reviewed implementation
+from the locked installation, and uses the project's environment for Django and
+application imports. It does not use an unrelated activated environment or require
+`PYTHONPATH`. The source and extension interpreters must have the same Python
+major/minor version, so locked binary dependencies remain compatible. An incomplete
+`.venv` or a version mismatch returns a protocol error with a recovery command.
+Without a project `.venv`, execution retains the caller's existing environment.
+On Windows, use `.venv\Scripts\python.exe` for the requirements command.
+
 ## Parity notes
 
 Every scanned route carries `parity_notes`: facts about the exact behavior of the

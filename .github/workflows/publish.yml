@@ -17,7 +17,7 @@ jobs:
           version: "0.11.21"
           python-version: "3.12"
           enable-cache: true
-      - run: test "$GITHUB_REF_TYPE" = tag && test "$GITHUB_REF_NAME" = extensions-v0.1.0a20
+      - run: test "$GITHUB_REF_TYPE" = tag && test "$GITHUB_REF_NAME" = extensions-v0.1.0a21
       - run: uv sync --frozen --all-packages
       - run: make check
       - run: uv run python scripts/build_release.py --output-dir dist
@@ -33,29 +33,17 @@ jobs:
           retention-days: 14
 
   sdk:
-    name: Publish the SDK before implementing packages
+    name: Verify the already published SDK
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: marketplace-${{ github.ref_name }}
           path: .
-      - name: Pin the SDK tag to this reviewed source
-        run: python3 scripts/ensure_sdk_release_tag.py "$GITHUB_SHA"
-      - name: Publish the exact SDK wheels
-        run: >-
-          gh release create sdk-v0.1.0a4
-          dist/sanka_connector_sdk-0.1.0a12-py3-none-any.whl
-          dist/sanka_extension_sdk-0.1.0a4-py3-none-any.whl
-          --verify-tag --repo "$GITHUB_REPOSITORY"
-          --prerelease --title "Sanka Extension SDK 0.1.0a4"
-          --notes "Typed Flow generator protocol. Native execution and runtime adoption are separate releases."
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Require the original SDK source and identical local and published wheels
+        run: python3 scripts/verify_published_sdk.py dist
 
   release:
     name: Attach marketplace artifacts to GitHub release
