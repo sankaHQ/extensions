@@ -936,6 +936,7 @@ def _field_payload(field: SerializerFieldIR) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "name": field.name,
         "kind": field.kind,
+        "coerce_to_string": field.coerce_to_string,
         "timezone": field.timezone,
         "required": field.required,
         "read_only": field.read_only,
@@ -2256,7 +2257,11 @@ def _custom_lookup_adaptation_reason(
             "lookup-field",
             f"Custom lookup field {lookup_field!r} is absent from the serializer.",
         )
-    if not serializer_field.supported or serializer_field.kind not in {"char", "integer"}:
+    if not serializer_field.supported or serializer_field.kind not in {
+        "char",
+        "integer",
+        "big_integer",
+    }:
         return _adaptation_reason(
             "SANKA_DRF_LOOKUP_TYPE_UNSUPPORTED",
             "lookup-field",
@@ -3199,7 +3204,7 @@ def _build_serializer_ir(
                             integer_fields={
                                 (field.attname or field.name)
                                 for field in child_ir.fields
-                                if field.kind == "integer" and not field.read_only
+                                if field.kind in {"integer", "big_integer"} and not field.read_only
                             },
                         )
                         if nested_supported
@@ -3341,6 +3346,8 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
     kind: str | None = None
     if type(field) is fields_module.IntegerField:
         kind = "integer"
+    elif type(field) is getattr(fields_module, "BigIntegerField", None):
+        kind = "big_integer"
     elif type(field) is fields_module.CharField:
         kind = "char"
     elif type(field) is fields_module.DecimalField:
@@ -3410,7 +3417,20 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
         default=default if has_default else None,
         unique=unique,
         unique_message=unique_message,
-        messages=_field_messages(field, kind),
+        messages=_field_messages(field, "integer" if kind == "big_integer" else kind),
+        coerce_to_string=(
+            bool(
+                getattr(
+                    field,
+                    "coerce_to_string",
+                    importlib.import_module(
+                        "rest_framework.settings"
+                    ).api_settings.COERCE_BIGINT_TO_STRING,
+                )
+            )
+            if kind == "big_integer"
+            else False
+        ),
         supported=supported,
         timezone=_field_timezone_name(field) if kind == "datetime" else None,
     )

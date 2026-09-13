@@ -49,3 +49,19 @@ jobs:
       - run: uv sync --frozen --all-packages
       - run: make check
       - run: make build-release
+
+  modern-drf:
+    name: Django 6 and DRF bigint conversion parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.21"
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --frozen --all-packages
+      - name: Install the declared modern source framework versions
+        run: uv pip install 'django==6.0.6' 'djangorestframework==3.17.1'
+      - name: Compare real source and generated HTTP responses and database effects
+        run: uv run --no-sync python -m pytest packages/sanka-extension-drf-to-fastapi/tests/test_big_integer.py

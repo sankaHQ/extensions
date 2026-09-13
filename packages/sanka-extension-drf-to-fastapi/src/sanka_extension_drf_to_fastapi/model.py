@@ -171,6 +171,7 @@ class SerializerFieldIR:
     messages: tuple[tuple[str, str], ...] = ()
     supported: bool = True
     timezone: str | None = None
+    coerce_to_string: bool = False
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> SerializerFieldIR:
