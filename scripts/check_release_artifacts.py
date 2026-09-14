@@ -54,11 +54,11 @@ MIGRATION_MANIFEST: dict[str, Any] = {
     "schema_version": "sanka-extension-manifest/v2",
     "kind": "migration",
     "id": "sanka/drf-to-fastapi",
-    "version": "0.1.0a11",
+    "version": "0.1.0a12",
     "protocol_version": "sanka-extension/v1",
     "distribution": {
         "name": "sanka-extension-drf-to-fastapi",
-        "version": "0.1.0a11",
+        "version": "0.1.0a12",
         "executable": "sanka-extension-drf-to-fastapi",
     },
     "commands": ["apply", "plan", "scan", "test", "verify"],
