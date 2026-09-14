@@ -2,7 +2,9 @@
 
 ## Current candidate
 
-`extensions-v0.1.0a24` prepares DRF-to-FastAPI 0.1.0a12 with UUID and Boolean
+This candidate also prepares DRF-to-Flask 0.1.0a7 with stock ViewSet CRUD and bounded serializer support.
+
+`extensions-v0.1.0a25` prepares DRF-to-FastAPI 0.1.0a12 with UUID and Boolean
 field support and primary-key URL aliases. Writable UUID primary keys and custom
 field behavior remain unsupported. Custom handlers, querysets, permission rules and middleware
 remain subject to explicit compatibility checks. The SDK and other implementing
@@ -19,7 +21,7 @@ manifest URLs and hashes. All previous release tags and artifacts remain immutab
 
 Merge the exact human-approved head using `sanka-pr-flow`. Publication requires
 user authorization separately from preparing the candidate. Create and push
-`extensions-v0.1.0a24` at the reviewed merge, then dispatch `publish.yml` at that tag.
+`extensions-v0.1.0a25` at the reviewed merge, then dispatch `publish.yml` at that tag.
 The workflow rejects every other tag. This repository currently publishes GitHub
 release wheels; it does not publish these versions to PyPI.
 
@@ -30,7 +32,7 @@ that the existing `sdk-v0.1.0a4` tag still identifies its reviewed source and th
 both SDK wheels in the bundle are byte-identical to their published assets.
 The SDK verification job is read-only. It does not move the tag or re-upload
 unchanged SDK packages. Only after verification succeeds may the marketplace
-job publish implementing packages under `extensions-v0.1.0a24`.
+job publish implementing packages under `extensions-v0.1.0a25`.
 
 A changed or missing SDK tag, local wheel or public asset blocks publication.
 SDK changes require a separately reviewed version and publication before the

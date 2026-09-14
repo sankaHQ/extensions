@@ -48,22 +48,22 @@
     {
       "name": "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
       "sha256": "34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a24/sanka_connector_sdk-0.1.0a12-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a25/sanka_connector_sdk-0.1.0a12-py3-none-any.whl"
     },
     {
       "name": "sanka_drf_replay-0.1.0a2-py3-none-any.whl",
       "sha256": "2daeb62be69d1489097351b409fa32dda1713aaf8d39933037be101438757dde",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a24/sanka_drf_replay-0.1.0a2-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a25/sanka_drf_replay-0.1.0a2-py3-none-any.whl"
     },
     {
       "name": "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
       "sha256": "f1a6655095ab81e549137e1d9604492bda2a31677d674c6359b0a39a2da96307",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a24/sanka_extension_sdk-0.1.0a4-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a25/sanka_extension_sdk-0.1.0a4-py3-none-any.whl"
     },
     {
       "name": "sanka_extension_drf_to_fastapi-0.1.0a12-py3-none-any.whl",
       "sha256": "bb28db0b74155c6b09e9cedf7f72b06e37351f29028c470c40d23b5dacfdfb02",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a24/sanka_extension_drf_to_fastapi-0.1.0a12-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a25/sanka_extension_drf_to_fastapi-0.1.0a12-py3-none-any.whl"
     }
   ]
 }
