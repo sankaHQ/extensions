@@ -14,7 +14,10 @@ manifest hashes with `make update-marketplace-hashes` after final package change
 Finish code review, then let the workspace PR helper run `make check build-release`
 as the final broad gate. The build verifies all 193 wheel filenames, locked
 third-party hashes, package versions, dependency and entry-point boundaries, and
-manifest URLs and hashes. All previous release tags and artifacts remain immutable.
+manifest URLs and hashes. The builder resumes interrupted dependency downloads by
+reusing existing wheels only when their locked size and SHA-256 match; it always
+rebuilds the local implementing packages. All previous release tags and artifacts
+remain immutable.
 
 Merge the exact human-approved head using `sanka-pr-flow`. Publication requires
 user authorization separately from preparing the candidate. Create and push

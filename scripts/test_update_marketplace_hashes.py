@@ -144,12 +144,15 @@ def test_build_release_cleanup_is_limited_to_known_wheels(tmp_path: Path) -> Non
     output.mkdir(parents=True)
     stale_wheel = output / "sanka_connector_csv-0.1.0a14-py3-none-any.whl"
     stale_wheel.write_bytes(b"stale")
+    dependency = output / build_release.LOCKED_DEPENDENCY_WHEELS[0].name
+    dependency.write_bytes(b"dependency is revalidated before reuse")
     keep = output / "operator-notes.txt"
     keep.write_text("keep")
 
     _prepare_output(output, root=root)
 
     assert not stale_wheel.exists()
+    assert dependency.exists()
     assert keep.read_text() == "keep"
     with pytest.raises(ValueError, match="repository-owned"):
         _prepare_output(tmp_path / "outside", root=root)
@@ -320,3 +323,51 @@ def test_release_validator_rejects_invalid_release_boundaries(
         catalog_path.write_text(json.dumps(catalog))
 
     assert any(expected in error for error in validate_release(root, release))
+
+
+@pytest.mark.parametrize("existing", [b"valid", b"wrong", b"shorter", None])
+def test_dependency_cache_requires_locked_size_and_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bytes | None
+) -> None:
+    content = b"valid"
+    wheel = build_release.LockedWheel(
+        "example",
+        "example-1.0-py3-none-any.whl",
+        "https://files.pythonhosted.org/example.whl",
+        hashlib.sha256(content).hexdigest(),
+        len(content),
+    )
+    target = tmp_path / wheel.name
+    if existing is not None:
+        target.write_bytes(existing)
+    downloads = []
+
+    def download(_url: str, timeout: int) -> io.BytesIO:
+        downloads.append(_url)
+        return io.BytesIO(content)
+
+    monkeypatch.setattr(build_release, "urlopen", download)
+    assert build_release.download_locked_wheel(tmp_path, wheel) == target
+    assert target.read_bytes() == content
+    assert len(downloads) == (0 if existing == content else 1)
+
+
+def test_dependency_cache_does_not_reuse_symlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = b"valid"
+    wheel = build_release.LockedWheel(
+        "example",
+        "example-1.0-py3-none-any.whl",
+        "https://files.pythonhosted.org/example.whl",
+        hashlib.sha256(content).hexdigest(),
+        len(content),
+    )
+    source = tmp_path / "source"
+    source.write_bytes(content)
+    target = tmp_path / wheel.name
+    target.symlink_to(source)
+    monkeypatch.setattr(build_release, "urlopen", lambda _url, timeout: io.BytesIO(content))
+    build_release.download_locked_wheel(tmp_path, wheel)
+    assert not target.is_symlink()
+    assert source.read_bytes() == target.read_bytes() == content
