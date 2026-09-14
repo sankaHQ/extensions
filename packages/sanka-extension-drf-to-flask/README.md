@@ -5,17 +5,19 @@ resolved DRF routes, creates a deterministic reviewed plan, and emits a native
 Flask target plus ORM-only Django settings and a machine-readable gap inventory.
 It never imports the Sanka runtime or the FastAPI extension.
 
-This alpha converts recognized JSON APIView handlers and configuration-only
-APIView inheritance. It preserves JSON parsing, isolated Django ORM modules,
+This alpha converts recognized JSON APIView handlers, configuration-only
+APIView inheritance, and the stock ModelViewSet JSON scope described below. It preserves JSON parsing, isolated Django ORM modules,
 transaction blocks, and framework-independent project functions whose transitive
 imports stay inside the permitted ORM/stdlib boundary.
 
-The native envelope also includes plain serializers with CharField/IntegerField
+The APIView envelope also includes plain serializers with CharField/IntegerField
 validation and self-independent object validation, plus a single self-independent
 header authenticator returning a user/token pair or raising AuthenticationFailed.
 That authentication subset requires AllowAny and UNAUTHENTICATED_USER=None;
 session authentication, multiple authenticators, custom permissions, throttling,
-custom dispatch, serializer saves/nested fields, and middleware remain manual gaps.
+custom dispatch, serializer saves/nested fields in APIView handlers, and middleware
+remain manual gaps. ModelViewSet support has its own bounded serializer/authentication
+checks described below.
 No DRF classes are imported by the generated serving process. Recognized HEAD,
 OPTIONS, method rejection, JSON content negotiation, and conditional Allow headers
 are generated alongside handlers. Readiness counts converted method/path pairs,
@@ -82,3 +84,27 @@ can truncate file contents. `verify` reports these mismatches as
 `multipart_boundary_parity`, with repair guidance and differing saved-file sizes.
 A parity pass does not establish that the source preserves all uploaded bytes.
 Custom view/rendering behavior remains an explicit migration gap.
+
+
+### ModelViewSet JSON APIs
+
+The native target also supports stock `ModelViewSet` CRUD with Django ORM,
+`SimpleRouter`/`DefaultRouter` routes, JSON format aliases, and the API root.
+Supported `ModelSerializer` fields are character, integer, decimal, choice, and
+nested model lists. Explicit, self-independent nested `create` and `update`
+methods are lowered with their ORM writes and transaction boundaries intact.
+Validation messages, uniqueness checks, read-only fields, partial updates, and
+nested decimal output are captured from the source environment.
+
+This target is a JSON API: the DRF browsable HTML interface and form uploads are
+not generated for ViewSets. That scope change is included in the reviewed plan.
+Django models and their dependencies remain necessary. Empty authentication or
+the default Session/Basic combination with no middleware is supported; Basic
+credentials are still authenticated. Custom permissions, serializer hooks,
+filtered querysets, pagination, middleware, and unsupported global settings
+remain explicit gaps and cannot pass the generated-app check.
+
+`test_model_viewsets.py` compares source and generated JSON responses and database
+counts for nested CRUD, rollback, validation failures, and Basic authentication.
+It also checks that the Flask serving process imports no DRF modules. These tests
+qualify this bounded scope; they do not establish parity for arbitrary projects.
