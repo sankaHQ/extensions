@@ -6,17 +6,31 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.build_release import PINNED_EXTENSION_SDK
+from scripts import build_release
+from scripts.build_release import PINNED_EXTENSION_SDK, LockedWheel
 from scripts.check_sdk_candidate import validate
 
 
-def test_published_sdk_identity_is_separate_from_candidate() -> None:
-    assert PINNED_EXTENSION_SDK.name == "sanka_extension_sdk-0.1.0a4-py3-none-any.whl"
-    assert "/sdk-v0.1.0a4/" in PINNED_EXTENSION_SDK.url
-    assert (
-        PINNED_EXTENSION_SDK.sha256
-        == "f1a6655095ab81e549137e1d9604492bda2a31677d674c6359b0a39a2da96307"
-    )
+def test_marketplace_build_fetches_pinned_sdk_instead_of_rebuilding_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built: list[str] = []
+    downloaded: list[LockedWheel] = []
+
+    def run(command: list[str], **kwargs: object) -> None:
+        built.append(command[command.index("--package") + 1])
+
+    def download(directory: Path, wheel: LockedWheel) -> Path:
+        downloaded.append(wheel)
+        return directory / wheel.name
+
+    monkeypatch.setattr(build_release, "_prepare_output", lambda path: path)
+    monkeypatch.setattr(build_release.subprocess, "run", run)
+    monkeypatch.setattr(build_release, "download_locked_wheel", download)
+    build_release.build(tmp_path)
+    assert "sanka-extension-sdk" not in built
+    assert set(built) == set(build_release.MARKETPLACE_PACKAGES) - {"sanka-extension-sdk"}
+    assert downloaded.count(PINNED_EXTENSION_SDK) == 1
 
 
 def test_candidate_cannot_reuse_published_version(tmp_path: Path) -> None:
