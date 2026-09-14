@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 [tool.uv]
 package = false
 # Test the candidate SDK without changing published extension dependency pins.
-override-dependencies = ["sanka-extension-sdk==0.1.0a5"]
+override-dependencies = ["sanka-extension-sdk==0.1.0a6"]
 
 [tool.uv.workspace]
 members = ["packages/*"]

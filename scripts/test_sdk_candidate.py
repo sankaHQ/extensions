@@ -33,11 +33,12 @@ def test_marketplace_build_fetches_pinned_sdk_instead_of_rebuilding_it(
     assert downloaded.count(PINNED_EXTENSION_SDK) == 1
 
 
-def test_candidate_cannot_reuse_published_version(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", ["0.1.0a4", "0.1.0a5"])
+def test_candidate_cannot_reuse_published_version(tmp_path: Path, version: str) -> None:
     with (
         patch(
             "scripts.check_sdk_candidate.tomllib.loads",
-            return_value={"project": {"version": "0.1.0a4"}},
+            return_value={"project": {"version": version}},
         ),
         pytest.raises(ValueError, match="reuse"),
     ):

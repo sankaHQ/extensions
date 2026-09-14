@@ -20,8 +20,8 @@ def validate(directory: Path, *, root: Path = ROOT) -> None:
         "project"
     ]
     version = project["version"]
-    if version == "0.1.0a4":
-        raise ValueError("Candidate SDK must not reuse the published a4 version")
+    if version in {"0.1.0a4", "0.1.0a5"}:
+        raise ValueError("Candidate SDK must not reuse a published SDK version")
     expected = directory / f"sanka_extension_sdk-{version}-py3-none-any.whl"
     if sorted(directory.iterdir()) != [expected]:
         raise ValueError("SDK candidate directory must contain exactly its versioned wheel")
@@ -36,6 +36,9 @@ def validate(directory: Path, *, root: Path = ROOT) -> None:
     with zipfile.ZipFile(expected) as archive:
         if "sanka_extensions/flow/native.py" not in archive.namelist():
             raise ValueError("SDK candidate omits the native contract")
+        for module in ("native_verification", "native_fixtures"):
+            if f"sanka_extensions/flow/{module}.py" not in archive.namelist():
+                raise ValueError("SDK candidate omits the native verification contract")
     print(f"SDK candidate {version}: metadata, license, dependencies and native contract OK")
 
 

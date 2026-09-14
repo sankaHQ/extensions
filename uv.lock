@@ -1195,7 +1195,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-extension-sdk"
-version = "0.1.0a5"
+version = "0.1.0a6"
 source = { editable = "packages/sanka-extension-sdk" }
 dependencies = [
     { name = "sanka-connector-sdk" },
