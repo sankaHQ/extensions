@@ -13,7 +13,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-flask",
-            "version": "0.1.0a6",
+            "version": "0.1.0a7",
             "executable": "sanka-extension-drf-to-flask",
         },
     },
