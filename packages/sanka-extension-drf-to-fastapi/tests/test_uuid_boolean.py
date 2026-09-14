@@ -53,6 +53,9 @@ for name, field in S().fields.items():
     if name=='id': assert ir.kind=='uuid' and ir.uuid_default
 related=_serializer_field_ir('parent',serializers.PrimaryKeyRelatedField(read_only=True),Item)
 assert related.kind=='related_uuid' and related.attname=='parent_id' and related.supported
+assert not _serializer_field_ir('parent',serializers.PrimaryKeyRelatedField(
+    read_only=True,pk_field=fields.UUIDField(format='hex')),Item).supported
+
 values=[True,False,1,0,1.0,0.0,2,'TRUE','false','On','OFF','yes','n','1','0','null','',[],{},'bad',None]
 for nullable in (False,True):
     field=fields.BooleanField(allow_null=nullable)
@@ -269,6 +272,12 @@ urlpatterns = [path('api/gadgets/', GadgetList.as_view()),
     from uuid import UUID
 
     for report in (original, generated):
+        lists = [
+            report["database"],
+            *[result["body"] for result in report["results"] if isinstance(result["body"], list)],
+        ]
+        for rows in lists:
+            assert [row["id"] for row in rows] == sorted(row["id"] for row in rows)
         created = [row for row in report["database"] if row["name"] in {"New", "Bad"}]
         assert len(created) == 2
         for row in created:
@@ -284,4 +293,8 @@ urlpatterns = [path('api/gadgets/', GadgetList.as_view()),
             report_text = json.dumps(report).replace(identifier, "created-" + row["name"])
             report.clear()
             report.update(json.loads(report_text))
+        report["database"].sort(key=lambda row: row["id"])
+        for result in report["results"]:
+            if isinstance(result["body"], list):
+                result["body"].sort(key=lambda row: row["id"])
     assert generated == original

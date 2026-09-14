@@ -3477,7 +3477,8 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
             kind="related_uuid" if related_uuid else "related_pk",
             read_only=True,
             attname=attname,
-            supported=attname is not None,
+            supported=attname is not None and (not related_uuid or field.pk_field is None),
+            allow_null=bool(field.allow_null),
         )
     serializers_module = importlib.import_module("rest_framework.serializers")
     if type(field) is serializers_module.ListSerializer:
@@ -3548,7 +3549,7 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
             kind == "boolean" and model_field.primary_key
         ):
             supported = False
-        uuid_default = model_field.default is uuid.uuid4
+        uuid_default = kind == "uuid" and model_field.default is uuid.uuid4
         if model_field.has_default() and callable(model_field.default) and not uuid_default:
             supported = False
     default = getattr(field, "default", fields_module.empty)
