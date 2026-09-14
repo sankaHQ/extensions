@@ -198,7 +198,7 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
     packages = {
         "sanka-drf-replay": ("0.1.0a2", "sanka_drf_replay-0.1.0a2-py3-none-any.whl", ""),
         "sanka-extension-drf-to-flask": (
-            "0.1.0a6",
+            "0.1.0a7",
             "sanka_extension_drf_to_flask-0.1.0a7-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-flask = sanka_extension_drf_to_flask.__main__:main\n",
