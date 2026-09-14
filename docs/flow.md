@@ -338,3 +338,11 @@ SDK source approval/publication precedes runtime SDK synchronization or consumer
 pins. This change does not publish a package, upgrade the hosted API, migrate the
 28 Studio recipes or modify any existing workflow. Remaining native recipe
 profiles require typed contracts; arbitrary action dictionaries are not accepted.
+
+The SDK candidate is version `0.1.0a5`, built and checked separately under
+`release/sdk-candidate`. The workspace-only UV override exercises existing code
+against the candidate; published extension package requirements remain pinned to
+`0.1.0a4`. Marketplace builds retrieve that original SDK wheel from its immutable
+SDK release and verify its exact size and SHA-256. Existing manifests and wheel
+URLs/hashes are unchanged. Marketplace publication does not publish the new SDK;
+SDK a5 requires its own reviewed publication before any consumer pin is advanced.

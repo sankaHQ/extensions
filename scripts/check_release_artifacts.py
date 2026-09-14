@@ -21,11 +21,14 @@ if __package__ in {None, ""}:  # Direct script execution keeps only scripts/ on 
 from scripts.build_release import (  # noqa: E402
     LOCKED_DEPENDENCY_WHEELS,
     MARKETPLACE_WHEELS,
+    PINNED_EXTENSION_SDK,
 )
 from scripts.update_marketplace_hashes import MANIFEST_WHEELS, RELEASE_TAG  # noqa: E402
 
 RELEASE = ROOT / "release" / "all"
-LOCKED_DEPENDENCY_HASHES = {wheel.name: wheel.sha256 for wheel in LOCKED_DEPENDENCY_WHEELS}
+LOCKED_DEPENDENCY_HASHES = {
+    wheel.name: wheel.sha256 for wheel in (PINNED_EXTENSION_SDK, *LOCKED_DEPENDENCY_WHEELS)
+}
 CATALOG: dict[str, Any] = {
     "schema_version": "sanka-marketplace/v1",
     "extensions": [

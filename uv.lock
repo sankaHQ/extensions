@@ -21,6 +21,7 @@ members = [
     "sanka-extension-sdk",
     "sanka-extensions-workspace",
 ]
+overrides = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
 
 [[package]]
 name = "aiosqlite"
@@ -1182,7 +1183,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-extension-sdk"
-version = "0.1.0a4"
+version = "0.1.0a5"
 source = { editable = "packages/sanka-extension-sdk" }
 dependencies = [
     { name = "sanka-connector-sdk" },

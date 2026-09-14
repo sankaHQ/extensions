@@ -8,11 +8,13 @@ check:
 	uv run python scripts/check_terminology.py
 	uv run python scripts/check_catalog_docs.py
 	uv run pytest
-	uv run python -m pytest scripts/test_update_marketplace_hashes.py -q
+	uv run python -m pytest scripts/test_update_marketplace_hashes.py scripts/test_sdk_candidate.py -q
 
 .PHONY: build-release
 
 build-release:
+	uv build --wheel --package sanka-extension-sdk --out-dir release/sdk-candidate --clear --no-create-gitignore
+	uv run python scripts/check_sdk_candidate.py release/sdk-candidate
 	uv run python scripts/build_release.py --output-dir dist
 	uv run python scripts/check_release_artifacts.py dist
 
