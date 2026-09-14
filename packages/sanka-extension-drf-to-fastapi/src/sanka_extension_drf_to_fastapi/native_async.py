@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sanka_extension_drf_to_fastapi.native_access import RUNTIME as _ACCESS_RUNTIME
+
 SQL_ENGINES = ("tortoise", "sqlalchemy", "psycopg")
 DEFAULT_SQL_ENGINE = "tortoise"
 BENCH_DJANGO_ENGINE = "django"
@@ -122,8 +124,8 @@ def _add_model_spec(specs: dict[str, dict[str, Any]], item: dict[str, Any]) -> N
     columns: dict[str, dict[str, Any]] = dict(specs.get(table, {}).get("columns") or {})
     pk = str(item.get("pk_attname") or "id")
     columns.setdefault(pk, {"name": pk, "kind": "integer", "pk": True, "max_length": None})
-    for field in item.get("fields", []):
-        if field.get("kind") == "nested_many":
+    for field in [*item.get("fields", []), *item.get("storage", [])]:
+        if field.get("kind") in {"nested_many", "membership_read", "related_preview"}:
             continue
         name = str(field.get("attname") or field["name"])
         columns[name] = {
@@ -299,6 +301,8 @@ package = false
 
 
 def _render_store(sql_engine: str) -> str:
+    from sanka_extension_drf_to_fastapi.native_access import delete_helpers, store_helpers
+
     store = {
         BENCH_DJANGO_ENGINE: _DJANGO_STORE,
         "tortoise": _TORTOISE_STORE,
@@ -309,6 +313,8 @@ def _render_store(sql_engine: str) -> str:
     return (
         store.replace(declaration, declaration + "    data = _creation_values(resource, data)\n")
         + _CREATE_DEFAULTS
+        + store_helpers(sql_engine)
+        + delete_helpers(sql_engine)
     )
 
 
@@ -318,6 +324,10 @@ _CREATE_DEFAULTS = r"""
 def _creation_values(resource: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     from uuid import UUID, uuid4
     values = dict(data)
+    from datetime import datetime, timezone
+    for field in resource.get("storage", ()):
+        if field.get("auto_now"):
+            values[field["name"]] = datetime.now(timezone.utc)
     for field in resource.get("fields", ()):
         if field["kind"] not in {"uuid", "related_uuid", "boolean"}:
             continue
@@ -729,7 +739,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 """
@@ -744,6 +754,12 @@ _ENGINE = None
 _SESSION = None
 
 
+def _sqlite_foreign_keys(connection, _record):
+    cursor = connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 def _sessionmaker() -> async_sessionmaker[AsyncSession]:
     global _ENGINE, _SESSION
     if _SESSION is None:
@@ -753,6 +769,8 @@ def _sessionmaker() -> async_sessionmaker[AsyncSession]:
         elif url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
         _ENGINE = create_async_engine(url)
+        if url.startswith("sqlite"):
+            event.listen(_ENGINE.sync_engine, "connect", _sqlite_foreign_keys)
         _SESSION = async_sessionmaker(_ENGINE, expire_on_commit=False)
     return _SESSION
 
@@ -1378,7 +1396,9 @@ def _represent(spec: dict[str, Any], value: Any) -> Any:
 async def _serialize_fields(fields: list[dict[str, Any]], instance: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     for spec in fields:
-        if spec["kind"] == "nested_many":
+        if spec["kind"] in {"membership_read", "related_preview"}:
+            payload[spec["name"]] = await _access_representation(spec, instance)
+        elif spec["kind"] == "nested_many":
             child = spec["child"]
             related = await store.fetch_children(spec, _instance_pk(instance))
             payload[spec["name"]] = [
@@ -2086,7 +2106,8 @@ async def _authenticate(request: Request, auth: dict[str, Any], allow: str) -> t
     user_id = await store.token_user_id(auth, parts[1])
     if user_id is None:
         return None, _auth_error(messages["invalid_token"], auth, allow)
-    is_active = await store.user_is_active(user_id)
+    user = await store.access_user(auth, user_id)
+    is_active = None if user is None else bool(user["active"])
     if is_active is None:
         return None, _auth_error(messages["invalid_token"], auth, allow)
     if not is_active:
@@ -2098,7 +2119,7 @@ async def _require_user(request: Request, auth: dict[str, Any], allow: str) -> t
     user_id, error = await _authenticate(request, auth, allow)
     if error is not None:
         return None, error
-    if user_id is None:
+    if user_id is None and auth.get("require_authenticated", True):
         return None, _auth_error(auth["messages"]["no_credentials"], auth, allow)
     return user_id, None
 
@@ -2146,8 +2167,16 @@ async def handle(
         user_id, gate_error = await _require_user(request, auth, allow)
         if gate_error is not None:
             return gate_error
+    permission_error = await _access_permission(spec, request, auth, user_id, allow)
+    if permission_error is not None:
+        return permission_error
+    if (spec.get("access") or {}).get("member_action"):
+        return await _member_action(spec, request, auth, user_id, allow)
     if operation == "list":
-        rows = await store.fetch_all(spec)
+        rows = await _scope_rows(spec, request, user_id, await store.fetch_all(spec))
+        query = (spec.get("access") or {}).get("query") or {}
+        if query.get("ordering"):
+            rows = _sort_rows(spec, rows, query["ordering"])
         listing = spec.get("listing") or {}
         if listing.get("search"):
             rows = _apply_search(spec, listing["search"], request, rows)
@@ -2169,26 +2198,45 @@ async def handle(
         payload = [await _serialize(spec, item) for item in rows]
         return JSONResponse(payload, headers={"Allow": allow})
     if operation == "retrieve":
-        instance, miss = await store.fetch_one(spec, _lookup_value(spec, request))
+        instance, miss = await _accessible_instance(spec, request, user_id)
         if instance is None:
             return _not_found(spec, allow, miss)
+        permission_error = await _access_permission(spec, request, auth, user_id, allow, instance)
+        if permission_error is not None:
+            return permission_error
         return JSONResponse(await _serialize(spec, instance), headers={"Allow": allow})
     if operation == "destroy":
-        instance, miss = await store.fetch_one(spec, _lookup_value(spec, request))
+        instance, miss = await _accessible_instance(spec, request, user_id)
         if instance is None:
             return _not_found(spec, allow, miss)
+        permission_error = await _access_permission(spec, request, auth, user_id, allow, instance)
+        if permission_error is not None:
+            return permission_error
         if (
             auth is not None
             and auth.get("owner_attname")
             and _attr(instance, auth["owner_attname"]) != user_id
         ):
             return _forbidden(auth, allow)
+        delete_tables = (spec.get("access") or {}).get("delete_tables")
+        if delete_tables is not None:
+            await store.access_delete(
+                delete_tables, _attr(instance, spec.get("pk_attname") or "id")
+            )
+            return Response(status_code=204, headers={"Allow": allow})
         for field in spec["fields"]:
             if field["kind"] == "nested_many":
                 for child in await store.fetch_children(field, _instance_pk(instance)):
                     await store.delete_row(field["child"], child)
         await store.delete_row(spec, instance)
         return Response(status_code=204, headers={"Allow": allow})
+    if operation in ("update", "partial_update") and (spec.get("access") or {}):
+        instance, miss = await _accessible_instance(spec, request, user_id)
+        if instance is None:
+            return _not_found(spec, allow, miss)
+        permission_error = await _access_permission(spec, request, auth, user_id, allow, instance)
+        if permission_error is not None:
+            return permission_error
     if raw_body is None:
         raw_body = await read_raw_body(request)
     payload, parse_error = _parse_json(raw_body)
@@ -2202,7 +2250,12 @@ async def handle(
         if auth is not None and auth.get("inject_owner_attname"):
             validated[auth["inject_owner_attname"]] = user_id
         create = spec.get("create") or {"style": "default"}
-        if create["style"] == "carryover":
+        if create["style"] == "parent_duplicate":
+            validated, error = await _parent_create_values(spec, create, request, validated, allow)
+            if error is not None:
+                return error
+            instance = await store.create_row(spec, validated)
+        elif create["style"] == "carryover":
             validated.update(nested)
             instance, carryover_error = await store.create_with_user_logic(spec, validated)
             if carryover_error is not None:
@@ -2231,10 +2284,11 @@ async def handle(
             instance = await store.create_row(spec, validated)
         else:
             raise RuntimeError("Custom create contract requires manual adaptation")
+        await _add_creator_member(spec, instance, user_id)
         return JSONResponse(
             await _serialize(spec, instance), status_code=201, headers={"Allow": allow}
         )
-    instance, miss = await store.fetch_one(spec, _lookup_value(spec, request))
+    instance, miss = await _accessible_instance(spec, request, user_id)
     if instance is None:
         return _not_found(spec, allow, miss)
     if (
@@ -2250,6 +2304,10 @@ async def handle(
         return JSONResponse(errors, status_code=400, headers={"Allow": allow})
     for name, value in validated.items():
         _set_attr(instance, name, value)
+    from datetime import datetime, timezone
+    for field in spec.get("storage", ()):
+        if field.get("auto_now"):
+            _set_attr(instance, field["name"], datetime.now(timezone.utc))
     await store.save_row(spec, instance)
     return JSONResponse(await _serialize(spec, instance), headers={"Allow": allow})
 
@@ -2342,7 +2400,11 @@ async def method_not_allowed(request: Request) -> Response:
         for route in resource["routes"]:
             regex = "^" + re.sub(r"\\\{[^}\\\\]*\\\}", "[^/]+", re.escape(route["path"])) + "$"
             if re.match(regex, request.url.path):
-                _user, error = await _require_user(request, auth, allow or "")
+                scoped_request = _access_request(resource, request)
+                _user, error = await _require_user(scoped_request, auth, allow or "")
+                if error is not None:
+                    return error
+                error = await _access_permission(resource, scoped_request, auth, _user, allow or "")
                 if error is not None:
                     return error
                 break
@@ -2364,6 +2426,8 @@ async def options_response(request: Request, path: str) -> Any:
         ),
         None,
     )
+    if resource_spec is not None:
+        request = _access_request(resource_spec, request)
     auth = resource_spec.get("auth") if resource_spec is not None else None
     user_id = None
     variant = spec["anonymous"]
@@ -2372,15 +2436,22 @@ async def options_response(request: Request, path: str) -> Any:
         if gate_error is not None:
             return gate_error
         variant = spec["authorized"]
+    if resource_spec is not None:
+        permission_error = await _access_permission(resource_spec, request, auth, user_id, allow)
+        if permission_error is not None:
+            return permission_error
     body = json.loads(json.dumps(variant))
     actions = body.get("actions")
     if isinstance(actions, dict) and "PUT" in actions:
         keep = False
         if resource_spec is not None:
-            instance, _miss = await store.fetch_one(
-                resource_spec, _lookup_value(resource_spec, request)
-            )
+            instance, _miss = await _accessible_instance(resource_spec, request, user_id)
             keep = instance is not None
+            if keep:
+                error = await _access_permission(
+                    resource_spec, request, auth, user_id, allow, instance
+                )
+                keep = error is None
             owner_attname = auth.get("owner_attname") if auth is not None else None
             if keep and owner_attname and _attr(instance, owner_attname) != user_id:
                 keep = False
@@ -2390,3 +2461,5 @@ async def options_response(request: Request, path: str) -> Any:
             body.pop("actions")
     return JSONResponse(body, headers={"Allow": allow})
 '''
+
+_RUNTIME += _ACCESS_RUNTIME

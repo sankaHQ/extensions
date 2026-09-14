@@ -176,6 +176,7 @@ def test_new_contract_is_hash_bound_without_changing_legacy_scan_hash():
     legacy = sample_scan(None, schema_version=7).to_dict()
     legacy.pop("scan_hash")
     legacy["serializer_details"][0].pop("create_contract")
+    legacy["serializer_details"][0].pop("storage")
     assert FrameworkScan.from_dict(legacy).with_hash().scan_hash == content_hash(legacy)
     original = sample_scan(lower(SOURCE))
     changed = lower(SOURCE.replace("100", "101"))

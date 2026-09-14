@@ -32,14 +32,14 @@ def test_hash_updater_records_each_manifest_dependency_closure(tmp_path: Path) -
         for name in names:
             _wheel(tmp_path, name)
 
-    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a24")
+    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a25")
 
     assert set(manifests) == set(MANIFEST_WHEELS)
     for package, payload in manifests.items():
         assert [wheel["name"] for wheel in payload["wheels"]] == list(MANIFEST_WHEELS[package])
         assert all(
             wheel["url"].startswith(
-                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a24/"
+                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a25/"
             )
             and len(wheel["sha256"]) == 64
             for wheel in payload["wheels"]
@@ -133,7 +133,7 @@ def test_hash_updater_rejects_an_incomplete_or_wrongly_tagged_wheel_set(tmp_path
     _wheel(tmp_path, "sanka_connector_sdk-0.1.0a12-py3-none-any.whl")
 
     with pytest.raises(RuntimeError, match="complete marketplace wheel set"):
-        update_manifests(tmp_path, release_tag="extensions-v0.1.0a24")
+        update_manifests(tmp_path, release_tag="extensions-v0.1.0a25")
     with pytest.raises(RuntimeError, match=r"extensions-v0\.1\.0a16"):
         update_manifests(tmp_path, release_tag="extensions-v0.1.0a16")
 
@@ -206,7 +206,7 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
         "sanka-extension-sdk": ("0.1.0a4", "sanka_extension_sdk-0.1.0a4-py3-none-any.whl", ""),
         "sanka-extension-drf-to-fastapi": (
             "0.1.0a12",
-            "sanka_extension_drf_to_fastapi-0.1.0a12-py3-none-any.whl",
+            "sanka_extension_drf_to_fastapi-0.1.0a13-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-fastapi = sanka_extension_drf_to_fastapi.__main__:main\n",
         ),
