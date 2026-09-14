@@ -16,6 +16,7 @@ members = [
     "sanka-connector-sdk",
     "sanka-connector-sqlite",
     "sanka-drf-replay",
+    "sanka-extension-business-flows",
     "sanka-extension-drf-to-fastapi",
     "sanka-extension-drf-to-flask",
     "sanka-extension-sdk",
@@ -1150,6 +1151,17 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 name = "sanka-drf-replay"
 version = "0.1.0a2"
 source = { editable = "packages/sanka-drf-replay" }
+
+[[package]]
+name = "sanka-extension-business-flows"
+version = "0.1.0a1"
+source = { editable = "packages/sanka-extension-business-flows" }
+dependencies = [
+    { name = "sanka-extension-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
 
 [[package]]
 name = "sanka-extension-drf-to-fastapi"

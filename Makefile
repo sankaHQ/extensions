@@ -10,7 +10,10 @@ check:
 	uv run pytest
 	uv run python -m pytest scripts/test_update_marketplace_hashes.py scripts/test_sdk_candidate.py -q
 
-.PHONY: build-release
+.PHONY: build-release build-business-flows
+
+build-business-flows:
+	uv run python scripts/build_business_flows.py
 
 build-release:
 	uv build --wheel --package sanka-extension-sdk --out-dir release/sdk-candidate --clear --no-create-gitignore

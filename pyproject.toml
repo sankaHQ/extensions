@@ -64,6 +64,7 @@ known-first-party = [
   "sanka_connector_postgres",
   "sanka_connector_sqlite",
   "sanka_extension_sdk",
+  "sanka_extension_business_flows",
   "sanka_extension_drf_to_fastapi",
   "sanka_extension_drf_to_flask",
 ]

@@ -1,0 +1,1885 @@
+{
+  "schema_version": "sanka-business-flow-catalog/v1",
+  "version": "0.1.0a1",
+  "categories": [
+    {
+      "id": "sales",
+      "title": "Sales & CRM",
+      "title_ja": "営業・CRM",
+      "description": "Move deals forward and prepare sales documents.",
+      "description_ja": "取引を進め、営業書類を作成します。"
+    },
+    {
+      "id": "billing",
+      "title": "Billing & Collections",
+      "title_ja": "請求・入金管理",
+      "description": "Prepare invoices and follow up on payments.",
+      "description_ja": "請求書の作成と入金確認を行います。"
+    },
+    {
+      "id": "purchasing",
+      "title": "Purchasing",
+      "title_ja": "購買管理",
+      "description": "Manage purchase approvals and supplier bills.",
+      "description_ja": "発注の承認と仕入請求を管理します。"
+    },
+    {
+      "id": "inventory",
+      "title": "Inventory",
+      "title_ja": "在庫管理",
+      "description": "Track stock movements and replenishment.",
+      "description_ja": "入出庫と在庫補充を管理します。"
+    },
+    {
+      "id": "expenses",
+      "title": "Expenses",
+      "title_ja": "経費管理",
+      "description": "Review expenses and prepare reimbursements.",
+      "description_ja": "経費の承認と精算準備を行います。"
+    },
+    {
+      "id": "projects",
+      "title": "Projects",
+      "title_ja": "プロジェクト管理",
+      "description": "Create task checklists and track deadlines.",
+      "description_ja": "タスクの作成と期限の確認を行います。"
+    },
+    {
+      "id": "support",
+      "title": "Support",
+      "title_ja": "サポート",
+      "description": "Assign tickets and follow up on requests.",
+      "description_ja": "問い合わせの担当割り当てと対応確認を行います。"
+    },
+    {
+      "id": "hr",
+      "title": "HR",
+      "title_ja": "人事管理",
+      "description": "Coordinate onboarding, leave and attendance.",
+      "description_ja": "入社準備、休暇、勤怠確認を行います。"
+    },
+    {
+      "id": "cross-department",
+      "title": "Cross-department",
+      "title_ja": "部門間の業務",
+      "description": "Connect sales, delivery, purchasing and accounting.",
+      "description_ja": "営業、納品、購買、経理の業務をつなぎます。"
+    }
+  ],
+  "recipes": [
+    {
+      "id": "sales.deal-to-estimate",
+      "category_id": "sales",
+      "title": "Deal to Estimate",
+      "title_ja": "取引から見積を作成",
+      "description": "Create a draft estimate when a deal is created.",
+      "description_ja": "取引の作成時に下書きの見積を作成します。",
+      "source_object_type": "deal",
+      "outcome": "estimate",
+      "parameters": [],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "sales.won-deal-to-order",
+      "category_id": "sales",
+      "title": "Won deal to order",
+      "title_ja": "受注した取引から受注を作成",
+      "description": "Create a draft order with the deal's customer and line items when its stage changes to the selected won stage.",
+      "description_ja": "指定した受注ステージへの変更時に、取引先と明細を引き継いだ受注の下書きを作成します。",
+      "source_object_type": "deal",
+      "outcome": "order",
+      "parameters": [
+        {
+          "key": "won_stage",
+          "kind": "text",
+          "title": "Won stage",
+          "title_ja": "受注した取引のステージ",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "deal_stage",
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "sales.stalled-deal-follow-up",
+      "category_id": "sales",
+      "title": "Stalled-deal follow-up",
+      "title_ja": "進捗がない取引の対応タスク",
+      "description": "Check selected stages daily in your workspace timezone. Create an assigned task for each deal unchanged for the selected number of days, once per inactive period.",
+      "description_ja": "毎日、ワークスペースの時刻で指定ステージを確認します。指定日数以上更新がない取引ごとに、担当者付きの対応タスクを一度作成します。",
+      "source_object_type": "deal",
+      "outcome": "task",
+      "parameters": [
+        {
+          "key": "local_hour",
+          "kind": "integer",
+          "title": "Run at (hour)",
+          "title_ja": "実行時刻（時）",
+          "required": false,
+          "default": 9,
+          "minimum": 0,
+          "maximum": 23,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "open_stages",
+          "kind": "string_list",
+          "title": "Open stages to check",
+          "title_ja": "確認する進行中のステージ",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "deal",
+          "provider": null
+        },
+        {
+          "key": "stale_days",
+          "kind": "integer",
+          "title": "Days without updates",
+          "title_ja": "更新がない日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "billing.order-to-invoice",
+      "category_id": "billing",
+      "title": "Order to invoice",
+      "title_ja": "受注から請求書を作成",
+      "description": "Order to invoice",
+      "description_ja": "受注から請求書を作成",
+      "source_object_type": "order",
+      "outcome": "invoice",
+      "parameters": [
+        {
+          "key": "invoice_notes",
+          "kind": "text",
+          "title": "Invoice notes",
+          "title_ja": "請求書の備考",
+          "required": false,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "billing.monthly-invoices",
+      "category_id": "billing",
+      "title": "Monthly consolidated invoices",
+      "title_ja": "月次の合算請求書を作成",
+      "description": "Create draft invoices for unbilled orders dated in the previous calendar month. Group by customer, currency and compatible tax rules. Run daily from the chosen billing day in your workspace timezone; invoice date is the previous month end.",
+      "description_ja": "前月の未請求受注から下書きの請求書を作成します。顧客・通貨・税の設定ごとに合算します。指定日以降、毎日ワークスペースの時刻で実行し、請求日は前月末とします。",
+      "source_object_type": "order",
+      "outcome": "grouped_invoice",
+      "parameters": [
+        {
+          "key": "local_hour",
+          "kind": "integer",
+          "title": "Run at hour",
+          "title_ja": "実行時刻",
+          "required": false,
+          "default": 9,
+          "minimum": 0,
+          "maximum": 23,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "billing_day",
+          "kind": "integer",
+          "title": "Start billing on day of month",
+          "title_ja": "請求処理を開始する日",
+          "required": false,
+          "default": 1,
+          "minimum": 1,
+          "maximum": 28,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "invoice_due_days",
+          "kind": "integer",
+          "title": "Days from invoice date to payment due",
+          "title_ja": "請求日から支払期限までの日数",
+          "required": false,
+          "default": 30,
+          "minimum": 0,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "billing.overdue-reminders",
+      "category_id": "billing",
+      "title": "Overdue invoice reminders",
+      "title_ja": "支払期限が過ぎた請求書の確認",
+      "description": "Check sent and overdue invoices daily in your workspace timezone. Create an assigned payment follow-up task once per invoice due date when an unpaid balance remains.",
+      "description_ja": "送信済み・遅延中の請求書を毎日ワークスペースの時刻で確認します。未入金額がある場合、請求書の支払期限ごとに担当者付きの入金確認タスクを一度作成します。",
+      "source_object_type": "invoice",
+      "outcome": "reminder",
+      "parameters": [
+        {
+          "key": "local_hour",
+          "kind": "integer",
+          "title": "Run at (hour)",
+          "title_ja": "実行時刻（時）",
+          "required": false,
+          "default": 9,
+          "minimum": 0,
+          "maximum": 23,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "overdue_days",
+          "kind": "integer",
+          "title": "Days past payment due",
+          "title_ja": "支払期限からの経過日数",
+          "required": false,
+          "default": 1,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "purchasing.purchase-order-to-bill",
+      "category_id": "purchasing",
+      "title": "Purchase order to bill",
+      "title_ja": "発注から仕入請求を作成",
+      "description": "Create one draft supplier bill from each new purchase order, retaining its supplier and line items. Existing linked bills are skipped.",
+      "description_ja": "新しい発注から仕入先と明細を引き継いで仕入請求の下書きを作成します。請求が紐づいている発注はスキップします。",
+      "source_object_type": "purchase_order",
+      "outcome": "bill",
+      "parameters": [
+        {
+          "key": "use_po_date",
+          "kind": "boolean",
+          "title": "Use purchase order date",
+          "title_ja": "発注日を発行日に使用",
+          "required": false,
+          "default": true,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "bill_due_days",
+          "kind": "integer",
+          "title": "Bill due after (days)",
+          "title_ja": "支払期限までの日数",
+          "required": false,
+          "default": 30,
+          "minimum": 0,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "bill_notes",
+          "kind": "text",
+          "title": "Bill notes",
+          "title_ja": "仕入請求の備考",
+          "required": false,
+          "default": "",
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "purchasing.purchase-approvals",
+      "category_id": "purchasing",
+      "title": "Purchase approvals",
+      "title_ja": "発注の承認",
+      "description": "Request approval for each new purchase order. Selected approvers review it in order, and the workflow records their decision.",
+      "description_ja": "新しい発注の承認を依頼します。選択した承認者が順番に確認し、ワークフローに承認・却下の結果を記録します。",
+      "source_object_type": "purchase_order",
+      "outcome": "approval",
+      "parameters": [
+        {
+          "key": "approver_ids",
+          "kind": "string_list",
+          "title": "Approvers",
+          "title_ja": "承認者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "purchasing.supplier-payment-reminders",
+      "category_id": "purchasing",
+      "title": "Supplier payment reminders",
+      "title_ja": "仕入先への支払確認",
+      "description": "Create assigned tasks to check received or approved supplier bills approaching their due date, including overdue bills. Paid bills are excluded.",
+      "description_ja": "支払期限が近い、または期限を過ぎた受領済み・承認済みの仕入請求について、担当者に確認タスクを作成します。支払済みの請求は対象外です。",
+      "source_object_type": "bill",
+      "outcome": "reminder",
+      "parameters": [
+        {
+          "key": "local_hour",
+          "kind": "integer",
+          "title": "Run at (hour)",
+          "title_ja": "実行時刻（時）",
+          "required": false,
+          "default": 9,
+          "minimum": 0,
+          "maximum": 23,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "days_before_due",
+          "kind": "integer",
+          "title": "Days before payment is due",
+          "title_ja": "支払期限の何日前に確認するか",
+          "required": false,
+          "default": 7,
+          "minimum": 0,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "inventory.order-to-stock-movement",
+      "category_id": "inventory",
+      "title": "Order to stock movement",
+      "title_ja": "受注から出庫を作成",
+      "description": "Create stock-out transactions from order line quantities using the selected inventory rules.",
+      "description_ja": "受注の明細数量と選択した在庫ルールに基づいて出庫を作成します。",
+      "source_object_type": "order",
+      "outcome": "stock_out",
+      "parameters": [
+        {
+          "key": "rotate_inventory",
+          "kind": "boolean",
+          "title": "Use inventory with available stock",
+          "title_ja": "在庫がある保管先から出庫",
+          "required": false,
+          "default": true,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "subtract_from_components",
+          "kind": "boolean",
+          "title": "Subtract component stock",
+          "title_ja": "構成商品の在庫を減らす",
+          "required": false,
+          "default": false,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "require_all_components_in_stock",
+          "kind": "boolean",
+          "title": "Require all components in stock",
+          "title_ja": "すべての構成商品の在庫を確認",
+          "required": false,
+          "default": true,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "inventory.low-stock-replenishment",
+      "category_id": "inventory",
+      "title": "Low-stock replenishment",
+      "title_ja": "在庫不足の補充依頼",
+      "description": "Create an assigned replenishment task when an active inventory record falls below the available-stock threshold. Keep one open task per inventory record.",
+      "description_ja": "有効な在庫の利用可能数が基準を下回った場合、担当者に補充依頼タスクを作成します。同じ在庫に未完了のタスクがある場合は追加しません。",
+      "source_object_type": "inventory",
+      "outcome": "replenishment_task",
+      "parameters": [
+        {
+          "key": "local_hour",
+          "kind": "integer",
+          "title": "Run at (hour)",
+          "title_ja": "実行時刻（時）",
+          "required": false,
+          "default": 9,
+          "minimum": 0,
+          "maximum": 23,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "stock_threshold",
+          "kind": "integer",
+          "title": "Replenish below",
+          "title_ja": "補充する在庫数の基準",
+          "required": false,
+          "default": 10,
+          "minimum": 0,
+          "maximum": 1000000,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "inventory.stock-discrepancy-review",
+      "category_id": "inventory",
+      "title": "Stock discrepancy review",
+      "title_ja": "在庫差異の確認",
+      "description": "Create assigned review tasks for negative stock quantities or recorded totals that do not match available, committed and unavailable quantities.",
+      "description_ja": "在庫数量がマイナスの場合や、在庫総数と利用可能・引当済み・利用不可の合計が一致しない場合、担当者に確認タスクを作成します。",
+      "source_object_type": "inventory",
+      "outcome": "discrepancy_task",
+      "parameters": [
+        {
+          "key": "local_hour",
+          "kind": "integer",
+          "title": "Run at (hour)",
+          "title_ja": "実行時刻（時）",
+          "required": false,
+          "default": 9,
+          "minimum": 0,
+          "maximum": 23,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "difference_tolerance",
+          "kind": "integer",
+          "title": "Quantity difference to allow",
+          "title_ja": "許容する数量差",
+          "required": false,
+          "default": 0,
+          "minimum": 0,
+          "maximum": 1000000,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "expenses.expense-approvals",
+      "category_id": "expenses",
+      "title": "Expense approvals",
+      "title_ja": "経費の承認",
+      "description": "When an expense is created in Sanka, ask the selected approvers to review it in order. Record the decision in workflow history.",
+      "description_ja": "Sankaで経費を作成したとき、選択した承認者が順に確認し、判断をワークフロー履歴に記録します。",
+      "source_object_type": "expense",
+      "outcome": "approval",
+      "parameters": [
+        {
+          "key": "approver_ids",
+          "kind": "string_list",
+          "title": "Approvers",
+          "title_ja": "承認者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "expenses.reimbursement-preparation",
+      "category_id": "expenses",
+      "title": "Reimbursement preparation",
+      "title_ja": "経費精算の準備",
+      "description": "Create assigned preparation tasks for approved expenses with an unsettled balance. Review reimbursement details before making a payment.",
+      "description_ja": "未精算額が残る承認済みの経費に、精算準備の担当タスクを作成します。支払前に内容を確認できます。",
+      "source_object_type": "expense",
+      "outcome": "reimbursement_task",
+      "parameters": [
+        {
+          "key": "local_hour",
+          "kind": "integer",
+          "title": "Run at (hour)",
+          "title_ja": "実行時刻（時）",
+          "required": false,
+          "default": 9,
+          "minimum": 0,
+          "maximum": 23,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "expenses.missing-receipt-reminders",
+      "category_id": "expenses",
+      "title": "Missing-receipt reminders",
+      "title_ja": "領収書の未提出を確認",
+      "description": "Create assigned follow-up tasks for submitted or approved expenses that still have no attachment after the chosen waiting period.",
+      "description_ja": "指定日数を過ぎても添付ファイルがない提出済み・承認済みの経費に、領収書の確認タスクを作成します。",
+      "source_object_type": "expense",
+      "outcome": "missing_receipt",
+      "parameters": [
+        {
+          "key": "local_hour",
+          "kind": "integer",
+          "title": "Run at (hour)",
+          "title_ja": "実行時刻（時）",
+          "required": false,
+          "default": 9,
+          "minimum": 0,
+          "maximum": 23,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "wait_days",
+          "kind": "integer",
+          "title": "Wait after creation (days)",
+          "title_ja": "作成からの待機日数",
+          "required": false,
+          "default": 3,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "projects.project-task-checklist",
+      "category_id": "projects",
+      "title": "Project task checklist",
+      "title_ja": "プロジェクトのタスクリスト",
+      "description": "When a project is created in Sanka, create and assign each checklist task in that project.",
+      "description_ja": "Sankaでプロジェクトを作成したとき、指定したタスクをそのプロジェクトに作成し、担当者を割り当てます。",
+      "source_object_type": "project",
+      "outcome": "checklist",
+      "parameters": [
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "task_titles",
+          "kind": "string_list",
+          "title": "Tasks (one per line)",
+          "title_ja": "タスク（1行に1件）",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "projects.milestone-reminders",
+      "category_id": "projects",
+      "title": "Milestone reminders",
+      "title_ja": "マイルストーンの期限確認",
+      "description": "Track project tasks with the specified names as milestones. Create an assigned reminder subtask when an open milestone approaches its deadline.",
+      "description_ja": "指定した名前のプロジェクトタスクをマイルストーンとして確認し、未完了のタスクの期限が近づいたら、担当者付きの確認用サブタスクを作成します。",
+      "source_object_type": "task",
+      "outcome": "reminder",
+      "parameters": [
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "task_names",
+          "kind": "string_list",
+          "title": "Milestone task names (one per line)",
+          "title_ja": "マイルストーンのタスク名（1行に1件）",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "open_statuses",
+          "kind": "string_list",
+          "title": "Open task statuses",
+          "title_ja": "未完了のタスクステータス",
+          "required": true,
+          "default": [
+            "todo",
+            "in_progress"
+          ],
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "days_before_due",
+          "kind": "integer",
+          "title": "Days before deadline",
+          "title_ja": "期限の何日前から確認するか",
+          "required": false,
+          "default": 7,
+          "minimum": 0,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "projects.overdue-task-escalation",
+      "category_id": "projects",
+      "title": "Overdue-task escalation",
+      "title_ja": "期限超過タスクの対応依頼",
+      "description": "Create an assigned escalation subtask when an open task is overdue. Keep its parent task and project links.",
+      "description_ja": "未完了のタスクが期限を超過したら、元のタスクとプロジェクトに紐づく対応依頼サブタスクを作成し、担当者を割り当てます。",
+      "source_object_type": "task",
+      "outcome": "escalation",
+      "parameters": [
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "open_statuses",
+          "kind": "string_list",
+          "title": "Open task statuses",
+          "title_ja": "未完了のタスクステータス",
+          "required": true,
+          "default": [
+            "todo",
+            "in_progress"
+          ],
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "overdue_days",
+          "kind": "integer",
+          "title": "Days overdue",
+          "title_ja": "期限超過の日数",
+          "required": false,
+          "default": 1,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "support.ticket-assignment",
+      "category_id": "support",
+      "title": "Ticket assignment",
+      "title_ja": "問い合わせの担当割り当て",
+      "description": "When a ticket is created in Sanka, assign its owner from the selected members in turn. Keep tickets that already have an owner.",
+      "description_ja": "Sankaで問い合わせを作成したとき、選択したメンバーに順番に担当を割り当てます。担当者が設定済みの場合は変更しません。",
+      "source_object_type": "ticket",
+      "outcome": "assignment",
+      "parameters": [
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "support.unresolved-ticket-escalation",
+      "category_id": "support",
+      "title": "Unresolved-ticket escalation",
+      "title_ja": "未解決の問い合わせの対応依頼",
+      "description": "Create an assigned follow-up task for unresolved tickets that have not been updated for the configured number of days.",
+      "description_ja": "未解決の問い合わせが指定した日数以上更新されていない場合、対応依頼タスクを作成し、担当者を割り当てます。",
+      "source_object_type": "ticket",
+      "outcome": "escalation",
+      "parameters": [
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "stale_days",
+          "kind": "integer",
+          "title": "Days without progress",
+          "title_ja": "進捗がない日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "support.resolution-follow-up",
+      "category_id": "support",
+      "title": "Resolution follow-up",
+      "title_ja": "問い合わせ解決後の確認",
+      "description": "Create an assigned follow-up task after a ticket's recorded resolution time. Reopened and archived tickets are excluded.",
+      "description_ja": "問い合わせに記録された解決日時から指定した日数が経過したら、確認タスクを作成し、担当者を割り当てます。再開またはアーカイブした問い合わせは対象外です。",
+      "source_object_type": "ticket",
+      "outcome": "follow_up",
+      "parameters": [
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "wait_days",
+          "kind": "integer",
+          "title": "Days after resolution",
+          "title_ja": "解決からの日数",
+          "required": false,
+          "default": 3,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "hr.employee-onboarding",
+      "category_id": "hr",
+      "title": "Employee onboarding",
+      "title_ja": "入社準備",
+      "description": "Create assigned checklist tasks for active employees near their recorded start date. Configure the preparation and catch-up windows.",
+      "description_ja": "記録された入社日が近い在籍中の従業員について、チェックリストのタスクを作成し、担当者を割り当てます。準備を始める日数と入社後の対象期間を設定できます。",
+      "source_object_type": "employee",
+      "outcome": "checklist",
+      "parameters": [
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "task_titles",
+          "kind": "string_list",
+          "title": "Tasks (one per line)",
+          "title_ja": "タスク（1行に1件）",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "days_before_start",
+          "kind": "integer",
+          "title": "Days before start date",
+          "title_ja": "入社日の何日前から準備するか",
+          "required": false,
+          "default": 7,
+          "minimum": 0,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "catch_up_days",
+          "kind": "integer",
+          "title": "Include employees who started within (days)",
+          "title_ja": "入社後何日まで対象に含めるか",
+          "required": false,
+          "default": 7,
+          "minimum": 0,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "hr.leave-approvals",
+      "category_id": "hr",
+      "title": "Leave approvals",
+      "title_ja": "休暇の承認",
+      "description": "When an absence is created in Sanka, send it to the selected reviewers for sequential approval in the native workflow.",
+      "description_ja": "Sankaで休暇申請を作成したとき、選択した承認者に順番に承認を依頼します。",
+      "source_object_type": "absence",
+      "outcome": "approval",
+      "parameters": [
+        {
+          "key": "approver_ids",
+          "kind": "string_list",
+          "title": "Approvers",
+          "title_ja": "承認者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "hr.missing-attendance-reminders",
+      "category_id": "hr",
+      "title": "Missing-attendance reminders",
+      "title_ja": "勤怠の未入力を確認",
+      "description": "Check past expected workdays for selected employees and create a task when no attendance entry exists. Skip excluded dates and approved leave.",
+      "description_ja": "選択した従業員について、過去の勤務予定日に勤怠記録がなければ確認タスクを作成します。対象外の日付と承認済みの休暇は除きます。",
+      "source_object_type": "attendance",
+      "outcome": "missing_attendance",
+      "parameters": [
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "employee_ids",
+          "kind": "string_list",
+          "title": "Employees to check",
+          "title_ja": "勤怠を確認する従業員",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "weekdays",
+          "kind": "string_list",
+          "title": "Expected workdays",
+          "title_ja": "勤務予定の曜日",
+          "required": true,
+          "default": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            {
+              "value": "mon",
+              "title": "Monday",
+              "title_ja": "月曜日",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "tue",
+              "title": "Tuesday",
+              "title_ja": "火曜日",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "wed",
+              "title": "Wednesday",
+              "title_ja": "水曜日",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "thu",
+              "title": "Thursday",
+              "title_ja": "木曜日",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "fri",
+              "title": "Friday",
+              "title_ja": "金曜日",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "sat",
+              "title": "Saturday",
+              "title_ja": "土曜日",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "sun",
+              "title": "Sunday",
+              "title_ja": "日曜日",
+              "source_endpoint_id": null
+            }
+          ],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "excluded_dates",
+          "kind": "string_list",
+          "title": "Excluded dates (YYYY-MM-DD, one per line)",
+          "title_ja": "対象外の日付（YYYY-MM-DD、1行に1件）",
+          "required": false,
+          "default": [],
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "lookback_days",
+          "kind": "integer",
+          "title": "Past days to check",
+          "title_ja": "過去何日分を確認するか",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 31,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "cross-department.sales-delivery-billing",
+      "category_id": "cross-department",
+      "title": "Sales to delivery and billing",
+      "title_ja": "営業から納品準備・請求へ",
+      "description": "When a deal reaches the selected won stage, create or reuse its order, prepare an assigned delivery task, and create a linked draft invoice. Existing invoices remain unchanged.",
+      "description_ja": "指定の受注ステージになった取引から、受注、担当者付きの納品準備タスク、下書きの請求書を作成します。既存の受注や請求書は再利用します。",
+      "source_object_type": "deal",
+      "outcome": "delivery_invoice",
+      "parameters": [
+        {
+          "key": "won_stage",
+          "kind": "text",
+          "title": "Won stage",
+          "title_ja": "受注した取引のステージ",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "deal_stage",
+          "provider": null
+        },
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "invoice_due_days",
+          "kind": "integer",
+          "title": "Invoice payment due after (days)",
+          "title_ja": "請求書の支払期限までの日数",
+          "required": false,
+          "default": 30,
+          "minimum": 0,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "cross-department.replenishment-purchasing",
+      "category_id": "cross-department",
+      "title": "Replenishment to purchasing",
+      "title_ja": "補充依頼から購買・入庫へ",
+      "description": "Check one inventory daily. Below the threshold, prepare a draft purchase order for the selected supplier and an assigned receiving task. Outstanding purchases block duplicates.",
+      "description_ja": "選択した在庫を毎日確認し、基準を下回ると指定の仕入先への下書き発注と入庫準備タスクを作成します。未納品の発注がある場合は重複作成しません。",
+      "source_object_type": "inventory",
+      "outcome": "purchase_receiving",
+      "parameters": [
+        {
+          "key": "inventory_id",
+          "kind": "record",
+          "title": "Inventory",
+          "title_ja": "在庫",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "inventory",
+          "provider": null
+        },
+        {
+          "key": "supplier_id",
+          "kind": "record",
+          "title": "Supplier",
+          "title_ja": "仕入先",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "company",
+          "provider": null
+        },
+        {
+          "key": "stock_threshold",
+          "kind": "integer",
+          "title": "Replenish below",
+          "title_ja": "補充する在庫数の基準",
+          "required": false,
+          "default": 10,
+          "minimum": 0,
+          "maximum": 1000000,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "reorder_quantity",
+          "kind": "integer",
+          "title": "Quantity to purchase",
+          "title_ja": "発注数量",
+          "required": true,
+          "default": null,
+          "minimum": 1,
+          "maximum": 1000000,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "unit_price",
+          "kind": "text",
+          "title": "Unit price before tax",
+          "title_ja": "税抜単価",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "currency",
+          "kind": "choice",
+          "title": "Currency",
+          "title_ja": "通貨",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            {
+              "value": "JPY",
+              "title": "JPY",
+              "title_ja": "JPY",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "USD",
+              "title": "USD",
+              "title_ja": "USD",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "EUR",
+              "title": "EUR",
+              "title_ja": "EUR",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "GBP",
+              "title": "GBP",
+              "title_ja": "GBP",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "AUD",
+              "title": "AUD",
+              "title_ja": "AUD",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "CAD",
+              "title": "CAD",
+              "title_ja": "CAD",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "SGD",
+              "title": "SGD",
+              "title_ja": "SGD",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "CNY",
+              "title": "CNY",
+              "title_ja": "CNY",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "TWD",
+              "title": "TWD",
+              "title_ja": "TWD",
+              "source_endpoint_id": null
+            },
+            {
+              "value": "KRW",
+              "title": "KRW",
+              "title_ja": "KRW",
+              "source_endpoint_id": null
+            }
+          ],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "tax_rate",
+          "kind": "integer",
+          "title": "Tax rate (%)",
+          "title_ja": "税率（%）",
+          "required": false,
+          "default": 0,
+          "minimum": 0,
+          "maximum": 100,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "cross-department.expenses-accounting",
+      "category_id": "cross-department",
+      "title": "Expenses to accounting",
+      "title_ja": "経費から経理への引き継ぎ",
+      "description": "Check approved or reimbursed expenses daily and assign an accounting review task. Review accounts, tax and supporting documents; no journal or external posting is created.",
+      "description_ja": "承認済み・精算済みの経費を毎日確認し、経理担当者の確認タスクを作成します。勘定科目・税区分・証憑を確認するためのタスクで、仕訳の作成や外部への送信は行いません。",
+      "source_object_type": "expense",
+      "outcome": "accounting_task",
+      "parameters": [
+        {
+          "key": "assignee_ids",
+          "kind": "string_list",
+          "title": "Assignees",
+          "title_ja": "担当者",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "workspace_user",
+          "provider": null
+        },
+        {
+          "key": "due_days",
+          "kind": "integer",
+          "title": "Due after (days)",
+          "title_ja": "期限までの日数",
+          "required": false,
+          "default": 7,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "definition_only"
+    },
+    {
+      "id": "billing.hubspot-deal-invoices",
+      "category_id": "billing",
+      "title": "HubSpot deals to orders and draft invoices",
+      "title_ja": "HubSpotの取引から注文・下書き請求書を作成",
+      "description": "HubSpot deals to orders and draft invoices",
+      "description_ja": "HubSpotの取引から注文・下書き請求書を作成",
+      "source_object_type": "order",
+      "outcome": "hubspot_invoice",
+      "parameters": [
+        {
+          "key": "source_endpoint_id",
+          "kind": "endpoint",
+          "title": "HubSpot data endpoint",
+          "title_ja": "HubSpotのデータエンドポイント",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": "hubspot"
+        },
+        {
+          "key": "interval_minutes",
+          "kind": "integer",
+          "title": "Run every (minutes)",
+          "title_ja": "実行間隔（分）",
+          "required": false,
+          "default": 30,
+          "minimum": 5,
+          "maximum": 1440,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "mapping_template_id",
+          "kind": "record",
+          "title": "Saved order import mapping",
+          "title_ja": "保存済みの注文インポートのマッピング",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "integration_mapping_template",
+          "provider": "hubspot"
+        },
+        {
+          "key": "updated_since",
+          "kind": "text",
+          "title": "Import deals updated since (YYYY-MM-DD, UTC)",
+          "title_ja": "この日以降に更新された取引をインポート（YYYY-MM-DD、UTC）",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        },
+        {
+          "key": "pipeline_id",
+          "kind": "text",
+          "title": "Pipeline",
+          "title_ja": "パイプライン",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "hubspot_pipeline",
+          "provider": null
+        },
+        {
+          "key": "deal_stage_ids",
+          "kind": "string_list",
+          "title": "Eligible deal stages",
+          "title_ja": "対象の取引ステージ",
+          "required": true,
+          "default": null,
+          "minimum": null,
+          "maximum": null,
+          "options": [],
+          "object_type": "hubspot_deal_stage",
+          "provider": null
+        },
+        {
+          "key": "invoice_due_days",
+          "kind": "integer",
+          "title": "Payment due after (days)",
+          "title_ja": "支払期限までの日数",
+          "required": false,
+          "default": 30,
+          "minimum": 1,
+          "maximum": 365,
+          "options": [],
+          "object_type": null,
+          "provider": null
+        }
+      ],
+      "apps": [
+        "hubspot",
+        "sanka"
+      ],
+      "version": 1,
+      "generation": "blueprint_v3"
+    }
+  ]
+}
