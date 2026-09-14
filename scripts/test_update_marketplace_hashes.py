@@ -205,8 +205,8 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
         ),
         "sanka-extension-sdk": ("0.1.0a4", "sanka_extension_sdk-0.1.0a4-py3-none-any.whl", ""),
         "sanka-extension-drf-to-fastapi": (
-            "0.1.0a11",
-            "sanka_extension_drf_to_fastapi-0.1.0a11-py3-none-any.whl",
+            "0.1.0a12",
+            "sanka_extension_drf_to_fastapi-0.1.0a12-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-fastapi = sanka_extension_drf_to_fastapi.__main__:main\n",
         ),

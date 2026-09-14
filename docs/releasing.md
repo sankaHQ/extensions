@@ -2,7 +2,11 @@
 
 ## Current candidate
 
-`extensions-v0.1.0a25` prepares DRF-to-Flask 0.1.0a7 with stock ViewSet CRUD and bounded serializer support. DRF-to-FastAPI remains 0.1.0a11. Custom handlers, querysets, permission rules and middleware
+This candidate also prepares DRF-to-Flask 0.1.0a7 with stock ViewSet CRUD and bounded serializer support.
+
+`extensions-v0.1.0a25` prepares DRF-to-FastAPI 0.1.0a12 with UUID and Boolean
+field support and primary-key URL aliases. Writable UUID primary keys and custom
+field behavior remain unsupported. Custom handlers, querysets, permission rules and middleware
 remain subject to explicit compatibility checks. The SDK and other implementing
 packages remain unchanged.
 

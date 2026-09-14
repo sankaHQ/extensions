@@ -1165,7 +1165,7 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 
 [[package]]
 name = "sanka-extension-drf-to-fastapi"
-version = "0.1.0a11"
+version = "0.1.0a12"
 source = { editable = "packages/sanka-extension-drf-to-fastapi" }
 dependencies = [
     { name = "sanka-drf-replay" },

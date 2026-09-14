@@ -30,7 +30,7 @@ LOCAL_MANIFEST_WHEELS = {
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
         "sanka_drf_replay-0.1.0a2-py3-none-any.whl",
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-        "sanka_extension_drf_to_fastapi-0.1.0a11-py3-none-any.whl",
+        "sanka_extension_drf_to_fastapi-0.1.0a12-py3-none-any.whl",
     ),
     "sanka-connector-markdown": (
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",

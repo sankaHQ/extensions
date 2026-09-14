@@ -22,7 +22,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-fastapi",
-            "version": "0.1.0a11",
+            "version": "0.1.0a12",
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },

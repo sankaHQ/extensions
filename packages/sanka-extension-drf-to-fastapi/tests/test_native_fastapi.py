@@ -113,6 +113,7 @@ def _run_probe(
     *,
     output: Path | None = None,
     max_body_bytes: int | None = None,
+    seed: dict[str, Any] | None = None,
     scenarios: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     env = _clean_env()
@@ -130,6 +131,8 @@ def _run_probe(
         "--scenarios",
         json.dumps(SCENARIOS if scenarios is None else scenarios),
     ]
+    if seed is not None:
+        argv.extend(["--seed", json.dumps(seed)])
     if output is not None:
         argv.extend(["--output", str(output)])
     outcome = subprocess.run(
@@ -705,6 +708,7 @@ def test_native_plan_explains_middleware_in_legacy_scan(crud_project: Path) -> N
     for view in payload.get("view_details", []):
         view.pop("listing", None)
         view.pop("carryover", None)
+        view.pop("lookup_url_kwarg", None)
 
     def strip_new_serializer_fields(serializer: dict[str, object]) -> None:
         serializer.pop("create_contract", None)
@@ -712,6 +716,8 @@ def test_native_plan_explains_middleware_in_legacy_scan(crud_project: Path) -> N
         assert isinstance(fields, list)
         for item in fields:
             item.pop("timezone", None)
+            item.pop("uuid_default", None)
+            item.pop("default_on_create_only", None)
             child = item.get("child")
             if isinstance(child, dict):
                 strip_new_serializer_fields(child)
