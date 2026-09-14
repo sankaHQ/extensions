@@ -113,6 +113,7 @@ def _run_probe(
     *,
     output: Path | None = None,
     max_body_bytes: int | None = None,
+    seed: dict[str, Any] | None = None,
     scenarios: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     env = _clean_env()
@@ -130,6 +131,8 @@ def _run_probe(
         "--scenarios",
         json.dumps(SCENARIOS if scenarios is None else scenarios),
     ]
+    if seed is not None:
+        argv.extend(["--seed", json.dumps(seed)])
     if output is not None:
         argv.extend(["--output", str(output)])
     outcome = subprocess.run(

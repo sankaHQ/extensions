@@ -23,6 +23,7 @@ def main() -> int:
     parser.add_argument("--output", default=None)
     parser.add_argument("--database", required=True)
     parser.add_argument("--scenarios", required=True)
+    parser.add_argument("--seed", default=None)
     args = parser.parse_args()
 
     project = Path(args.project).resolve()
@@ -40,7 +41,12 @@ def main() -> int:
     from inventory.models import Gadget  # type: ignore[import-not-found]
 
     Gadget.objects.all().delete()
-    Gadget.objects.create(id=1, name="Alpha", quantity=3, notes="")
+    seed = (
+        json.loads(args.seed)
+        if args.seed
+        else {"id": 1, "name": "Alpha", "quantity": 3, "notes": ""}
+    )
+    Gadget.objects.create(**seed)
 
     scenarios: list[dict[str, Any]] = json.loads(args.scenarios)
     if args.mode == "source":
@@ -56,7 +62,9 @@ def main() -> int:
         "results": results,
         "database": list(Gadget.objects.order_by("id").values("id", "name", "quantity", "notes")),
     }
-    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
+    print(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str)
+    )
     return 0
 
 

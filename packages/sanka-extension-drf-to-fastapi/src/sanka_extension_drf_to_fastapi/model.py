@@ -172,6 +172,8 @@ class SerializerFieldIR:
     supported: bool = True
     timezone: str | None = None
     coerce_to_string: bool = False
+    uuid_default: bool = False
+    default_on_create_only: bool = False
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> SerializerFieldIR:
@@ -258,6 +260,7 @@ class ViewIR:
     name: str
     auth: ViewAuthIR | None = None
     lookup_regex: str | None = None
+    lookup_url_kwarg: str | None = None
     listing: dict[str, Any] = field(default_factory=dict)
     carryover: dict[str, Any] = field(default_factory=dict)
 
@@ -270,6 +273,7 @@ class ViewIR:
             lookup_regex=(
                 str(payload["lookup_regex"]) if payload.get("lookup_regex") is not None else None
             ),
+            lookup_url_kwarg=payload.get("lookup_url_kwarg"),
             listing=dict(payload.get("listing") or {}),
             carryover=dict(payload.get("carryover") or {}),
         )
@@ -358,6 +362,13 @@ class FrameworkScan:
         if self.schema_version < 8:
             for serializer in payload.get("serializer_details", []):
                 _strip_create_contract(serializer)
+        if self.schema_version < 9:
+            for view in payload.get("view_details", []):
+                view.pop("lookup_url_kwarg", None)
+            for serializer in payload.get("serializer_details", []):
+                _strip_field_keys(
+                    serializer.get("fields", []), ("uuid_default", "default_on_create_only")
+                )
         return payload
 
     def with_hash(self) -> FrameworkScan:

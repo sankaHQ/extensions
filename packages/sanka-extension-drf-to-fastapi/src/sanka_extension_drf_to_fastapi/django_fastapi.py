@@ -174,7 +174,7 @@ def scan_django(
     permissions = sorted({value for route in routes for value in route.permissions})
     authentication = sorted({value for route in routes for value in route.authentication})
     scan = FrameworkScan(
-        schema_version=8,
+        schema_version=9,
         source=".",
         language="python",
         framework="django-rest-framework",
@@ -937,6 +937,8 @@ def _field_payload(field: SerializerFieldIR) -> dict[str, Any]:
         "name": field.name,
         "kind": field.kind,
         "coerce_to_string": field.coerce_to_string,
+        "uuid_default": field.uuid_default,
+        "default_on_create_only": field.default_on_create_only,
         "timezone": field.timezone,
         "required": field.required,
         "read_only": field.read_only,
@@ -1286,6 +1288,7 @@ def _render_native_output(
                 "pk_attname": ir.pk_attname,
                 "ordering": list(ir.ordering),
                 "lookup": ir.lookup,
+                "lookup_url_kwarg": view_ir.lookup_url_kwarg if view_ir else None,
                 "lookup_regex": view_ir.lookup_regex if view_ir is not None else None,
                 "listing": dict(view_ir.listing) if view_ir is not None else {},
                 "view_carryover": (
@@ -2179,7 +2182,10 @@ def _native_route_support(
             carryover = carried
             manual_operations = {}
     result.view_details[view_name] = replace_dataclass(
-        result.view_details[view_name], listing=listing, carryover=carryover
+        result.view_details[view_name],
+        listing=listing,
+        carryover=carryover,
+        lookup_url_kwarg=getattr(view_class, "lookup_url_kwarg", None),
     )
     lookup_reason = _custom_lookup_adaptation_reason(
         view_class,
@@ -2203,9 +2209,10 @@ def _custom_lookup_adaptation_reason(
 ) -> RouteAdaptationReason | None:
     """Validate the narrow custom-lookup envelope used by native CRUD.
 
-    A native detail lookup must name the same URL kwarg and model field, be
-    unique, and use a scalar serializer field whose value the generated stores
-    can coerce without Django. This is intentionally narrower than everything
+    A primary-key lookup may use a separate URL kwarg. Other detail lookups
+    must name the same URL kwarg and unique model field, with a scalar serializer
+    field whose value the generated stores can coerce without Django.
+    This is intentionally narrower than everything
     DRF accepts: it prevents a generated ``get()`` from changing one-object
     semantics or quietly querying the primary key instead.
     """
@@ -2220,7 +2227,7 @@ def _custom_lookup_adaptation_reason(
             f"Lookup names must be Python identifiers: field={lookup_field!r}, "
             f"URL kwarg={lookup_kwarg!r}.",
         )
-    if lookup_kwarg != lookup_field:
+    if lookup_field != "pk" and lookup_kwarg != lookup_field:
         return _adaptation_reason(
             "SANKA_DRF_LOOKUP_URL_KWARG_UNSUPPORTED",
             "lookup-field",
@@ -2234,6 +2241,8 @@ def _custom_lookup_adaptation_reason(
             "lookup-field",
             f"Detail route {path!r} does not expose the lookup kwarg {lookup_kwarg!r}.",
         )
+    if lookup_field == "pk":
+        return None
     queryset = getattr(view_class, "queryset", None)
     model = getattr(queryset, "model", None)
     if model is None:
@@ -3257,6 +3266,15 @@ def _build_serializer_ir(
         if field_ir.kind == "nested_many" and not field_ir.read_only:
             has_writable_nested = True
 
+    if model._meta.pk.get_internal_type() == "UUIDField" and not any(
+        field.kind == "uuid"
+        and field.read_only
+        and (field.attname or field.name) == model._meta.pk.attname
+        for field in fields
+    ):
+        # Do not infer an integer key or change Django primary-key mutation semantics.
+        supported = False
+
     create_style = "default"
     create_source: str | None = None
     create_contract: dict[str, Any] | None = None
@@ -3451,9 +3469,12 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
     validators_module = importlib.import_module("django.core.validators")
     if type(field) is relations_module.PrimaryKeyRelatedField and field.read_only:
         attname = _related_attname(model, name)
+        model_field = model._meta.get_field(name) if attname else None
+        target_field = getattr(model_field, "target_field", None)
+        related_uuid = target_field is not None and target_field.get_internal_type() == "UUIDField"
         return SerializerFieldIR(
             name=name,
-            kind="related_pk",
+            kind="related_uuid" if related_uuid else "related_pk",
             read_only=True,
             attname=attname,
             supported=attname is not None,
@@ -3466,6 +3487,12 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
         kind = "integer"
     elif type(field) is getattr(fields_module, "BigIntegerField", None):
         kind = "big_integer"
+    elif type(field) is fields_module.BooleanField:
+        kind = "boolean"
+    elif type(field) is fields_module.UUIDField:
+        if field.uuid_format != "hex_verbose":
+            return SerializerFieldIR(name=name, kind="unsupported", supported=False)
+        kind = "uuid"
     elif type(field) is fields_module.CharField:
         kind = "char"
     elif type(field) is fields_module.DecimalField:
@@ -3490,7 +3517,7 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
     if kind is None:
         return SerializerFieldIR(name=name, kind="unsupported", supported=False)
     drf_validators = importlib.import_module("rest_framework.validators")
-    allowed_validators = (
+    allowed_validators: tuple[Any, ...] = (
         validators_module.MaxLengthValidator,
         validators_module.MinLengthValidator,
         validators_module.MaxValueValidator,
@@ -3499,6 +3526,8 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
         drf_validators.ProhibitSurrogateCharactersValidator,
         drf_validators.UniqueValidator,
     )
+    if kind in {"boolean", "uuid"}:
+        allowed_validators = (drf_validators.UniqueValidator,)
     supported = all(isinstance(item, allowed_validators) for item in field.validators)
     unique = False
     unique_message: str | None = None
@@ -3506,13 +3535,36 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
         if isinstance(item, drf_validators.UniqueValidator):
             unique = True
             unique_message = str(item.message)
+    uuid_default = False
+    if kind in {"uuid", "boolean"} and model is not None:
+        import uuid
+
+        try:
+            model_field = model._meta.get_field(name)
+        except importlib.import_module("django.core.exceptions").FieldDoesNotExist:
+            return SerializerFieldIR(name=name, kind="unsupported", supported=False)
+        expected_type = "UUIDField" if kind == "uuid" else "BooleanField"
+        if model_field.get_internal_type() != expected_type or (
+            kind == "boolean" and model_field.primary_key
+        ):
+            supported = False
+        uuid_default = model_field.default is uuid.uuid4
+        if model_field.has_default() and callable(model_field.default) and not uuid_default:
+            supported = False
     default = getattr(field, "default", fields_module.empty)
     has_default = default is not fields_module.empty
+    default_on_create_only = False
     if not has_default:
         model_default = _django_field_default(model, name)
         if model_default is not fields_module.empty:
             default = model_default
             has_default = True
+            default_on_create_only = kind in {"uuid", "boolean"}
+    if kind == "uuid" and has_default:
+        import uuid
+
+        if isinstance(default, uuid.UUID):
+            default = str(default)
     if has_default and not isinstance(default, str | int | float | bool | type(None)):
         supported = False
         default = None
@@ -3536,6 +3588,8 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
         unique=unique,
         unique_message=unique_message,
         messages=_field_messages(field, "integer" if kind == "big_integer" else kind),
+        uuid_default=uuid_default,
+        default_on_create_only=default_on_create_only,
         coerce_to_string=(
             bool(
                 getattr(
@@ -3586,6 +3640,8 @@ def _maybe_int(value: Any) -> int | None:
 
 
 _MESSAGE_KEYS = {
+    "uuid": ("required", "null", "invalid"),
+    "boolean": ("required", "null", "invalid"),
     "integer": ("required", "null", "invalid", "min_value", "max_value", "max_string_length"),
     "decimal": (
         "required",
@@ -4302,7 +4358,9 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
         var = _unique_ident(f"_{ident.upper()}", used_vars)
         resource_var[view] = var
         object_names[view] = ident
-        lookup_by_view[view] = str(resource.get("lookup") or "pk")
+        lookup_by_view[view] = str(
+            resource.get("lookup_url_kwarg") or resource.get("lookup") or "pk"
+        )
         lookup_regex = resource.get("lookup_regex")
         if isinstance(lookup_regex, str) and lookup_regex:
             converter = _unique_ident(f"sanka_{ident}_lookup", used_converters)
