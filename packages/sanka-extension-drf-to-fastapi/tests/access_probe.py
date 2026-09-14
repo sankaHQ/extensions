@@ -19,8 +19,16 @@ os.environ["SANKA_TEST_DB"] = str(Path(folder) / "test.sqlite3")
 import django
 
 django.setup()
+from board_config.urls import urlpatterns
 from django.core.management import call_command
 
+from sanka_extension_drf_to_fastapi.django_fastapi import _walk_patterns
+
+# Metadata capture must work before the source database has been populated.
+empty_scan = _walk_patterns(urlpatterns, root_path=Path(fixture), middleware=())
+assert all(route.options for route in empty_scan.routes), [
+    route.key for route in empty_scan.routes if not route.options
+]
 call_command("migrate", run_syncdb=True, verbosity=0)
 from bulletins.models import Account, Collection, Entry
 from bulletins.permissions import CollectionMembers, EntryMembers, ParentMembers
@@ -66,10 +74,6 @@ for view, model in [
 assert capture_creator_membership(Collections, Collection)
 assert capture_member_action(AddMember), "add action not recognized"
 assert capture_member_action(RemoveMember), "remove action not recognized"
-from board_config.urls import urlpatterns
-
-from sanka_extension_drf_to_fastapi.django_fastapi import _walk_patterns
-
 scan = _walk_patterns(urlpatterns, root_path=Path(fixture), middleware=())
 assert all(r.native for r in scan.routes), [
     (r.key, r.adaptation_reasons) for r in scan.routes if not r.native
