@@ -19,17 +19,22 @@ The [catalog](docs/catalog.md) groups extensions into **Data**, **Workflow**, an
 ## Sanka Extension SDK
 
 Use `sanka_extensions` to build extensions. The published SDK is distributed as
-GitHub release wheels, including its exact compatibility dependency:
+GitHub release wheels, including its exact compatibility dependency. Install
+[uv](https://docs.astral.sh/uv/getting-started/installation/) before using these
+macOS/Linux commands:
 
 ```bash
-python -m pip install \
-  https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a19/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
-  https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a19/sanka_extension_sdk-0.1.0a3-py3-none-any.whl
+uv venv --python 3.12 .venv
+source .venv/bin/activate
+uv pip install \
+  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a4/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
+  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a4/sanka_extension_sdk-0.1.0a4-py3-none-any.whl
 ```
 
-This installs the released `0.1.0a3` SDK with Blueprint v2. The `0.1.0a4` Flow
-generator protocol on this branch is a release candidate; develop it with
-`uv sync --frozen --all-packages`. Runtime adoption is a separate release.
+This installs published SDK `0.1.0a4` and its exact compatibility dependency.
+The SDK release is independent of the implementing extension bundle. CLI
+`0.2.12` was verified with this SDK and marketplace `extensions-v0.1.0a22`;
+see the [CLI compatibility table](https://github.com/sankaHQ/sanka/blob/main/docs/compatibility.md).
 
 | Interface | Purpose |
 | --- | --- |
@@ -50,7 +55,7 @@ The source SDK includes its versioned contract; CRM/billing packages and Flow
 execution are not in the published marketplace. See [Flow contracts](docs/flow.md)
 for reapplication, construction, verification and activation requirements.
 
-See the [SDK guide](packages/sanka-extension-sdk/README.md) for development and the [compatibility guide](docs/naming-compatibility.md) for published package identifiers. `sanka-drf-replay` supplies optional request/response replay support for code extensions.
+See the [SDK guide](docs/sdk.md) for development and the [compatibility guide](docs/naming-compatibility.md) for published package identifiers. `sanka-drf-replay` supplies optional request/response replay support for code extensions.
 
 HubSpot, Salesforce, SendGrid, and other hosted SaaS implementations remain private Sanka API capabilities. Their data is accessed through hosted adapters; users do not install them as local extensions.
 
@@ -64,9 +69,9 @@ sanka extension list --json
 ```
 
 CLI versions before the published-catalog default support follow the Git default
-branch. For those versions, clone the published `extensions-v0.1.0a19` tag and add
+branch. For those versions, clone the published `extensions-v0.1.0a22` tag and add
 that directory with `--trust`. On CLI versions supporting `--revision`, use the
-full published commit `1a8c9450243b1cc25096396244dac5ed3cf7abfd` to pin this bundle.
+full published commit `37873d18970e7ffe4c55bfa1663e7c4c36fd4d12` to pin this bundle.
 Development `main` may reference wheels awaiting publication.
 
 Installation makes a capability available. It does not authenticate any data endpoint or verify its reachability. Configure each data source or destination with its own endpoint and credential references before planning a data migration. Code extensions operate on projects and do not require a authenticated data endpoint.
