@@ -5,6 +5,31 @@ The SDK also provides the declarative business contract in `sanka_extensions.flo
 See [Flow development](flow.md) for the supported source API and the runtime work
 required before a business configuration can be applied.
 
+## Start with a runnable example
+
+The [Config upgrade starter](https://github.com/sankaHQ/sanka-examples/tree/main/extensions/config-upgrade)
+shows a complete Code extension package, a manifest, SDK contract tests and
+an acceptance check against published CLI `0.2.12` and SDK `0.1.0a4` wheels.
+It scans a small JSON configuration and writes an upgrade plan. It deliberately
+advertises only `scan` and `plan`; it does not claim to apply a migration.
+
+Run its documented `check.py` command from an independent clone. It builds the
+example wheel, creates isolated environments, verifies published SDK hashes,
+adds an explicitly trusted local marketplace and invokes the public CLI. It also
+checks invalid input and tampered wheel rejection. No runtime checkout or private
+service is required. The macOS/Linux CI runs the same command.
+
+For your own extension, replace the example namespace, distribution, executable,
+project matcher and target, then implement and test your typed contract. Advertise
+only commands you implement. Publish immutable HTTPS wheel URLs and all transitive
+wheel hashes before sharing a marketplace. The local HTTPS fixture in the example
+is a development harness, not a public distribution service.
+
+The [SDK guide](sdk.md) installs the published
+SDK in a Python 3.12+ development environment. The CLI stays in its own environment;
+the runtime creates another isolated environment for the extension. Avoid imports
+from the runtime and never edit its cache or project lock to simulate installation.
+
 ## Data access
 
 ```python
@@ -30,4 +55,4 @@ HubSpot, Salesforce, SendGrid, and other hosted SaaS implementations belong in t
 
 ## Code conversion
 
-Use `sanka_extensions.code.ExtensionRequest` and `ExtensionResponse` for the code migration lifecycle. Requests and responses use the versioned `sanka-extension/v1` JSON contract; diagnostics belong on standard error. See the [SDK guide](../packages/sanka-extension-sdk/README.md).
+Use `sanka_extensions.code.ExtensionRequest` and `ExtensionResponse` for the code migration lifecycle. Requests and responses use the versioned `sanka-extension/v1` JSON contract; diagnostics belong on standard error. See the [SDK guide](sdk.md).
