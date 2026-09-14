@@ -49,6 +49,7 @@ jobs:
       - run: uv sync --frozen --all-packages
       - run: make check
       - run: make build-release
+      - run: make build-business-flows
 
   modern-drf:
     name: Django 6 DRF conversion parity

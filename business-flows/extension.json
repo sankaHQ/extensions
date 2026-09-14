@@ -1,0 +1,48 @@
+{
+  "schema_version": "sanka-extension-manifest/v2",
+  "id": "sanka/business-flows",
+  "version": "0.1.0a1",
+  "kind": "flow",
+  "protocol_version": "sanka-flow-extension/v1",
+  "commands": [
+    "blueprint"
+  ],
+  "capabilities": [
+    {
+      "type": "sanka/hubspot-deal-invoices",
+      "references": [],
+      "values": [],
+      "template": {
+        "id": "sanka/hubspot-deal-invoices",
+        "revision": "1",
+        "digest": "sha256:e81e1a13d59240e7ad7a0349fae775853082803e310e76df831f049fe420717e"
+      },
+      "output_schema": "sanka-flow-blueprint/v3"
+    }
+  ],
+  "runtime": {
+    "sanka_cli": ">=0.2.13,<0.3"
+  },
+  "distribution": {
+    "name": "sanka-extension-business-flows",
+    "version": "0.1.0a1",
+    "executable": "sanka-extension-business-flows"
+  },
+  "wheels": [
+    {
+      "name": "sanka_extension_sdk-0.1.0a5-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a5/sanka_extension_sdk-0.1.0a5-py3-none-any.whl",
+      "sha256": "259d80145d4cf75875cd6aa38091da3688d80b469ac28968b531f53bda8f41ab"
+    },
+    {
+      "name": "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a5/sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
+      "sha256": "34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e"
+    },
+    {
+      "name": "sanka_extension_business_flows-0.1.0a1-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/business-flows-v0.1.0a1/sanka_extension_business_flows-0.1.0a1-py3-none-any.whl",
+      "sha256": "9128a3a532f7873b2ee62a2a2d0442e7a1f298fdc1d74ad5bdc8cc5a819c1516"
+    }
+  ]
+}
