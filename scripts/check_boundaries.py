@@ -96,7 +96,9 @@ def main() -> int:
     extension_sdk_project = _project(extension_sdk)
     if extension_sdk_project.get("dependencies") != [f"{SDK_NAME}=={sdk_project['version']}"]:
         errors.append(f"{EXTENSION_SDK_NAME} may depend only on the pinned compatibility SDK")
-    extension_version = str(extension_sdk_project["version"])
+    # Consumer metadata stays on the independently published SDK until its
+    # successor is released; workspace overrides test the candidate separately.
+    extension_version = "0.1.0a4"
     for package in (extension_sdk, *(PACKAGES / name for name in EXTENSION_NAMES)):
         own_module = package.name.replace("-", "_")
         allowed_modules: tuple[str, ...] = (own_module,)

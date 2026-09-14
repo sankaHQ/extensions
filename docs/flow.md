@@ -302,3 +302,47 @@ does not prove the generator is trustworthy, the target supports claimed behavio
 or scenarios have executed. Runtime isolation, verified wheel and environment
 provenance, durable record identity and native scenario readback remain mandatory.
 Process/environment isolation must not be described as an OS or network sandbox.
+
+## Native order-import and billing profile (candidate, not released)
+
+Blueprint v3 adds `NativeOrderBillingWorkflow`, a bounded native capability
+profile for interval scheduling, complete HubSpot deal import into orders, and
+creation of draft invoices from that import's output. The declaration contains
+no credentials, provider clients, import implementation or invoice executor.
+Versioned business template packages select this profile and its settings; the
+private host resolves endpoints and saved mappings and executes the native actions.
+
+The profile fixes stable schedule/import/invoice node identities and rejects
+partial-import continuation, changing the import target to invoices, selecting
+all orders, overwriting existing invoices, or constructing active workflows.
+The mapping carries its exact ID, revision and digest. Hosts must resolve these
+against the selected workspace; syntactically valid IDs do not establish access.
+
+The isolated generator protocol admits v3 without changing existing v1/v2 wire
+forms. A v3 request uses exactly `definition.parameters.native_configuration`,
+validated by `NativeOrderBillingWorkflow.from_configuration`, with empty portable
+references and scalar values. Output must contain exactly one native workflow,
+with identical executable configuration as well as unchanged request metadata,
+target, extension and template identity. Every required native capability is
+derived from the profile and checked against the independent host observation.
+
+This candidate enables definition validation and planning of inactive construction.
+It supplies **no native scenario verification or activation contract**. V3 forbids
+portable graph scenarios: those describe a single record event creating zero or
+one record and cannot prove scheduled imports, batch billing or retries. Shared
+runtime verify/activate must reject v3 until the native scenario contract and
+native execution adapter are reviewed and implemented. A capability declaration
+is not evidence that provider execution works.
+
+SDK source approval/publication precedes runtime SDK synchronization or consumer
+pins. This change does not publish a package, upgrade the hosted API, migrate the
+28 Studio recipes or modify any existing workflow. Remaining native recipe
+profiles require typed contracts; arbitrary action dictionaries are not accepted.
+
+The SDK candidate is version `0.1.0a5`, built and checked separately under
+`release/sdk-candidate`. The workspace-only UV override exercises existing code
+against the candidate; published extension package requirements remain pinned to
+`0.1.0a4`. Marketplace builds retrieve that original SDK wheel from its immutable
+SDK release and verify its exact size and SHA-256. Existing manifests and wheel
+URLs/hashes are unchanged. Marketplace publication does not publish the new SDK;
+SDK a5 requires its own reviewed publication before any consumer pin is advanced.

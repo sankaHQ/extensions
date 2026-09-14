@@ -93,6 +93,17 @@ def locked_dependency_wheels(*, root: Path = ROOT) -> tuple[LockedWheel, ...]:
     return tuple(sorted(locked, key=lambda wheel: (wheel.distribution, wheel.name)))
 
 
+# Existing marketplace extensions still pin the published a4 SDK. Build the new
+# SDK candidate separately; never substitute new bytes under their old filename.
+PINNED_EXTENSION_SDK = LockedWheel(
+    "sanka-extension-sdk",
+    "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
+    "https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a4/"
+    "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
+    "f1a6655095ab81e549137e1d9604492bda2a31677d674c6359b0a39a2da96307",
+    46367,
+)
+
 LOCKED_DEPENDENCY_WHEELS = locked_dependency_wheels()
 MARKETPLACE_WHEELS = LOCAL_WHEELS + tuple(wheel.name for wheel in LOCKED_DEPENDENCY_WHEELS)
 
@@ -146,6 +157,8 @@ def build(output_dir: Path) -> None:
     output_dir = _prepare_output(output_dir)
     environment = os.environ | {"SOURCE_DATE_EPOCH": "315532800"}
     for package in MARKETPLACE_PACKAGES:
+        if package == "sanka-extension-sdk":
+            continue
         subprocess.run(
             [
                 "uv",
@@ -161,7 +174,7 @@ def build(output_dir: Path) -> None:
             env=environment,
             check=True,
         )
-    for wheel in LOCKED_DEPENDENCY_WHEELS:
+    for wheel in (PINNED_EXTENSION_SDK, *LOCKED_DEPENDENCY_WHEELS):
         download_locked_wheel(output_dir, wheel)
     print(f"Built {len(MARKETPLACE_WHEELS)} marketplace wheels in {output_dir}")
 
