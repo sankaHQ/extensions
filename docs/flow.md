@@ -346,3 +346,32 @@ against the candidate; published extension package requirements remain pinned to
 SDK release and verify its exact size and SHA-256. Existing manifests and wheel
 URLs/hashes are unchanged. Marketplace publication does not publish the new SDK;
 SDK a5 requires its own reviewed publication before any consumer pin is advanced.
+
+## Business recipe package candidate
+
+`packages/sanka-extension-business-flows` owns the initial nine-category,
+28-recipe catalog, including stable IDs, English/Japanese labels, typed fields,
+defaults and range validation. Its initial catalog was extracted from the maintained
+Studio catalog at API commit `ae1e2155d1f4381213c6c49f26c836cad7241457`,
+`app/model/domain/workflows/template_catalog.py`; it introduces no business-type step.
+Future consumers should use these package settings for manual forms and AI proposals.
+This source change does not switch the hosted Studio consumer.
+
+Only `billing.hubspot-deal-invoices` currently generates a Blueprint in this package.
+It maps to selector `sanka/hubspot-deal-invoices` and the SDK's typed native order/billing
+profile. The remaining 27 catalog entries report `definition_only`; that field
+describes package generation support, not the availability of existing hosted recipes.
+
+The host resolves data endpoints and immutable mapping snapshots in its workspace.
+The isolated generator cannot read providers, authenticate endpoints or execute native
+actions. Native verification and activation remain unsupported. See the
+[package README](../packages/sanka-extension-business-flows/README.md) for the protocol.
+
+`make build-business-flows` verifies the wheel, separate marketplace manifest and
+published SDK dependency hashes. `--update-manifest` on its build script is only
+for intentional candidate changes before publication. After publication, changed
+bytes require a new package version and reviewed catalog; do not overwrite assets.
+The dispatch-only `publish-business-flows.yml` requires the exact reviewed
+`business-flows-v0.1.0a1` tag. Publish this package before the companion CLI 0.2.13
+release; the CLI publisher verifies its real package through public artifact URLs.
+This separate catalog does not change the default Data/Code marketplace.

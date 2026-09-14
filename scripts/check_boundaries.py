@@ -14,6 +14,7 @@ PACKAGES = ROOT / "packages"
 SDK_NAME = "sanka-connector-sdk"
 EXTENSION_SDK_NAME = "sanka-extension-sdk"
 EXTENSION_NAMES = ("sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask")
+FLOW_EXTENSION_NAME = "sanka-extension-business-flows"
 HOSTED_SYSTEM_PROVIDERS = frozenset({"hubspot", "salesforce", "sendgrid"})
 
 
@@ -99,10 +100,19 @@ def main() -> int:
     # Consumer metadata stays on the independently published SDK until its
     # successor is released; workspace overrides test the candidate separately.
     extension_version = "0.1.0a4"
-    for package in (extension_sdk, *(PACKAGES / name for name in EXTENSION_NAMES)):
+    for package in (
+        extension_sdk,
+        *(PACKAGES / name for name in EXTENSION_NAMES),
+        PACKAGES / FLOW_EXTENSION_NAME,
+    ):
         own_module = package.name.replace("-", "_")
         allowed_modules: tuple[str, ...] = (own_module,)
         project = _project(package)
+        if package.name == FLOW_EXTENSION_NAME:
+            if project.get("dependencies") != ["sanka-extension-sdk==0.1.0a5"]:
+                errors.append("Business Flow definitions depend only on the published SDK a5")
+            if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
+                errors.append("Business Flow definitions require their isolated executable")
         if package.name in EXTENSION_NAMES:
             allowed_modules += ("sanka_extension_sdk", "sanka_extensions")
             expected_dependency = f"{EXTENSION_SDK_NAME}=={extension_version}"
@@ -116,6 +126,12 @@ def main() -> int:
             ):
                 errors.append(f"missing Apache-2.0 SPDX header: {source.relative_to(ROOT)}")
             for module in _imports(source):
+                if (
+                    package.name == FLOW_EXTENSION_NAME
+                    and module.split(".")[0] not in sys.stdlib_module_names
+                    and not _is_module_or_submodule(module, (own_module, "sanka_extensions"))
+                ):
+                    errors.append(f"Business Flow imports non-SDK execution code: {module}")
                 if module == "sanka" or module.startswith("sanka."):
                     errors.append(
                         f"extension imports the Sanka runtime in {source.relative_to(ROOT)}"

@@ -1,0 +1,9 @@
+{
+  "schema_version": "sanka-marketplace/v1",
+  "extensions": [
+    {
+      "id": "sanka/business-flows",
+      "manifest": "extension.json"
+    }
+  ]
+}
