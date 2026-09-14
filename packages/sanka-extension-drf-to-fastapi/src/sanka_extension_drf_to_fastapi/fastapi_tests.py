@@ -208,6 +208,10 @@ def _int_sample(spec: dict[str, Any]) -> int:
 
 def _value_expr(spec: dict[str, Any]) -> str:
     kind = str(spec.get("kind") or "")
+    if kind == "boolean":
+        return "True"
+    if kind in {"uuid", "related_uuid"}:
+        return "str(uuid.uuid4())"
     if kind in {"integer", "big_integer", "related_pk"}:
         return repr(_int_sample(spec))
     if kind == "decimal":
@@ -280,7 +284,7 @@ def _render_generated_tests(manifest: dict[str, Any], *, allow_writes: bool) -> 
             view = _slug(str(resource.get("view") or "resource").rsplit(".", 1)[-1])
             auth = resource.get("auth") is not None
             fields = list(resource.get("fields") or [])
-            lookup = str(resource.get("lookup") or "pk")
+            lookup = str(resource.get("lookup_url_kwarg") or resource.get("lookup") or "pk")
             listed = _route(resource, "list")
             retrieve = _route(resource, "retrieve")
             create = _route(resource, "create")
