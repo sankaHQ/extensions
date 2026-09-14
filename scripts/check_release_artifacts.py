@@ -150,12 +150,12 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
 FLASK_MANIFEST = {
     **MIGRATION_MANIFEST,
     "id": "sanka/drf-to-flask",
-    "version": "0.1.0a6",
+    "version": "0.1.0a7",
     "commands": ["apply", "plan", "scan", "test", "verify"],
     "targets": ["flask"],
     "distribution": {
         "name": "sanka-extension-drf-to-flask",
-        "version": "0.1.0a6",
+        "version": "0.1.0a7",
         "executable": "sanka-extension-drf-to-flask",
     },
 }
