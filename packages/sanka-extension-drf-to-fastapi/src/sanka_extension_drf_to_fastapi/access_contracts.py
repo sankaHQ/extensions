@@ -132,11 +132,21 @@ def user_identity() -> dict[str, str]:
     user = importlib.import_module("django.contrib.auth").get_user_model()
     models = importlib.import_module("django.db.models")
     manager = user._default_manager
+    base_user = importlib.import_module("django.contrib.auth.base_user").AbstractBaseUser
+    deferred = importlib.import_module("django.db.models.query_utils").DeferredAttribute
     if (
         user._meta.proxy
         or user._meta.parents
         or user.__getattribute__ is not models.Model.__getattribute__
         or user.__eq__ is not models.Model.__eq__
+        or user.__init__ is not models.Model.__init__
+        or user.from_db.__func__ is not models.Model.from_db.__func__
+        or inspect.getattr_static(user, "is_authenticated")
+        is not inspect.getattr_static(base_user, "is_authenticated")
+        or any(
+            type(inspect.getattr_static(user, name)) is not deferred
+            for name in ("is_active", "is_superuser")
+        )
         or manager.get_queryset.__func__ is not models.Manager.get_queryset
         or manager._queryset_class is not models.QuerySet
         or user._meta.ordering

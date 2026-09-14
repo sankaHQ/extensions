@@ -110,6 +110,12 @@ class SessionFallback(Collections):
 
 
 assert _view_auth_support(SessionFallback, Collection) is None
+# A custom user predicate must not become an unconditional authenticated-user grant.
+Account.is_authenticated = property(lambda self: False)
+try:
+    assert _view_auth_support(Collections, Collection) is None
+finally:
+    del Account.is_authenticated
 
 alice = Account.objects.create_user(username="alice")
 bob = Account.objects.create_user(username="bob")
