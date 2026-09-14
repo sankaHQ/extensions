@@ -25,7 +25,7 @@ def test_marketplace_build_fetches_pinned_sdk_instead_of_rebuilding_it(
         return directory / wheel.name
 
     monkeypatch.setattr(build_release, "_prepare_output", lambda path: path)
-    monkeypatch.setattr(build_release.subprocess, "run", run)
+    monkeypatch.setattr("scripts.build_release.subprocess.run", run)
     monkeypatch.setattr(build_release, "download_locked_wheel", download)
     build_release.build(tmp_path)
     assert "sanka-extension-sdk" not in built
