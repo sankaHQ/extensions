@@ -7,6 +7,7 @@ from sanka_extensions.flow.blueprint import (
     BLUEPRINT_V2_SCHEMA_VERSION,
     BLUEPRINT_V3_SCHEMA_VERSION,
     BLUEPRINT_V4_SCHEMA_VERSION,
+    BLUEPRINT_V5_SCHEMA_VERSION,
     Blueprint,
     Resource,
 )
@@ -43,6 +44,12 @@ from sanka_extensions.flow.native_fixtures import (
     NativeBillingFixturePageRef,
     NativeBillingFixtureRecord,
 )
+from sanka_extensions.flow.native_process_recipes import NativeBusinessProcessWorkflow
+from sanka_extensions.flow.native_recipes import (
+    NativeRecordConversionWorkflow,
+    NativeSourceApprovalWorkflow,
+)
+from sanka_extensions.flow.native_task_recipes import NativeAssignedTaskWorkflow
 from sanka_extensions.flow.native_verification import NativeBillingDelivery, NativeBillingScenario
 from sanka_extensions.flow.protocol import (
     MAX_MESSAGE_BYTES,
@@ -70,6 +77,7 @@ __all__ = [
     "BLUEPRINT_V2_SCHEMA_VERSION",
     "BLUEPRINT_V3_SCHEMA_VERSION",
     "BLUEPRINT_V4_SCHEMA_VERSION",
+    "BLUEPRINT_V5_SCHEMA_VERSION",
     "MAX_MESSAGE_BYTES",
     "PROTOCOL_VERSION",
     "SCHEMA_VERSION",
@@ -87,13 +95,17 @@ __all__ = [
     "FlowDefinition",
     "FlowExtensionFailure",
     "Mapping",
+    "NativeAssignedTaskWorkflow",
     "NativeBillingDelivery",
     "NativeBillingFixtureManifest",
     "NativeBillingFixturePage",
     "NativeBillingFixturePageRef",
     "NativeBillingFixtureRecord",
     "NativeBillingScenario",
+    "NativeBusinessProcessWorkflow",
     "NativeOrderBillingWorkflow",
+    "NativeRecordConversionWorkflow",
+    "NativeSourceApprovalWorkflow",
     "RecordIdentity",
     "Reference",
     "ReferenceRequirement",
