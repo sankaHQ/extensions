@@ -174,7 +174,7 @@ def scan_django(
     permissions = sorted({value for route in routes for value in route.permissions})
     authentication = sorted({value for route in routes for value in route.authentication})
     scan = FrameworkScan(
-        schema_version=9,
+        schema_version=10,
         source=".",
         language="python",
         framework="django-rest-framework",
@@ -935,6 +935,7 @@ def _field_timezone_name(field: Any) -> str | None:
 def _field_payload(field: SerializerFieldIR) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "name": field.name,
+        "relation": dict(field.relation),
         "kind": field.kind,
         "coerce_to_string": field.coerce_to_string,
         "uuid_default": field.uuid_default,
@@ -978,6 +979,8 @@ def _carryover_function_name(ir: SerializerIR) -> str:
 
 
 def _create_payload(ir: SerializerIR, *, preserve_carryover: bool = False) -> dict[str, Any]:
+    if ir.create_style == "contract":
+        return dict(ir.create_contract or {"style": "unsupported"})
     if ir.create_style == "carryover":
         if preserve_carryover:
             return {"style": "carryover", "function": _carryover_function_name(ir)}
@@ -1263,9 +1266,11 @@ def _render_native_output(
         ir = serializer_by_name[route.serializer]
         view_ir = views_by_name.get(route.view)
         auth_payload: dict[str, Any] | None = None
-        if view_ir is not None and view_ir.auth is not None and view_ir.auth.require_authenticated:
+        if view_ir is not None and view_ir.auth is not None and view_ir.auth.token_keyword:
             auth = view_ir.auth
             auth_payload = {
+                "require_authenticated": auth.require_authenticated,
+                "user": auth.user,
                 "token_keyword": auth.token_keyword,
                 "token_db_table": auth.token_db_table,
                 "token_key_column": auth.token_key_column,
@@ -1280,6 +1285,7 @@ def _render_native_output(
             {
                 "view": route.view,
                 "auth": auth_payload,
+                "access": dict(view_ir.access) if view_ir else {},
                 "serializer": ir.name,
                 "model_module": ir.model_module,
                 "model_class": ir.model_class,
@@ -1300,6 +1306,7 @@ def _render_native_output(
                     else None
                 ),
                 "fields": [_field_payload(field) for field in ir.fields],
+                "storage": list(ir.storage),
                 "create": _create_payload(ir, preserve_carryover=preserve_carryover),
                 "update_drops": None if ir.update_drops is None else list(ir.update_drops),
                 "routes": [],
@@ -1874,6 +1881,21 @@ def _walk_patterns(
             serializer_name=serializer,
             middleware=middleware,
         )
+        captured_view = result.view_details.get(view_name)
+        if captured_view is not None and captured_view.access:
+            converters = importlib.import_module("django.urls.converters").get_converters()
+            parameter_regexes = {
+                name: converters[kind].regex
+                for kind, name in re.findall(
+                    r"<(str|int|slug|uuid|path):([A-Za-z_][A-Za-z0-9_]*)>", combined
+                )
+            }
+            result.view_details[view_name] = replace_dataclass(
+                captured_view,
+                access={**captured_view.access, "parameter_regexes": parameter_regexes},
+            )
+        if captured_view is not None and captured_view.access.get("member_action"):
+            serializer = captured_view.access["serializer"]
         lookup_kwarg = str(
             getattr(view_class, "lookup_url_kwarg", None)
             or getattr(view_class, "lookup_field", "pk")
@@ -2067,6 +2089,58 @@ def _native_route_support(
         if all(root.path != path for root in result.api_roots):
             result.api_roots.append(ApiRootIR(path=path, links=links))
         return True, (), {}
+    from sanka_extension_drf_to_fastapi.access_contracts import (
+        capture_member_action,
+        capture_membership_permission,
+    )
+
+    member_action = capture_member_action(view_class)
+    if member_action is not None:
+        model_class, member_serializer, contract = member_action
+        view_name = f"{view_class.__module__}.{view_class.__qualname__}"
+        auth_ir = _view_auth_support(view_class, model_class)
+        permission_rules = [
+            capture_membership_permission(p, model_class) for p in view_class.permission_classes
+        ]
+        rule = next((p for p in permission_rules if p is not None), None)
+        if (
+            auth_ir is None
+            or rule is None
+            or rule.get("parent_param")
+            or getattr(callback, "view_initkwargs", None)
+            or getattr(callback, "initkwargs", None)
+            or getattr(view_class, "throttle_classes", ())
+            or getattr(view_class, "versioning_class", None)
+            or middleware_reasons
+            or f"{{{contract['param']}}}" not in path
+        ):
+            return disqualify(
+                "SANKA_DRF_MEMBER_ACTION_UNSUPPORTED",
+                "member-action",
+                "Member action requires supported authentication and object permissions.",
+            )
+        serializer_name = f"{member_serializer.__module__}.{member_serializer.__qualname__}"
+        field = importlib.import_module("rest_framework.fields").UUIDField(read_only=True)
+        if model_class._meta.pk.get_internal_type() != "UUIDField":
+            field = importlib.import_module("rest_framework.fields").IntegerField(read_only=True)
+        member_ir = SerializerIR(
+            name=serializer_name,
+            model=f"{model_class.__module__}.{model_class.__qualname__}",
+            model_module=model_class.__module__,
+            model_class=model_class.__qualname__,
+            object_name=model_class._meta.object_name,
+            db_table=model_class._meta.db_table,
+            pk_attname=model_class._meta.pk.attname,
+            fields=(_serializer_field_ir(model_class._meta.pk.name, field, model_class),),
+        )
+        result.serializer_details[serializer_name] = member_ir
+        result.view_details[view_name] = ViewIR(
+            name=view_name,
+            auth=auth_ir,
+            lookup_url_kwarg=contract["param"],
+            access={"permission": rule, "member_action": contract, "serializer": serializer_name},
+        )
+        return True, (), {}
     generics = importlib.import_module("rest_framework.generics")
     generic_view = issubclass(view_class, generics.GenericAPIView) and not hasattr(
         callback, "actions"
@@ -2096,7 +2170,18 @@ def _native_route_support(
             "view-kind",
             f"{view_class.__module__}.{view_class.__qualname__} is not a ModelViewSet.",
         )
+    from sanka_extension_drf_to_fastapi.access_contracts import capture_query
+
+    source_model = getattr(
+        getattr(getattr(view_class, "serializer_class", None), "Meta", None), "model", None
+    )
+    access: dict[str, Any] = {}
     overrides = _viewset_overrides(view_class, allow_missing=generic_view)
+    if "get_queryset" in overrides:
+        query = capture_query(view_class, source_model)
+        if query is not None:
+            access["query"] = query
+            overrides = tuple(name for name in overrides if name != "get_queryset")
     operation_overrides = [name for name in overrides if name in _OPERATION_OVERRIDES]
     if "update" in operation_overrides and "partial_update" not in operation_overrides:
         operation_overrides.append("partial_update")
@@ -2122,9 +2207,31 @@ def _native_route_support(
     view_name = f"{view_class.__module__}.{view_class.__qualname__}"
     if view_name not in result.view_details:
         queryset = getattr(view_class, "queryset", None)
-        model = getattr(queryset, "model", None)
+        model = getattr(queryset, "model", None) or source_model
         auth_ir = _view_auth_support(view_class, model)
-        result.view_details[view_name] = ViewIR(name=view_name, auth=auth_ir)
+        from sanka_extension_drf_to_fastapi.access_contracts import (
+            capture_creator_membership,
+            capture_membership_permission,
+        )
+
+        for permission in view_class.permission_classes:
+            captured = capture_membership_permission(permission, model)
+            if captured is not None:
+                access["permission"] = captured
+        creator = capture_creator_membership(view_class, model)
+        if creator is not None:
+            access["creator_membership"] = creator
+        result.view_details[view_name] = ViewIR(name=view_name, auth=auth_ir, access=access)
+    detail = result.view_details[view_name]
+    user_scoped = any(
+        rule["kind"] == "member" for rule in detail.access.get("query", {}).get("filters", ())
+    )
+    if user_scoped and (detail.auth is None or not detail.auth.require_authenticated):
+        return disqualify(
+            "SANKA_DRF_USER_QUERY_AUTH_UNSUPPORTED",
+            "authentication",
+            "User-scoped querysets require an explicit authenticated-user gate.",
+        )
     if result.view_details[view_name].auth is None:
         return disqualify(
             "SANKA_DRF_AUTH_PERMISSIONS_UNSUPPORTED",
@@ -2187,6 +2294,35 @@ def _native_route_support(
         carryover=carryover,
         lookup_url_kwarg=getattr(view_class, "lookup_url_kwarg", None),
     )
+    if result.view_details[view_name].access:
+        from sanka_extension_drf_to_fastapi.access_contracts import capture_delete
+        from sanka_extension_drf_to_fastapi.nested_create import supports_default_model_writes
+
+        if not supports_default_model_writes(source_model):
+            for operation in {"create", "update", "partial_update", "destroy"}.intersection(
+                actions.values()
+            ):
+                manual_operations[operation] = (
+                    _adaptation_reason(
+                        "SANKA_DRF_MODEL_WRITES_UNSUPPORTED",
+                        "model-writes",
+                        "Custom model write behavior requires manual adaptation.",
+                    ),
+                )
+        deletion = capture_delete(source_model)
+        detail = result.view_details[view_name]
+        if deletion is not None:
+            result.view_details[view_name] = replace_dataclass(
+                detail, access={**detail.access, "delete_tables": deletion}
+            )
+        elif "destroy" in actions.values():
+            manual_operations["destroy"] = (
+                _adaptation_reason(
+                    "SANKA_DRF_DELETE_CASCADE_UNSUPPORTED",
+                    "delete-cascade",
+                    "Delete hooks or cascading relations require manual adaptation.",
+                ),
+            )
     lookup_reason = _custom_lookup_adaptation_reason(
         view_class,
         actions=actions,
@@ -2800,13 +2936,22 @@ def _view_auth_support(view_class: type[Any], model: Any) -> ViewAuthIR | None:
         if create_overridden:
             return None
         return ViewAuthIR(require_authenticated=False)
-    if permissions_module.IsAuthenticated not in permissions:
+    from sanka_extension_drf_to_fastapi.access_contracts import (
+        UnsupportedContract,
+        capture_creator_membership,
+        capture_membership_permission,
+        user_identity,
+    )
+
+    membership_rules = [capture_membership_permission(item, model) for item in permissions]
+    member_permission = next((item for item in membership_rules if item is not None), None)
+    if permissions_module.IsAuthenticated not in permissions and member_permission is None:
         return None
     extras = [item for item in permissions if item is not permissions_module.IsAuthenticated]
     owner_field: str | None = None
     if len(extras) == 1:
         owner_field = _match_owner_permission(extras[0])
-        if owner_field is None:
+        if owner_field is None and member_permission is None:
             return None
     elif extras:
         return None
@@ -2819,7 +2964,7 @@ def _view_auth_support(view_class: type[Any], model: Any) -> ViewAuthIR | None:
     inject_owner: str | None = None
     if create_overridden:
         inject_owner = _match_perform_create(view_class)
-        if inject_owner is None:
+        if inject_owner is None and capture_creator_membership(view_class, model) is None:
             return None
     owner_attname = _user_fk_attname(model, owner_field) if owner_field else None
     if owner_field is not None and owner_attname is None:
@@ -2829,8 +2974,13 @@ def _view_auth_support(view_class: type[Any], model: Any) -> ViewAuthIR | None:
         return None
     token_model = authenticators[0]().get_model()
     key_field = token_model._meta.pk
+    try:
+        user = user_identity()
+    except UnsupportedContract:
+        return None
     return ViewAuthIR(
-        require_authenticated=True,
+        require_authenticated=permissions_module.IsAuthenticated in permissions,
+        user=user,
         token_keyword=str(authenticators[0].keyword),
         token_db_table=str(token_model._meta.db_table),
         token_key_column=str(key_field.column),
@@ -3223,9 +3373,15 @@ def _serializer_ir(view_class: type[Any], serializer_name: str) -> SerializerIR 
     if not issubclass(serializer_class, serializers_module.ModelSerializer):
         return None
     queryset = view_class.queryset
-    if queryset is None:
+    model = getattr(queryset, "model", None) or getattr(serializer_class.Meta, "model", None)
+    if model is None:
         return None
-    model = queryset.model
+    if queryset is None:
+        from sanka_extension_drf_to_fastapi.access_contracts import capture_query
+
+        if capture_query(view_class, model) is None:
+            return None
+        queryset = model.objects.all()
     lookup = str(getattr(view_class, "lookup_field", "pk") or "pk")
     ir = _build_serializer_ir(
         serializer_class,
@@ -3284,8 +3440,14 @@ def _build_serializer_ir(
         create_overridden = serializer_class.create is not serializers_module.ModelSerializer.create
         update_overridden = serializer_class.update is not serializers_module.ModelSerializer.update
         if create_overridden:
+            from sanka_extension_drf_to_fastapi.access_contracts import capture_parent_create
+
+            parent_create = capture_parent_create(serializer_class, model)
             carryover = _analyze_create_carryover(serializer_class)
-            if carryover is None:
+            if parent_create is not None:
+                create_style = "contract"
+                create_contract = parent_create
+            elif carryover is None:
                 supported = False
             else:
                 create_style = "carryover"
@@ -3365,7 +3527,20 @@ def _build_serializer_ir(
         # overrides would be silently skipped, so they are unsupported.
         supported = False
 
+    storage = []
+    for model_field in model._meta.concrete_fields:
+        if getattr(model_field, "auto_now", False):
+            if (
+                model_field.get_internal_type() != "DateTimeField"
+                or not importlib.import_module("django.conf").settings.USE_TZ
+            ):
+                supported = False
+            else:
+                storage.append(
+                    {"name": str(model_field.attname), "kind": "datetime", "auto_now": True}
+                )
     return SerializerIR(
+        storage=tuple(storage),
         name=name,
         model=f"{model.__module__}.{model.__qualname__}",
         model_module=str(model.__module__),
@@ -3411,6 +3586,36 @@ def _nested_many_field_ir(name: str, field: Any, parent_model: Any) -> Serialize
         ordering=tuple(str(item) for item in (child_model_type._meta.ordering or ())),
         analyze_writes=False,
     )
+    if getattr(relation, "many_to_many", False) and field.read_only:
+        from sanka_extension_drf_to_fastapi.access_contracts import (
+            UnsupportedContract,
+            membership,
+            user_identity,
+        )
+
+        try:
+            member = {**membership(parent_model, [name]), "user": user_identity()}
+        except UnsupportedContract:
+            return SerializerFieldIR(name=name, kind="unsupported", supported=False)
+        if _defines_methods(child_class, serializers_module.ModelSerializer):
+            return SerializerFieldIR(name=name, kind="unsupported", supported=False)
+        types = importlib.import_module("rest_framework.fields")
+        output_fields = []
+        for key, child_field in child.fields.items():
+            if (
+                type(child_field) not in (types.IntegerField, types.CharField)
+                or child_field.source != key
+                or child_field.write_only
+            ):
+                return SerializerFieldIR(name=name, kind="unsupported", supported=False)
+            model_field = child_model_type._meta.get_field(key)
+            if model_field.is_relation or not model_field.concrete:
+                return SerializerFieldIR(name=name, kind="unsupported", supported=False)
+            output_fields.append({"name": key, "column": str(model_field.column)})
+        member["output_fields"] = output_fields
+        if child_model_type._meta.ordering:
+            return SerializerFieldIR(name=name, kind="unsupported", supported=False)
+        return SerializerFieldIR(name=name, kind="membership_read", read_only=True, relation=member)
     parent_fk = relation.field.attname if hasattr(relation, "field") else None
     if parent_fk is None:
         return SerializerFieldIR(name=name, kind="unsupported", supported=False)
@@ -3483,6 +3688,17 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
     serializers_module = importlib.import_module("rest_framework.serializers")
     if type(field) is serializers_module.ListSerializer:
         return _nested_many_field_ir(name, field, model)
+    if type(field) is serializers_module.SerializerMethodField:
+        from sanka_extension_drf_to_fastapi.access_contracts import capture_computed_preview
+
+        preview = capture_computed_preview(field, model)
+        return SerializerFieldIR(
+            name=name,
+            kind="related_preview",
+            read_only=True,
+            supported=preview is not None,
+            relation=preview or {},
+        )
     kind: str | None = None
     if type(field) is fields_module.IntegerField:
         kind = "integer"
@@ -4352,7 +4568,7 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
     resource_var: dict[str, str] = {}
     object_names: dict[str, str] = {}
     lookup_by_view: dict[str, str] = {}
-    converter_by_view: dict[str, str] = {}
+    converter_by_view: dict[str, dict[str, str]] = {}
     for resource in manifest["resources"]:
         view = str(resource["view"])
         ident = _python_ident(str(resource["object_name"]))
@@ -4363,16 +4579,19 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
             resource.get("lookup_url_kwarg") or resource.get("lookup") or "pk"
         )
         lookup_regex = resource.get("lookup_regex")
+        patterns = dict((resource.get("access") or {}).get("parameter_regexes") or {})
         if isinstance(lookup_regex, str) and lookup_regex:
+            patterns[lookup_by_view[view]] = lookup_regex
+        for parameter, pattern_regex in patterns.items():
             converter = _unique_ident(f"sanka_{ident}_lookup", used_converters)
             converter_class = _unique_ident(
                 f"_Sanka{ident.title()}LookupConvertor", used_converters
             )
-            converter_by_view[view] = converter
+            converter_by_view.setdefault(view, {})[parameter] = converter
             lines.extend(
                 [
                     f"class {converter_class}(Convertor):",
-                    f"    regex = {_py_str(lookup_regex)}",
+                    f"    regex = {_py_str(pattern_regex)}",
                     "",
                     "    def convert(self, value: str) -> str:",
                     "        return value",
@@ -4415,11 +4634,8 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
             continue
         view = str(route["source_view"])
         runtime_path = path
-        if view in converter_by_view:
-            lookup = lookup_by_view[view]
-            runtime_path = runtime_path.replace(
-                f"{{{lookup}}}", f"{{{lookup}:{converter_by_view[view]}}}"
-            )
+        for parameter, converter in converter_by_view.get(view, {}).items():
+            runtime_path = runtime_path.replace(f"{{{parameter}}}", f"{{{parameter}:{converter}}}")
         var = resource_var[view]
         func = _unique_ident(
             f"{_OPERATION_FUNCS.get(operation, operation)}_{object_names[view]}",
@@ -4453,10 +4669,9 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
         for path in sorted(options_paths):
             view = path_views.get(path, "")
             runtime_path = path
-            if view in converter_by_view:
-                lookup = lookup_by_view[view]
+            for parameter, converter in converter_by_view.get(view, {}).items():
                 runtime_path = runtime_path.replace(
-                    f"{{{lookup}}}", f"{{{lookup}:{converter_by_view[view]}}}"
+                    f"{{{parameter}}}", f"{{{parameter}:{converter}}}"
                 )
             func = _unique_ident("sanka_options", used_funcs)
             path_parameters = re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", path)

@@ -174,6 +174,7 @@ class SerializerFieldIR:
     coerce_to_string: bool = False
     uuid_default: bool = False
     default_on_create_only: bool = False
+    relation: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> SerializerFieldIR:
@@ -199,6 +200,7 @@ class SerializerIR:
     ordering: tuple[str, ...] = ()
     lookup: str = "pk"
     fields: tuple[SerializerFieldIR, ...] = ()
+    storage: tuple[dict[str, Any], ...] = ()
     create_style: str = "default"
     create_source: str | None = None
     create_contract: dict[str, Any] | None = None
@@ -215,6 +217,7 @@ class SerializerIR:
         data["fields"] = tuple(
             SerializerFieldIR.from_dict(item) for item in payload.get("fields", ())
         )
+        data["storage"] = tuple(payload.get("storage", ()))
         data["create_imports"] = tuple(
             (str(alias), str(module), None if attr is None else str(attr))
             for alias, module, attr in payload.get("create_imports", ())
@@ -235,6 +238,7 @@ class ViewAuthIR:
     native envelope."""
 
     require_authenticated: bool = False
+    user: dict[str, str] = field(default_factory=dict)
     token_keyword: str | None = None
     token_db_table: str | None = None
     token_key_column: str = "key"
@@ -263,6 +267,7 @@ class ViewIR:
     lookup_url_kwarg: str | None = None
     listing: dict[str, Any] = field(default_factory=dict)
     carryover: dict[str, Any] = field(default_factory=dict)
+    access: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> ViewIR:
@@ -276,6 +281,7 @@ class ViewIR:
             lookup_url_kwarg=payload.get("lookup_url_kwarg"),
             listing=dict(payload.get("listing") or {}),
             carryover=dict(payload.get("carryover") or {}),
+            access=dict(payload.get("access") or {}),
         )
 
 
@@ -299,6 +305,8 @@ def _strip_field_keys(fields: list[dict[str, Any]], keys: tuple[str, ...]) -> No
             item.pop(key, None)
         child = item.get("child")
         if isinstance(child, dict):
+            if "relation" in keys:
+                child.pop("storage", None)
             _strip_field_keys(child.get("fields", []), keys)
 
 
@@ -369,6 +377,14 @@ class FrameworkScan:
                 _strip_field_keys(
                     serializer.get("fields", []), ("uuid_default", "default_on_create_only")
                 )
+        if self.schema_version < 10:
+            for serializer in payload.get("serializer_details", []):
+                serializer.pop("storage", None)
+                _strip_field_keys(serializer.get("fields", []), ("relation",))
+            for view in payload.get("view_details", []):
+                view.pop("access", None)
+                if view.get("auth"):
+                    view["auth"].pop("user", None)
         return payload
 
     def with_hash(self) -> FrameworkScan:
