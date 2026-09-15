@@ -63,7 +63,9 @@ def _price(value: object) -> None:
         if not number.is_finite() or not 0 <= number <= 1_000_000_000:
             raise ValueError("unit_price must be finite and between zero and 1000000000")
         exponent = number.as_tuple().exponent
-        if type(exponent) is not int or exponent < -6 or format(number, "f") != value:
+        # Bound exponent expansion before formatting, including zero values that
+        # pass the amount range check despite an enormous positive exponent.
+        if type(exponent) is not int or not -6 <= exponent <= 29 or format(number, "f") != value:
             raise ValueError("unit_price requires fixed decimal notation with at most six places")
     except InvalidOperation as exc:
         raise ValueError("unit_price requires a decimal number") from exc

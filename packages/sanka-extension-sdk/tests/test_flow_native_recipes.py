@@ -411,6 +411,8 @@ def test_task_recipes_preserve_distinct_schedules_and_batch_semantics():
         ("replenishment_purchasing", "unit_price", "0.0000001"),
         ("replenishment_purchasing", "unit_price", "1e2"),
         ("replenishment_purchasing", "unit_price", "+1.0"),
+        ("replenishment_purchasing", "unit_price", "0e1000000000"),
+        ("replenishment_purchasing", "unit_price", "-0e1000000000"),
     ],
 )
 def test_process_rejects_invalid_settings_without_numeric_coercion(process, key, value):
