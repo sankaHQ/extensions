@@ -1,0 +1,20 @@
+{
+  "recipe_id": "purchasing.purchase-order-to-bill",
+  "input": {},
+  "expected_configuration": {
+    "conversion": "purchase_order_to_bill",
+    "settings": {
+      "use_po_date": true,
+      "bill_due_days": 30,
+      "bill_notes": ""
+    }
+  },
+  "expected_node_ids": [
+    "purchasing-purchase-order-to-bill/trigger",
+    "purchasing-purchase-order-to-bill/draft-bill"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "existing_linked_bill": "skip"
+  }
+}
