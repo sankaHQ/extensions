@@ -2,13 +2,10 @@
 
 ## Current candidate
 
-This candidate also prepares DRF-to-Flask 0.1.0a7 with stock ViewSet CRUD and bounded serializer support.
-
-`extensions-v0.1.0a25` prepares DRF-to-FastAPI 0.1.0a12 with UUID and Boolean
-field support and primary-key URL aliases. Writable UUID primary keys and custom
-field behavior remain unsupported. Custom handlers, querysets, permission rules and middleware
-remain subject to explicit compatibility checks. The SDK and other implementing
-packages remain unchanged.
+`extensions-v0.1.0a26` prepares DRF-to-FastAPI 0.1.0a13 with bounded membership
+permissions, user/parent-scoped queries and custom member/item writes. See
+[the supported contracts and remaining compatibility gates](drf-membership-compatibility.md).
+The SDK and other implementing packages remain unchanged.
 
 ## Preparation and review
 
@@ -17,11 +14,14 @@ manifest hashes with `make update-marketplace-hashes` after final package change
 Finish code review, then let the workspace PR helper run `make check build-release`
 as the final broad gate. The build verifies all 193 wheel filenames, locked
 third-party hashes, package versions, dependency and entry-point boundaries, and
-manifest URLs and hashes. All previous release tags and artifacts remain immutable.
+manifest URLs and hashes. The builder resumes interrupted dependency downloads by
+reusing existing wheels only when their locked size and SHA-256 match; it always
+rebuilds the local implementing packages. All previous release tags and artifacts
+remain immutable.
 
 Merge the exact human-approved head using `sanka-pr-flow`. Publication requires
 user authorization separately from preparing the candidate. Create and push
-`extensions-v0.1.0a25` at the reviewed merge, then dispatch `publish.yml` at that tag.
+`extensions-v0.1.0a26` at the reviewed merge, then dispatch `publish.yml` at that tag.
 The workflow rejects every other tag. This repository currently publishes GitHub
 release wheels; it does not publish these versions to PyPI.
 
@@ -32,7 +32,7 @@ that the existing `sdk-v0.1.0a4` tag still identifies its reviewed source and th
 both SDK wheels in the bundle are byte-identical to their published assets.
 The SDK verification job is read-only. It does not move the tag or re-upload
 unchanged SDK packages. Only after verification succeeds may the marketplace
-job publish implementing packages under `extensions-v0.1.0a25`.
+job publish implementing packages under `extensions-v0.1.0a26`.
 
 A changed or missing SDK tag, local wheel or public asset blocks publication.
 SDK changes require a separately reviewed version and publication before the

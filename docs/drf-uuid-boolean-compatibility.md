@@ -16,9 +16,8 @@ identifiers and Boolean state, including shopping-list APIs.
   existing Django tables. Django's SQLite UUID storage uses 32 hex digits;
   PostgreSQL uses native UUID values.
 - A primary-key detail route can set `lookup_url_kwarg`, for example `item_pk`,
-  independently of another `pk` parameter in the URL. This does not implement
-  parent scoping; a custom queryset remains unsupported until its behavior can
-  be lowered and verified.
+  independently of another `pk` parameter in the URL. Bounded parent scoping is
+  covered by the [membership and scoped-write contracts](drf-membership-compatibility.md).
 - Scan schema 9 captures UUID defaults and URL aliases. Earlier scan hashes
   retain their original payload representation.
 
@@ -37,24 +36,12 @@ synthetic generic CRUD application and compares HTTP responses and final databas
 state with the source application. The modern-framework job repeats this on
 Django 6.0.6 and DRF 3.17.1.
 
-## Remaining work for the shopping-list application
+## Shopping-list application readiness
 
-This change alone does not establish full application compatibility. The following
-behaviors need typed conversion contracts and source-versus-target acceptance
-coverage before a complete migration can be offered:
-
-1. Authenticated-user and URL-parameter queryset filters, stable ordering, and
-   parent-scoped detail lookups. Test cross-parent and cross-user isolation.
-2. Membership permissions (including the superuser rule), token/session
-   authentication order, and permission checks before reads and writes.
-3. Member relations, computed serializer fields, parent assignment, duplicate
-   checks, and membership add/remove operations with matching transaction behavior.
-4. Custom throttle scopes, middleware, and authentication/schema endpoints, or an
-   explicitly reviewed route scope that excludes unsupported endpoints without
-   representing the entire application as migrated.
-5. Complete source and generated HTTP/database comparison in isolated CI, followed
-   by an approved hosted release and an end-to-end GitHub pull-request run.
-
-The hosted API continues rejecting plans with no generatable routes before it
-reserves credits. Adding scalar support is not evidence that the complete
-shopping-list application is ready for a paid retry.
+Scalar support alone does not establish application compatibility. The subsequent
+[membership and scoped-write contracts](drf-membership-compatibility.md) cover the
+recognized permission/query/write patterns, including the surrounding relation display.
+Token/session authentication fallback, custom throttles, pagination and middleware
+still require compatible implementations or an explicitly reviewed route scope.
+Full source/generated HTTP and database acceptance, an approved hosted release, and
+an end-to-end GitHub pull-request run remain required before claiming completion.

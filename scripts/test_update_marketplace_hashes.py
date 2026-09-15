@@ -32,14 +32,14 @@ def test_hash_updater_records_each_manifest_dependency_closure(tmp_path: Path) -
         for name in names:
             _wheel(tmp_path, name)
 
-    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a25")
+    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a26")
 
     assert set(manifests) == set(MANIFEST_WHEELS)
     for package, payload in manifests.items():
         assert [wheel["name"] for wheel in payload["wheels"]] == list(MANIFEST_WHEELS[package])
         assert all(
             wheel["url"].startswith(
-                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a25/"
+                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a26/"
             )
             and len(wheel["sha256"]) == 64
             for wheel in payload["wheels"]
@@ -133,7 +133,7 @@ def test_hash_updater_rejects_an_incomplete_or_wrongly_tagged_wheel_set(tmp_path
     _wheel(tmp_path, "sanka_connector_sdk-0.1.0a12-py3-none-any.whl")
 
     with pytest.raises(RuntimeError, match="complete marketplace wheel set"):
-        update_manifests(tmp_path, release_tag="extensions-v0.1.0a25")
+        update_manifests(tmp_path, release_tag="extensions-v0.1.0a26")
     with pytest.raises(RuntimeError, match=r"extensions-v0\.1\.0a16"):
         update_manifests(tmp_path, release_tag="extensions-v0.1.0a16")
 
@@ -144,12 +144,15 @@ def test_build_release_cleanup_is_limited_to_known_wheels(tmp_path: Path) -> Non
     output.mkdir(parents=True)
     stale_wheel = output / "sanka_connector_csv-0.1.0a14-py3-none-any.whl"
     stale_wheel.write_bytes(b"stale")
+    dependency = output / build_release.LOCKED_DEPENDENCY_WHEELS[0].name
+    dependency.write_bytes(b"dependency is revalidated before reuse")
     keep = output / "operator-notes.txt"
     keep.write_text("keep")
 
     _prepare_output(output, root=root)
 
     assert not stale_wheel.exists()
+    assert dependency.exists()
     assert keep.read_text() == "keep"
     with pytest.raises(ValueError, match="repository-owned"):
         _prepare_output(tmp_path / "outside", root=root)
@@ -206,7 +209,7 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
         "sanka-extension-sdk": ("0.1.0a4", "sanka_extension_sdk-0.1.0a4-py3-none-any.whl", ""),
         "sanka-extension-drf-to-fastapi": (
             "0.1.0a12",
-            "sanka_extension_drf_to_fastapi-0.1.0a12-py3-none-any.whl",
+            "sanka_extension_drf_to_fastapi-0.1.0a13-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-fastapi = sanka_extension_drf_to_fastapi.__main__:main\n",
         ),
@@ -320,3 +323,51 @@ def test_release_validator_rejects_invalid_release_boundaries(
         catalog_path.write_text(json.dumps(catalog))
 
     assert any(expected in error for error in validate_release(root, release))
+
+
+@pytest.mark.parametrize("existing", [b"valid", b"wrong", b"shorter", None])
+def test_dependency_cache_requires_locked_size_and_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bytes | None
+) -> None:
+    content = b"valid"
+    wheel = build_release.LockedWheel(
+        "example",
+        "example-1.0-py3-none-any.whl",
+        "https://files.pythonhosted.org/example.whl",
+        hashlib.sha256(content).hexdigest(),
+        len(content),
+    )
+    target = tmp_path / wheel.name
+    if existing is not None:
+        target.write_bytes(existing)
+    downloads = []
+
+    def download(_url: str, timeout: int) -> io.BytesIO:
+        downloads.append(_url)
+        return io.BytesIO(content)
+
+    monkeypatch.setattr(build_release, "urlopen", download)
+    assert build_release.download_locked_wheel(tmp_path, wheel) == target
+    assert target.read_bytes() == content
+    assert len(downloads) == (0 if existing == content else 1)
+
+
+def test_dependency_cache_does_not_reuse_symlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = b"valid"
+    wheel = build_release.LockedWheel(
+        "example",
+        "example-1.0-py3-none-any.whl",
+        "https://files.pythonhosted.org/example.whl",
+        hashlib.sha256(content).hexdigest(),
+        len(content),
+    )
+    source = tmp_path / "source"
+    source.write_bytes(content)
+    target = tmp_path / wheel.name
+    target.symlink_to(source)
+    monkeypatch.setattr(build_release, "urlopen", lambda _url, timeout: io.BytesIO(content))
+    build_release.download_locked_wheel(tmp_path, wheel)
+    assert not target.is_symlink()
+    assert source.read_bytes() == target.read_bytes() == content
