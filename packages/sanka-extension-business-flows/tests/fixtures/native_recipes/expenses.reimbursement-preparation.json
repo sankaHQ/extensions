@@ -1,0 +1,29 @@
+{
+  "recipe_id": "expenses.reimbursement-preparation",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "task": "expense_reimbursement_preparation",
+    "settings": {
+      "local_hour": 9,
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7
+    }
+  },
+  "expected_node_ids": [
+    "expenses-reimbursement-preparation/schedule",
+    "expenses-reimbursement-preparation/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "selection": "approved_expenses_with_outstanding_balance",
+    "source_status": "unchanged"
+  }
+}

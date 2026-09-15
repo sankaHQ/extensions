@@ -1,0 +1,36 @@
+{
+  "recipe_id": "projects.project-task-checklist",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ],
+    "task_titles": [
+      " Kickoff ",
+      "Delivery"
+    ]
+  },
+  "expected_configuration": {
+    "task": "project_task_checklist",
+    "settings": {
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "task_titles": [
+        "Kickoff",
+        "Delivery"
+      ]
+    }
+  },
+  "expected_node_ids": [
+    "projects-project-task-checklist/trigger",
+    "projects-project-task-checklist/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "trigger": "project.created",
+    "transaction": "complete_source_checklist_and_receipt"
+  }
+}

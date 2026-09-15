@@ -1,0 +1,28 @@
+{
+  "recipe_id": "support.unresolved-ticket-escalation",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "task": "unresolved_ticket_escalation",
+    "settings": {
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "stale_days": 7
+    }
+  },
+  "expected_node_ids": [
+    "support-unresolved-ticket-escalation/schedule",
+    "support-unresolved-ticket-escalation/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "existing_open_source_task": "skip"
+  }
+}

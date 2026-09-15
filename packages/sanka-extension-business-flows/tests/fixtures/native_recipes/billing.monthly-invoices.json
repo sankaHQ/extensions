@@ -1,0 +1,21 @@
+{
+  "recipe_id": "billing.monthly-invoices",
+  "input": {},
+  "expected_configuration": {
+    "process": "monthly_invoice_consolidation",
+    "settings": {
+      "local_hour": 9,
+      "billing_day": 1,
+      "invoice_due_days": 30
+    }
+  },
+  "expected_node_ids": [
+    "billing-monthly-invoices/schedule",
+    "billing-monthly-invoices/draft-invoices"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "selection_limit": 5000,
+    "result": "draft_invoices_grouped_by_customer"
+  }
+}

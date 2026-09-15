@@ -1,0 +1,17 @@
+{
+  "recipe_id": "sales.deal-to-estimate",
+  "input": {},
+  "expected_configuration": {
+    "conversion": "deal_to_estimate",
+    "settings": {}
+  },
+  "expected_node_ids": [
+    "sales-deal-to-estimate/trigger",
+    "sales-deal-to-estimate/draft-estimate"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "trigger": "deal.created",
+    "amount_and_lines": "not_copied"
+  }
+}

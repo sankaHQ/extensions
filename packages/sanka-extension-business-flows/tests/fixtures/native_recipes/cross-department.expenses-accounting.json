@@ -1,0 +1,29 @@
+{
+  "recipe_id": "cross-department.expenses-accounting",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "task": "expense_accounting_review",
+    "settings": {
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7
+    }
+  },
+  "expected_node_ids": [
+    "cross-department-expenses-accounting/schedule",
+    "cross-department-expenses-accounting/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "selection": "approved_or_reimbursed_expenses",
+    "result": "assigned_tasks",
+    "source_status": "unchanged"
+  }
+}

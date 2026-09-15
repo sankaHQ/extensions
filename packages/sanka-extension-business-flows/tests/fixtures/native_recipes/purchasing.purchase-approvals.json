@@ -1,0 +1,25 @@
+{
+  "recipe_id": "purchasing.purchase-approvals",
+  "input": {
+    "approver_ids": [
+      "0502",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "subject": "purchase_order",
+    "approver_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_node_ids": [
+    "purchasing-purchase-approvals/trigger",
+    "purchasing-purchase-approvals/review"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "approvals": "selected_sequence",
+    "decision_target": "workflow_history"
+  }
+}
