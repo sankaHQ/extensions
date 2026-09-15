@@ -12,9 +12,9 @@
     "drf-fastapi-009": [0, 12],
     "drf-fastapi-010": [0, 5],
     "drf-fastapi-011": [0, 5],
-    "drf-flask-001": [0, 5],
-    "drf-flask-002": [0, 12],
-    "drf-flask-003": [1, 9],
+    "drf-flask-001": [0, 10],
+    "drf-flask-002": [0, 30],
+    "drf-flask-003": [1, 11],
     "drf-flask-004": [0, 5],
     "drf-flask-005": [5, 5],
     "drf-flask-006": [6, 6]
