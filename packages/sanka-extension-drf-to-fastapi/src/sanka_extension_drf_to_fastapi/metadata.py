@@ -83,6 +83,24 @@ def _capture(
     view.get_object = lambda: object()
     if authorized:
         view.check_permissions = lambda request: None
+    else:
+        from sanka_extension_drf_to_fastapi.access_contracts import capture_membership_permission
+
+        model = getattr(
+            getattr(getattr(view, "serializer_class", None), "Meta", None), "model", None
+        )
+        rules = [
+            capture_membership_permission(permission, model)
+            for permission in view.permission_classes
+        ]
+        if any(rule and rule.get("parent_param") for rule in rules):
+            # A captured URL-parent membership check can never admit an anonymous
+            # caller. Do not query a source database just to omit its action metadata.
+            # Runtime checks still resolve the real parent before returning 401/404.
+            def deny_anonymous(_request: Any) -> None:
+                raise importlib.import_module("rest_framework.exceptions").NotAuthenticated()
+
+            view.check_permissions = deny_anonymous
     metadata_class: Any = getattr(view, "metadata_class", None)
     if not callable(metadata_class):
         return None

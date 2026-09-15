@@ -31,7 +31,7 @@ MARKETPLACE_PACKAGES = (
 LOCAL_WHEELS = (
     "sanka_drf_replay-0.1.0a2-py3-none-any.whl",
     "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-    "sanka_extension_drf_to_fastapi-0.1.0a12-py3-none-any.whl",
+    "sanka_extension_drf_to_fastapi-0.1.0a13-py3-none-any.whl",
     "sanka_extension_drf_to_flask-0.1.0a7-py3-none-any.whl",
     "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
     "sanka_connector_markdown-0.1.0a14-py3-none-any.whl",
@@ -110,6 +110,17 @@ MARKETPLACE_WHEELS = LOCAL_WHEELS + tuple(wheel.name for wheel in LOCKED_DEPENDE
 
 def download_locked_wheel(output_dir: Path, wheel: LockedWheel) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
+    destination = output_dir / wheel.name
+    # Reuse only immutable dependency bytes, verified on every invocation. Own
+    # packages are still rebuilt from source. Failed downloads cannot enter this cache.
+    if (
+        not destination.is_symlink()
+        and destination.is_file()
+        and destination.stat().st_size == wheel.size
+    ):
+        with destination.open("rb") as cached:
+            if hashlib.file_digest(cached, "sha256").hexdigest() == wheel.sha256:
+                return destination
     temporary: Path | None = None
     try:
         with (
@@ -148,8 +159,9 @@ def _prepare_output(output_dir: Path, *, root: Path = ROOT) -> Path:
     if not relative.parts or relative.parts[0] not in {"dist", "release"}:
         raise ValueError("release output directory must be repository-owned")
     output_dir.mkdir(parents=True, exist_ok=True)
-    for name in MARKETPLACE_WHEELS:
-        (output_dir / name).unlink(missing_ok=True)
+    for name in LOCAL_WHEELS:
+        if name != PINNED_EXTENSION_SDK.name:
+            (output_dir / name).unlink(missing_ok=True)
     return output_dir
 
 

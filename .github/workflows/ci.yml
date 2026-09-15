@@ -65,4 +65,4 @@ jobs:
       - name: Install the declared modern source framework versions
         run: uv pip install 'django==6.0.6' 'djangorestframework==3.17.1'
       - name: Compare real source and generated HTTP responses and database effects
-        run: uv run --no-sync python -m pytest packages/sanka-extension-drf-to-fastapi/tests/test_big_integer.py packages/sanka-extension-drf-to-fastapi/tests/test_generic_views.py packages/sanka-extension-drf-to-fastapi/tests/test_uuid_boolean.py
+        run: uv run --no-sync python -m pytest packages/sanka-extension-drf-to-fastapi/tests/test_big_integer.py packages/sanka-extension-drf-to-fastapi/tests/test_generic_views.py packages/sanka-extension-drf-to-fastapi/tests/test_uuid_boolean.py packages/sanka-extension-drf-to-fastapi/tests/test_access_contracts.py
