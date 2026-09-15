@@ -9,6 +9,10 @@ fixture under `packages/sanka-extension-business-flows/tests/fixtures/native_rec
 This source is not advertised by the published a1 executable, manifest or catalog
 availability. The candidate requires SDK a7. Publish approved SDK a6 and then a7
 before changing the Business Flow dependency pin, package version or manifest.
+The a1 wheel excludes the three `native_*` candidate modules. The release helper
+must reproduce the existing published wheel hash; source-only candidates must not
+change immutable a1 artifacts. Remove those exclusions with the reviewed a2
+package adoption, after SDK publication.
 After publication, the a2 release must dispatch these selectors alongside the
 existing HubSpot selector and pass wheel/discovery acceptance against the shared
 runtime. The hosted adapter also needs translation and native parity evidence for
