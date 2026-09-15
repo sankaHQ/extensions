@@ -7,8 +7,9 @@ one explicit binding in `native_recipes.py` and a separate reviewed input/output
 fixture under `packages/sanka-extension-business-flows/tests/fixtures/native_recipes/`.
 
 This source is not advertised by the published a1 executable, manifest or catalog
-availability. The candidate requires SDK a7. Publish approved SDK a6 and then a7
-before changing the Business Flow dependency pin, package version or manifest.
+availability. The candidate requires SDK a7, published as `sdk-v0.1.0a7` from
+Extensions commit `78dbdc6b6e1b73c1486abb404e8858b2c9756ae8`. The Business Flow
+dependency pin, package version and manifest still require a reviewed a2 adoption.
 The a1 wheel excludes the three `native_*` candidate modules. The release helper
 must reproduce the existing published wheel hash; source-only candidates must not
 change immutable a1 artifacts. Remove those exclusions with the reviewed a2
