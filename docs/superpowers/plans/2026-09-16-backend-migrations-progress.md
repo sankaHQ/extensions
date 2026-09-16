@@ -169,7 +169,9 @@ Main was fetched and pulled with `--ff-only` before changes.
   unrepresentable validator path. Regression coverage and qualification checks
   require full-table exact uniqueness instead of silently substituting it.
 - At initial follow-up head `5fd4ee7`, CI passed the dedicated PostgreSQL HTTP
-  cases, source-schema adoption and modern DRF checks. Final-head CI remains the gate.
+  cases, source-schema adoption and modern DRF checks. Its full suite had 858 passes
+  and one stale marketplace-version expectation, now corrected. The marketplace
+  and packaging focused suite passed 25 tests after correction. Final-head CI remains the gate.
 
 The audit also found non-integer decimal bounds were dropped by integer-only bound
 capture. Native capture now blocks these bounds and decimal formatting/rounding
