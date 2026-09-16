@@ -308,3 +308,8 @@ and the full Django 6.0.6/DRF 3.17.1 Flask lane passed **88 tests, 9 PostgreSQL 
 in a separate Python 3.13 environment. Six installed-wheel request/lifecycle/
 determinism checks passed after rebuilding; both canonical 194-wheel sets again
 match byte-for-byte. Independent review found no blocker in the bounded probe.
+
+Final cookie review also covers empty/short incoming session cookies on early
+responses, both SESSION_SAVE_EVERY_REQUEST settings, and untouched 500 responses.
+The source/target fixture compares cookie and Vary behavior and verifies lazy SQL
+access; valid untouched cookies remain unread when save-every-request is disabled.

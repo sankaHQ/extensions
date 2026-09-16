@@ -637,33 +637,51 @@ def authenticate(context: dict[str, Any] | None, auth: dict[str, Any]) -> tuple[
     return user, None
 
 
+def _delete_session_cookie(response: Any, facts: dict[str, Any]) -> Any:
+    samesite = facts["cookie_samesite"] or None
+    secure = facts["cookie_name"].startswith(("__Secure-", "__Host-")) or (
+        isinstance(samesite, str) and samesite.lower() == "none"
+    )
+    response.delete_cookie(
+        facts["cookie_name"],
+        path=facts["cookie_path"],
+        domain=facts["cookie_domain"],
+        secure=secure,
+        samesite=samesite,
+    )
+    preserve_cookie_domain(response, facts["cookie_name"], facts["cookie_domain"])
+    _vary_cookie(response)
+    return response
+
+
 def save_response(context: dict[str, Any] | None, response: Any) -> Any:
     """Apply the stock database SessionMiddleware response side effects."""
     if context is None:
         return response
-    from flask import g
+    from flask import g, request
 
-    state = getattr(g, "sanka_session_state", None)
-    if state is None:
-        return response
     facts = context["facts"]["session"]
-    _vary_cookie(response)
-    if state["incoming"] and state["key"] is None and not state["data"]:
-        samesite = facts["cookie_samesite"] or None
-        secure = facts["cookie_name"].startswith(("__Secure-", "__Host-")) or (
-            isinstance(samesite, str) and samesite.lower() == "none"
-        )
-        response.delete_cookie(
-            facts["cookie_name"],
-            path=facts["cookie_path"],
-            domain=facts["cookie_domain"],
-            secure=secure,
-            samesite=samesite,
-        )
-        preserve_cookie_domain(response, facts["cookie_name"], facts["cookie_domain"])
-        return response
+    state = getattr(g, "sanka_session_state", None)
+    unaccessed_save_every = False
+    if state is None:
+        name = facts["cookie_name"]
+        if name in request.cookies and len(request.cookies[name]) < 8:
+            return _delete_session_cookie(response, facts)
+        if name not in request.cookies or not facts["save_every_request"]:
+            return response
+        state = _state(context)
+        unaccessed_save_every = True
+    if not (unaccessed_save_every and response.status_code >= 500):
+        _vary_cookie(response)
+    if (
+        state["incoming"] is not None
+        and state["key"] is None
+        and not state["data"]
+        and not unaccessed_save_every
+    ):
+        return _delete_session_cookie(response, facts)
     if not (state["modified"] or facts["save_every_request"]) or (
-        state["key"] is None and not state["data"]
+        state["key"] is None and not state["data"] and not unaccessed_save_every
     ):
         return response
     if response.status_code >= 500:

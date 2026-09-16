@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from sanka_code_migration.drf.model import FrameworkScan
 
 from sanka_extension_drf_to_flask.database import render_database
@@ -48,7 +49,7 @@ SESSION_COOKIE_PATH = '/'
 SESSION_COOKIE_SECURE = True
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Lax'
-SESSION_SAVE_EVERY_REQUEST = True
+SESSION_SAVE_EVERY_REQUEST = False
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 CSRF_USE_SESSIONS = False
 CSRF_COOKIE_NAME = 'project_csrf'
@@ -321,9 +322,15 @@ print(json.dumps({'qualified': qualified, 'contract': json.loads(files['native_c
     assert "fixture-current-secret" not in json.dumps(observed)
 
 
-def test_database_session_auth_and_csrf_match_source(tmp_path: Path, contract_databases) -> None:
+@pytest.mark.parametrize("save_every_request", [False, True])
+def test_database_session_auth_and_csrf_match_source(
+    tmp_path: Path, contract_databases, save_every_request: bool
+) -> None:
     source = tmp_path / "source"
     _session_project(source)
+    if save_every_request:
+        with (source / "settings.py").open("a") as settings:
+            settings.write("\nSESSION_SAVE_EVERY_REQUEST = True\n")
     source_database, target_url = contract_databases
     env = os.environ | {
         "DJANGO_SETTINGS_MODULE": "settings",
@@ -340,6 +347,10 @@ from django.db import connection
 from django.test import Client, override_settings
 from django.utils import timezone
 from django.middleware.csrf import _mask_cipher_secret
+from django.contrib.sessions.middleware import SessionMiddleware
+from django.http import HttpResponse
+from django.test import RequestFactory
+from django.test.utils import CaptureQueriesContext
 from catalog.models import Account, Note
 from sanka_code_migration.drf.models import capture_schema
 from sanka_code_migration.drf.scan import scan_django
@@ -385,6 +396,10 @@ create('hugeuser1', huge_user)
 with override_settings(SECRET_KEY='fixture-old-secret', SECRET_KEY_FALLBACKS=[]):
     old_hash = alice.get_session_auth_hash()
 create('fallback1', data(alice, old_hash), 'fixture-old-secret')
+fallback_60 = data(alice, old_hash); fallback_60['_session_expiry'] = 60
+create('fallback60', fallback_60, 'fixture-old-secret')
+fallback_browser = data(alice, old_hash); fallback_browser['_session_expiry'] = 0
+create('fallback0a', fallback_browser, 'fixture-old-secret')
 Session.objects.create(session_key='corrupt01', session_data='not-signed',
                        expire_date=timezone.now()+datetime.timedelta(hours=1))
 create('expired01', data(alice))
@@ -395,8 +410,16 @@ initial_sessions=list(Session.objects.order_by('session_key').values(
 for row in initial_sessions: row['expire_date']=row['expire_date'].isoformat()
 
 secret='A'*32; masked=_mask_cipher_secret(secret)
+def session_cookie(response):
+    cookie=response.cookies.get(settings.SESSION_COOKIE_NAME)
+    return None if cookie is None else {
+      'value_present':bool(cookie.value),'max_age':cookie['max-age'],'path':cookie['path'],
+      'domain':cookie['domain'],'secure':bool(cookie['secure']),
+      'httponly':bool(cookie['httponly']),'samesite':cookie['samesite']}
 cases = [
  {'id':'anonymous','method':'GET','key':None},
+ {'id':'empty-session','method':'GET','key':''},
+ {'id':'short-session','method':'GET','key':'short'},
  {'id':'missing','method':'GET','key':'missing01'},
  {'id':'corrupt','method':'GET','key':'corrupt01'},
  {'id':'expired','method':'GET','key':'expired01'},
@@ -435,12 +458,14 @@ cases = [
  {'id':'non-string-hash','method':'GET','key':'inthash01'},
  {'id':'unicode-hash','method':'GET','key':'unicodeh1'},
  {'id':'out-of-range-user','method':'GET','key':'hugeuser1'},
+ {'id':'fallback-custom-expiry','method':'GET','key':'fallback60'},
+ {'id':'fallback-browser-close','method':'GET','key':'fallback0a'},
  {'id':'fallback','method':'GET','key':'fallback1'},
 ]
 responses=[]
 for case in cases:
     client=Client(enforce_csrf_checks=True)
-    if case.get('key'): client.cookies[settings.SESSION_COOKIE_NAME]=case['key']
+    if case.get('key') is not None: client.cookies[settings.SESSION_COOKIE_NAME]=case['key']
     if case.get('csrf'): client.cookies[settings.CSRF_COOKIE_NAME]=case['csrf']
     headers={}
     if case.get('header'): headers[settings.CSRF_HEADER_NAME]=case['header']
@@ -450,22 +475,40 @@ for case in cases:
         json.dumps(case.get('body')) if 'body' in case else '', content_type='application/json',
         secure=case.get('secure',False), **headers)
     body=json.loads(response.content) if response.content else None
-    cookie=response.cookies.get(settings.SESSION_COOKIE_NAME)
     followup_status=client.get('/notes/').status_code if case['id']=='fallback' else None
     responses.append({'id':case['id'],'status':response.status_code,'body':body,
       'vary':response.headers.get('Vary'),
-      'session_cookie': None if cookie is None else {
-        'value_present':bool(cookie.value),'max_age':cookie['max-age'],'path':cookie['path'],
-        'domain':cookie['domain'],'secure':bool(cookie['secure']),
-        'httponly':bool(cookie['httponly']),'samesite':cookie['samesite']},
+      'session_cookie':session_cookie(response),
       'original_session_exists': bool(case.get('key') and
           Session.objects.filter(session_key=case['key']).exists()),
       'followup_status':followup_status,
       'notes':list(Note.objects.order_by('id').values('id','text'))})
+cookie_cases=[{'id':'absent'}, {'id':'empty','key':''}, {'id':'short','key':'short'},
+              {'id':'valid-length','key':'missing01'}]
+untouched=[]
+for case in cookie_cases:
+    client=Client()
+    if 'key' in case: client.cookies[settings.SESSION_COOKIE_NAME]=case['key']
+    response=client.get('/absent')
+    untouched.append({'id':case['id'],'status':response.status_code,
+                      'vary':response.headers.get('Vary'),
+                      'session_cookie':session_cookie(response)})
+server_errors=[]
+for case in cookie_cases:
+    request=RequestFactory().get('/absent')
+    if 'key' in case: request.COOKIES[settings.SESSION_COOKIE_NAME]=case['key']
+    middleware=SessionMiddleware(lambda request: HttpResponse(status=500))
+    middleware.process_request(request)
+    with CaptureQueriesContext(connection) as queries:
+        response=middleware.process_response(request,HttpResponse(status=500))
+    server_errors.append({'id':case['id'],'status':response.status_code,
+      'vary':response.headers.get('Vary'),'session_cookie':session_cookie(response),
+      'queries':len(queries)})
 scan=scan_django('.',settings_module='settings')
 print(json.dumps({'scan':scan.to_dict(),'schema':capture_schema([Account,Note,Session]),
  'overrides':capture_sqlalchemy_overrides(scan),'sessions':initial_sessions,
- 'cases':cases,'responses':responses},default=str))
+ 'cases':cases,'responses':responses,'cookie_cases':cookie_cases,'untouched':untouched,
+ 'server_errors':server_errors},default=str))
 """
     source_result = subprocess.run(
         [sys.executable, "-c", capture],
@@ -524,10 +567,20 @@ with engine.begin() as connection:
   row=dict(row);row['expire_date']=datetime.datetime.fromisoformat(row['expire_date'])
   connection.execute(sa.insert(TABLES['django_session']).values(**row))
 responses=[]
+def session_cookie(response):
+ cookie=response.headers.getlist('Set-Cookie');raw=next(
+  (value for value in cookie if value.startswith('project_session=')),None)
+ if raw is None: return None
+ from http.cookies import SimpleCookie
+ jar=SimpleCookie();jar.load(raw);item=jar['project_session']
+ return {'value_present':bool(item.value),
+  'max_age':int(item['max-age']) if item['max-age'] else '', 'path':item['path'],
+  'domain':item['domain'],'secure':bool(item['secure']),'httponly':bool(item['httponly']),
+  'samesite':item['samesite']}
 for case in facts['cases']:
  client=app.test_client(use_cookies=False);headers={}
  cookies=[]
- if case.get('key'): cookies.append('project_session='+case['key'])
+ if case.get('key') is not None: cookies.append('project_session='+case['key'])
  if case.get('csrf'): cookies.append('project_csrf='+case['csrf'])
  if cookies: headers['Cookie']='; '.join(cookies)
  if case.get('header'): headers['X-Project-Csrf']=case['header']
@@ -541,19 +594,15 @@ for case in facts['cases']:
       TABLES['catalog_note'].c.id)).mappings()]
   exists=bool(case.get('key') and connection.scalar(sa.select(sa.func.count()).select_from(
       TABLES['django_session']).where(TABLES['django_session'].c.session_key==case['key'])))
- cookie=response.headers.getlist('Set-Cookie');session_cookie=next(
-  (value for value in cookie if value.startswith('project_session=')),None)
- parsed=None
+ parsed=session_cookie(response)
  followup_status=None
- if session_cookie is not None:
+ if case['id']=='fallback':
+  raw=next(value for value in response.headers.getlist('Set-Cookie')
+           if value.startswith('project_session='))
   from http.cookies import SimpleCookie
-  jar=SimpleCookie();jar.load(session_cookie);item=jar['project_session']
-  parsed={'value_present':bool(item.value),
-   'max_age':int(item['max-age']) if item['max-age'] else '', 'path':item['path'],
-   'domain':item['domain'],'secure':bool(item['secure']),'httponly':bool(item['httponly']),
-   'samesite':item['samesite']}
-  if case['id']=='fallback':
-   followup_status=client.get('/notes/',headers={'Cookie':'project_session='+item.value}).status_code
+  jar=SimpleCookie();jar.load(raw)
+  followup_status=client.get('/notes/',headers={
+   'Cookie':'project_session='+jar['project_session'].value}).status_code
  responses.append({'id':case['id'],'status':response.status_code,'body':response.json,
   'vary':response.headers.get('Vary'),'session_cookie':parsed,
   'original_session_exists':exists,'followup_status':followup_status,'notes':notes})
@@ -561,6 +610,37 @@ if responses != facts['responses']:
  print(json.dumps([{'target':target,'source':source} for target,source in
   zip(responses,facts['responses'],strict=True) if target != source],indent=2))
  raise AssertionError('session response mismatch')
+untouched=[]
+sql=[]
+sa.event.listen(engine,'before_cursor_execute',lambda *args: sql.append(args[2]))
+save_every=next(iter(facts['overrides']['session_auth'].values()))['session'][
+ 'save_every_request']
+for case in facts['cookie_cases']:
+ headers={}
+ if 'key' in case: headers['Cookie']='project_session='+case['key']
+ before=len(sql)
+ response=app.test_client(use_cookies=False).get('/absent',headers=headers)
+ if not save_every or case.get('key') is None or len(case['key']) < 8:
+  assert len(sql)==before,(case,sql[before:])
+ else:
+  assert len(sql)>before,(case,sql[before:])
+ untouched.append({'id':case['id'],'status':response.status_code,
+  'vary':response.headers.get('Vary'),'session_cookie':session_cookie(response)})
+assert untouched==facts['untouched'],(untouched,facts['untouched'])
+from flask import Response
+from sanka_native import sqlalchemy_sessions as session_runtime
+server_errors=[]
+for case in facts['cookie_cases']:
+ headers={}
+ if 'key' in case: headers['Cookie']='project_session='+case['key']
+ with app.test_request_context('/absent',headers=headers):
+  before=len(sql)
+  response=session_runtime.save_response(
+   app.extensions['sanka_session_runtime'],Response(status=500))
+  server_errors.append({'id':case['id'],'status':response.status_code,
+   'vary':response.headers.get('Vary'),'session_cookie':session_cookie(response),
+   'queries':len(sql)-before})
+assert server_errors==facts['server_errors'],(server_errors,facts['server_errors'])
 engine.dispose()
 """
     target_result = subprocess.run(
