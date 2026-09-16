@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
+import importlib
 import re
 from typing import Any
 
 from flask import Flask, Response, g, request
-from werkzeug.exceptions import SecurityError
+from werkzeug.exceptions import RequestEntityTooLarge, SecurityError
 from werkzeug.wsgi import get_host
 
 
@@ -15,6 +16,22 @@ def install_middleware(app: Flask, contract: dict[str, Any], patterns: Any) -> N
     facts = contract["middleware"]
     security = contract["http_security"]
     exemptions = [re.compile(pattern) for pattern in facts["redirect_exempt"]]
+    session_runtime = (
+        importlib.import_module(__package__ + ".sqlalchemy_sessions")
+        if any(
+            view.get("auth", {}).get("kind") == "session"
+            for view in contract.get("views", {}).values()
+        )
+        else None
+    )
+    session_context = (
+        session_runtime.configure_runtime(app, contract) if session_runtime is not None else None
+    )
+    app.extensions["sanka_session_runtime"] = session_context
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def request_too_large(_error: RequestEntityTooLarge) -> Response:
+        return Response(facts["bad_request"], 400, content_type="text/html; charset=utf-8")
 
     def redirect(location: str) -> Response:
         # Django permanent redirects have an empty body, unlike Flask's HTML redirect helper.
@@ -43,7 +60,9 @@ def install_middleware(app: Flask, contract: dict[str, Any], patterns: Any) -> N
             kind = middleware.rsplit(".", 1)[-1]
             g.sanka_middleware.append(kind)
             try:
-                if kind == "CommonMiddleware":
+                if kind == "CsrfViewMiddleware" and session_runtime is not None:
+                    session_runtime.prepare_csrf(session_context)
+                elif kind == "CommonMiddleware":
                     checked_host()
                 elif kind == "SecurityMiddleware" and (
                     security["ssl_redirect"]
@@ -64,7 +83,18 @@ def install_middleware(app: Flask, contract: dict[str, Any], patterns: Any) -> N
         response.automatically_set_content_length = False
         response.headers.pop("Content-Length", None)
         for kind in reversed(getattr(g, "sanka_middleware", [])):
-            if kind == "CommonMiddleware":
+            if kind == "SessionMiddleware" and session_runtime is not None:
+                try:
+                    response = session_runtime.save_response(session_context, response)
+                except session_runtime.SessionInterrupted:
+                    response = Response(
+                        facts["bad_request"], 400, content_type="text/html; charset=utf-8"
+                    )
+                    response.automatically_set_content_length = False
+                    response.headers.pop("Content-Length", None)
+            elif kind == "CsrfViewMiddleware" and session_runtime is not None:
+                response = session_runtime.save_csrf(session_context, response)
+            elif kind == "CommonMiddleware":
                 if (
                     response.status_code == 404
                     and security["append_slash"]

@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import copy
 import importlib
+import importlib.metadata
 import inspect
 import math
 import re
@@ -163,11 +164,13 @@ def _capture_backends(view_class: type[Any]) -> dict[str, Any]:
                 "rule": "drf",
                 "pk": pk,
             }
-        elif (
-            inspect.isclass(backend)
-            and backend.__name__ == "DjangoFilterBackend"
-            and backend.__module__.startswith("django_filters.")
-        ):
+        else:
+            django_filters = importlib.import_module("django_filters.filters")
+            django_backend = importlib.import_module(
+                "django_filters.rest_framework.backends"
+            ).DjangoFilterBackend
+            if backend is not django_backend:
+                raise ValueError("filter backend requires manual adaptation")
             if getattr(view_class, "filterset_class", None) is not None:
                 raise ValueError("custom filtersets require manual adaptation")
             declared = getattr(view_class, "filterset_fields", None)
@@ -182,15 +185,101 @@ def _capture_backends(view_class: type[Any]) -> dict[str, Any]:
                     for lookup in lookups
                 ]
             )
+            model = getattr(getattr(view_class, "serializer_class", None), "Meta", None)
+            model = getattr(model, "model", None)
+            queryset = getattr(view_class, "queryset", None)
+            if model is None or queryset is None or getattr(queryset, "model", None) is not model:
+                raise ValueError("django-filter model requires manual adaptation")
+            model = cast(Any, model)
+            filterset = django_backend().get_filterset_class(view_class(), queryset)
+            if filterset is None:
+                raise ValueError("django-filter requires explicit filterset_fields")
             specs = []
-            for name, lookup in sorted(pairs):
+            for name, lookup in pairs:
                 if name not in field_names or lookup not in _FILTER_LOOKUPS:
                     raise ValueError("django-filter field or lookup requires manual adaptation")
+                if getattr(fields[name], "source", name) != name:
+                    raise ValueError("django-filter serializer alias requires manual adaptation")
                 param = name if lookup == "exact" else f"{name}__{lookup}"
-                specs.append({"param": param, "name": name, "lookup": lookup})
+                actual = filterset.base_filters.get(param)
+                if actual is None or actual.lookup_expr != lookup:
+                    raise ValueError("django-filter field requires manual adaptation")
+                model_field = model._meta.get_field(name)
+                boolean_filter = importlib.import_module(
+                    "django_filters.rest_framework.filters"
+                ).BooleanFilter
+                if lookup == "isnull" or isinstance(actual, boolean_filter):
+                    value_kind = "boolean"
+                elif isinstance(actual, django_filters.NumberFilter):
+                    value_kind = "number"
+                elif isinstance(actual, django_filters.ChoiceFilter):
+                    value_kind = "choice"
+                elif isinstance(actual, django_filters.CharFilter):
+                    value_kind = "string"
+                else:
+                    raise ValueError("django-filter field type requires manual adaptation")
+                if value_kind == "choice" and any(
+                    not isinstance(value, str) for value, _label in model_field.choices
+                ):
+                    raise ValueError("django-filter choice type requires manual adaptation")
+                if value_kind == "choice" and actual.field.null_label is not None:
+                    raise ValueError("django-filter null choice requires manual adaptation")
+                if lookup == "iexact" and value_kind not in {"string", "choice"}:
+                    raise ValueError("django-filter lookup requires manual adaptation")
+                if lookup in {"gt", "gte", "lt", "lte"} and value_kind == "boolean":
+                    raise ValueError("django-filter lookup requires manual adaptation")
+                spec: dict[str, Any] = {
+                    "param": param,
+                    "name": name,
+                    "lookup": lookup,
+                    "value_kind": value_kind,
+                }
+                if value_kind == "choice":
+                    spec["choices"] = [
+                        str(value) for value, _label in actual.field.choices if value != ""
+                    ]
+                    spec["invalid_choice"] = str(actual.field.error_messages["invalid_choice"])
+                elif value_kind == "number":
+                    if model_field.get_internal_type() in {
+                        "AutoField",
+                        "BigAutoField",
+                        "SmallAutoField",
+                        "IntegerField",
+                        "BigIntegerField",
+                        "SmallIntegerField",
+                        "PositiveIntegerField",
+                        "PositiveBigIntegerField",
+                        "PositiveSmallIntegerField",
+                    }:
+                        spec["number_kind"] = "integer"
+                        connection = importlib.import_module("django.db").connection
+                        minimum, maximum = connection.ops.integer_field_range(
+                            model_field.get_internal_type()
+                        )
+                        spec["integer_range"] = [minimum, maximum]
+                    try:
+                        actual.field.clean("not-a-number")
+                    except Exception as error:
+                        spec["invalid"] = str(getattr(error, "messages", [str(error)])[0])
+                    validator = actual.get_max_validator()
+                    if validator is not None:
+                        spec["max_value"] = str(validator.limit_value)
+                        try:
+                            actual.field.clean(str(Decimal(str(validator.limit_value)) * 10))
+                        except Exception as error:
+                            spec["max_value_error"] = str(
+                                getattr(error, "messages", [str(error)])[0]
+                            )
+                elif value_kind == "string":
+                    try:
+                        actual.field.clean("contains\x00null")
+                    except Exception as error:
+                        spec["null_character_error"] = str(
+                            getattr(error, "messages", [str(error)])[0]
+                        )
+                specs.append(spec)
             listing["filters"] = specs
-        else:
-            raise ValueError("filter backend requires manual adaptation")
+            listing["django_filter_version"] = importlib.metadata.version("django-filter")
     return listing
 
 
@@ -287,6 +376,43 @@ def _coerce(field: dict[str, Any], value: str) -> Any:
     return value
 
 
+class _FilterError(ValueError):
+    def __init__(self, body: dict[str, list[str]]) -> None:
+        self.body = body
+
+
+def _filter_value(spec: dict[str, Any], field: dict[str, Any], raw: str) -> Any:
+    kind = spec.get("value_kind")
+    if kind is None:
+        return _coerce(field, raw)
+    if kind == "boolean":
+        lowered = raw.lower()
+        if lowered in {"true", "1"}:
+            return True
+        if lowered in {"false", "0"}:
+            return False
+        return None
+    if kind == "number":
+        try:
+            value = Decimal(raw.strip())
+            if not value.is_finite():
+                raise ValueError
+        except (ArithmeticError, ValueError):
+            raise _FilterError({str(spec["param"]): [str(spec["invalid"])]}) from None
+        maximum = spec.get("max_value")
+        if maximum is not None and value > Decimal(str(maximum)):
+            raise _FilterError({str(spec["param"]): [str(spec["max_value_error"])]})
+        return int(value) if spec.get("number_kind") == "integer" else value
+    if kind == "choice" and raw not in spec.get("choices", ()):
+        template = str(spec["invalid_choice"])
+        raise _FilterError({str(spec["param"]): [template % {"value": raw}]})
+    if kind == "string":
+        if "\x00" in raw:
+            raise _FilterError({str(spec["param"]): [str(spec["null_character_error"])]})
+        return raw.strip()
+    return raw
+
+
 def _search_terms(value: str) -> list[str]:
     terms: list[str] = []
     for match in _SMART_SPLIT.finditer(value):
@@ -303,6 +429,18 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _integer_expression(sa: Any, column: Any, lookup: str, value: Any, bounds: Any) -> Any:
+    minimum, maximum = bounds
+    if minimum <= value <= maximum:
+        return None
+    if lookup == "exact":
+        return sa.false()
+    all_rows = (lookup in {"gt", "gte"} and value < minimum) or (
+        lookup in {"lt", "lte"} and value > maximum
+    )
+    return sa.true() if all_rows else sa.false()
+
+
 def _filters(
     statement: Any,
     table: Any,
@@ -312,24 +450,57 @@ def _filters(
 ) -> Any:
     import sqlalchemy as sa
 
+    cleaned: list[tuple[dict[str, Any], Any]] = []
+    errors: dict[str, list[str]] = {}
     for spec in listing.get("filters") or ():
         lookup = str(spec.get("lookup") or "exact")
         if lookup not in {"exact", "iexact", "in", "gt", "gte", "lt", "lte", "isnull"}:
             raise ValueError(f"unsupported filter lookup: {lookup}")
         raw = _value(query, str(spec["param"]))
-        if raw is None:
+        if raw is None or raw == "":
             continue
         name = str(spec["name"])
         field = _field(resource, name)
-        column = _column(table, resource, name)
-        if lookup == "exact":
-            expression = column == _coerce(field, raw)
-        elif lookup == "iexact":
-            expression = column.ilike(_escape_like(raw), escape="\\")
+        value: Any
+        try:
+            if lookup == "in":
+                value = [
+                    None
+                    if item == "" and spec.get("value_kind") == "number"
+                    else _filter_value(spec, field, item)
+                    for item in raw.split(",")
+                ]
+            else:
+                value = _filter_value(spec, field, raw)
+        except _FilterError as error:
+            errors.update(error.body)
+            continue
+        if value is None or value == [] or (spec.get("value_kind") == "string" and value == ""):
+            continue
+        cleaned.append((spec, value))
+    if errors:
+        raise _FilterError(errors)
+
+    for spec, value in cleaned:
+        lookup = str(spec.get("lookup") or "exact")
+        column = _column(table, resource, str(spec["name"]))
+        expression = (
+            _integer_expression(sa, column, lookup, value, spec["integer_range"])
+            if spec.get("number_kind") == "integer"
+            and lookup in {"exact", "gt", "gte", "lt", "lte"}
+            else None
+        )
+        if expression is not None:
+            pass
         elif lookup == "in":
-            expression = column.in_([_coerce(field, item) for item in raw.split(",")])
+            if not value:
+                continue
+            expression = column.in_(value)
+        elif lookup == "exact":
+            expression = column == value
+        elif lookup == "iexact":
+            expression = column.ilike(_escape_like(str(value)), escape="\\")
         elif lookup in {"gt", "gte", "lt", "lte"}:
-            value = _coerce(field, raw)
             expression = {
                 "gt": column > value,
                 "gte": column >= value,
@@ -337,9 +508,7 @@ def _filters(
                 "lte": column <= value,
             }[lookup]
         elif lookup == "isnull":
-            expression = (
-                column.is_(None) if _coerce({"kind": "boolean"}, raw) else column.is_not(None)
-            )
+            expression = column.is_(None) if value else column.is_not(None)
         statement = statement.where(expression)
     search = listing.get("search")
     if search:
@@ -368,6 +537,21 @@ def _filters(
             if matches:
                 statement = statement.where(sa.or_(*matches))
     return statement
+
+
+def apply_filters(
+    statement: Any,
+    table: Any,
+    resource: dict[str, Any],
+    listing: dict[str, Any],
+    query: dict[str, list[str]],
+) -> tuple[Any, dict[str, list[str]] | None]:
+    """Apply captured stock filters and preserve DRF's validation body."""
+
+    try:
+        return _filters(statement, table, resource, listing, query), None
+    except _FilterError as error:
+        return statement, error.body
 
 
 def _requested_ordering(
@@ -691,13 +875,15 @@ def list_records(
 
     import sqlalchemy as sa
 
-    statement = _filters(
+    statement, filter_error = apply_filters(
         sa.select(table) if base_statement is None else base_statement,
         table,
         resource,
         listing,
         query,
     )
+    if filter_error:
+        return filter_error, 400
     requested = _requested_ordering(listing.get("ordering"), query)
     pagination = listing.get("pagination")
     if pagination and pagination.get("kind") == "cursor":

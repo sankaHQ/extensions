@@ -11,7 +11,7 @@ import re
 import uuid
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode
 
 import sqlalchemy as sa
@@ -251,6 +251,14 @@ def _validate(
 
 
 def _authenticate(auth: dict[str, Any], tables: Any, sessions: Any) -> tuple[Any, Response | None]:
+    if auth.get("kind") == "session":
+        from flask import current_app
+
+        session_runtime = importlib.import_module(__package__ + ".sqlalchemy_sessions")
+        return cast(
+            tuple[Any, Response | None],
+            session_runtime.authenticate(current_app.extensions.get("sanka_session_runtime"), auth),
+        )
     if not auth.get("token_keyword"):
         return None, None
     messages = auth["messages"]
@@ -311,13 +319,16 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         else None
     )
     app = Flask(__name__)
-    app.config.update(MAX_CONTENT_LENGTH=2_621_440)
+    if contract["request_body_limit"] is not None:
+        app.config.update(MAX_CONTENT_LENGTH=contract["request_body_limit"])
     app.config.update(config or {})
     app.url_map.merge_slashes = False
     app.url_map.converters["allpaths"] = _AllPaths
     engine = database.make_engine(app.config.get("DATABASE_URL"))
     app.extensions["sanka_engine"] = engine
     sessions = database.sessions(engine)
+    app.extensions["sanka_sessions"] = sessions
+    app.extensions["sanka_tables"] = tables
     blueprint = Blueprint("source_api", __name__)
     routes: dict[tuple[str, str], dict[str, Any]] = {}
     for route in contract["routes"]:
@@ -338,9 +349,23 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
 
     def detail_row(
         resource: Any, session: Any, table: Any, kwargs: Any, view: Any, user_id: Any
-    ) -> Any:
+    ) -> tuple[Any, dict[str, list[str]] | None, bool]:
         parameter = kwargs.get(view.get("lookup_url_kwarg") or resource["lookup"])
         column = table.c[resource["lookup_column"]]
+        statement = sa.select(table)
+        if access_runtime is not None:
+            statement = access_runtime.scope_statement(
+                statement, table, tables, view["access"], kwargs, user_id
+            )
+        statement, error = (
+            listing_runtime.apply_filters(
+                statement, table, resource, view["listing"], dict(request.args.lists())
+            )
+            if request.method != "OPTIONS"
+            else (statement, None)
+        )
+        if error:
+            return None, error, False
         try:
             value = (
                 parameter
@@ -348,13 +373,9 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
                 else column.type.python_type(parameter)
             )
         except (TypeError, ValueError, AttributeError):
-            return None
-        statement = sa.select(table).where(column == value)
-        if access_runtime is not None:
-            statement = access_runtime.scope_statement(
-                statement, table, tables, view["access"], kwargs, user_id
-            )
-        return session.execute(statement).mappings().first()
+            return None, None, True
+        statement = statement.where(column == value)
+        return session.execute(statement).mappings().first(), None, False
 
     def handle(methods: dict[str, Any], kwargs: dict[str, Any]) -> Response:
         order = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"]
@@ -435,8 +456,10 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
                     "partial_update",
                     "destroy",
                 } or bool(access.get("member_action"))
-                instance: Any = (
-                    detail_row(resource, session, table, kwargs, view, user_id) if detail else None
+                instance, filter_error, invalid_lookup = (
+                    detail_row(resource, session, table, kwargs, view, user_id)
+                    if detail
+                    else (None, None, False)
                 )
                 denied = (
                     access_runtime.permission_error(
@@ -450,7 +473,9 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
                     and instance is not None
                     and instance[auth["owner_attname"]] != user[auth["user"]["pk"]]
                 )
-                if method == "OPTIONS":
+                if filter_error:
+                    response = _response(filter_error, 400)
+                elif method == "OPTIONS":
                     metadata = copy.deepcopy(
                         route["options"]["authorized" if user is not None else "anonymous"]
                     )
@@ -459,6 +484,8 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
                         if not metadata.get("actions"):
                             metadata.pop("actions", None)
                     response = _response(metadata)
+                elif detail and invalid_lookup:
+                    response = not_found()
                 elif detail and instance is None:
                     response = _response({"detail": resource["not_found"]}, 404)
                 elif denied and not access.get("member_action"):
@@ -492,6 +519,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
                                 session, tables, contract["schema"], resource["db_table"], instance
                             )
                         else:
+                            assert instance is not None
                             session.execute(
                                 sa.delete(table).where(
                                     table.c[resource["pk_column"]]
@@ -500,6 +528,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
                             )
                         session.commit()
                         response = Response(status=204)
+                        response.headers.pop("Content-Type", None)
                     except Exception as error:
                         if not isinstance(error, sa.exc.IntegrityError) and not (
                             deletion is not None and isinstance(error, deletion.DeletionBlocked)

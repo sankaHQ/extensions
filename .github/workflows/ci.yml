@@ -55,10 +55,31 @@ jobs:
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_records.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_nested.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py
           -k postgresql -q
       - run: make check
       - run: make build-release
       - run: make build-business-flows
+      - name: Install the actual Flask candidate and its published SDK dependencies
+        run: uv --no-config pip install --reinstall --no-index --find-links dist dist/sanka_extension_drf_to_flask-*.whl
+      - name: Verify installed Flask wheels with native lifecycle and database parity
+        run: |
+          uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_drf_to_flask, sanka_code_migration; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; root = pathlib.Path(sys.prefix).resolve(); assert all(pathlib.Path(m.__file__).resolve().is_relative_to(root) for m in (sanka_extension_drf_to_flask, sanka_code_migration))"
+          uv run --no-sync python -m pytest \
+            packages/sanka-extension-drf-to-flask/tests/test_native_plan.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_nested.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py \
+            packages/sanka-extension-drf-to-flask/tests/test_behavior_inventory_plan.py \
+            packages/sanka-extension-drf-to-flask/tests/test_session_lifecycle.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_csrf.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py
 
   modern-drf:
     name: Django 6 DRF conversion parity
@@ -89,3 +110,7 @@ jobs:
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_datetime.py
           packages/sanka-extension-drf-to-flask/tests/test_validator_qualification.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_csrf.py

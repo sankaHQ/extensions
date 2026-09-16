@@ -17,7 +17,7 @@ from sanka_extension_drf_to_flask.planning import _service_operations
 from sanka_extension_drf_to_flask.sqlalchemy import qualify_routes, render_sqlalchemy
 
 
-def test_nested_source_and_standalone_target(tmp_path: Path) -> None:
+def test_nested_source_and_standalone_target(tmp_path: Path, contract_databases) -> None:
     source = tmp_path / "source"
     source.mkdir()
     project(source)
@@ -33,6 +33,8 @@ def test_nested_source_and_standalone_target(tmp_path: Path) -> None:
         "'DEFAULT_AUTHENTICATION_CLASSES': [],"
         "'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],"
         "'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser']})\n"
+        "import os,json\n"
+        "DATABASES={'default':json.loads(os.environ['SANKA_SOURCE_TEST_DATABASE'])}\n"
     )
     serializers = source / "catalog/serializers.py"
     serializers.write_text(
@@ -49,6 +51,11 @@ def test_nested_source_and_standalone_target(tmp_path: Path) -> None:
             "POST",
             "/api/bundles/",
             {"code": "rollback", "parts": [{"quantity": 13, "cost": "1.00"}]},
+        ],
+        [
+            "POST",
+            "/api/bundles/",
+            {"code": "recovered", "parts": [{"quantity": 3, "cost": "2.50"}]},
         ],
         [
             "POST",
@@ -86,13 +93,19 @@ for method, path, data in json.loads(Path(sys.argv[1], 'cases.json').read_text()
                               content_type='application/json')
     body = json.loads(response.content) if response.content else None
     results.append([response.status_code, body,
-        list(Bundle.objects.order_by('id').values()), list(Part.objects.order_by('id').values())])
+        list(Bundle.objects.order_by('id').values()), list(Part.objects.order_by('id').values()),
+        {key:response.headers.get(key) for key in ['Allow','Content-Type','Vary']}])
 assert results[0][0] == 201 and results[3][0] == 400
+assert results[3][2:4] == results[2][2:4]
 assert len(results[3][2]) == 1 and len(results[3][3]) == 1
+assert results[4][0] == 201 and len(results[4][2]) == len(results[4][3]) == 2
+assert results[4][2][-1]['code'] == 'recovered'
+assert results[4][3][-1]['quantity'] == 3
 print(json.dumps({'scan':scan.to_dict(), 'schema':capture_schema([Bundle,Part]),
     'overrides':capture_sqlalchemy_overrides(scan), 'results':results}, default=str))
 """
-    env = dict(os.environ)
+    source_database, target_url = contract_databases
+    env = os.environ | {"SANKA_SOURCE_TEST_DATABASE": json.dumps(source_database)}
     result = subprocess.run(
         [sys.executable, "-c", capture, str(source)],
         cwd=source,
@@ -124,7 +137,7 @@ print(json.dumps({'scan':scan.to_dict(), 'schema':capture_schema([Bundle,Part]),
         path.write_text(text)
     (target / "cases.json").write_text(json.dumps(cases))
     (target / "results.json").write_text(json.dumps(facts["results"]))
-    env["SANKA_DATABASE_URL"] = "sqlite:///" + str(target / "target.sqlite3")
+    env["SANKA_DATABASE_URL"] = target_url
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=target,
@@ -159,9 +172,11 @@ for (method, path, data), expected in zip(cases, expected_results, strict=True):
         for name in ['catalog_bundle','catalog_part']:
             query = sa.select(TABLES[name]).order_by(TABLES[name].c.id)
             snapshots.append(list(map(dict, connection.execute(query).mappings())))
-    observed = [response.status_code, response.json if response.data else None, *snapshots]
+    observed = [response.status_code, response.json if response.data else None, *snapshots,
+        {key:response.headers.get(key) for key in ['Allow','Content-Type','Vary']}]
     observed = json.loads(json.dumps(observed, default=str))
     assert observed == expected, (method, path, data, observed, expected)
+app.extensions['sanka_engine'].dispose()
 """
     result = subprocess.run(
         [sys.executable, "-c", probe],

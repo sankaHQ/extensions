@@ -46,18 +46,44 @@ hash intentionally differs when that location changes.
 
 The standalone profile currently recognizes JSON CRUD and generic views, Token/owner
 permissions, atomic nested writes, stock page-number/limit-offset/cursor pagination,
-search and ordering, and stock Common/Security/XFrame middleware. Recognized database
+search and ordering, bounded stock django-filter fields, and stock Common/Security/XFrame middleware. Recognized database
 delete policies execute in the request transaction. Each supported contract has
 source/target response and database-effect checks in the converter test suite.
-Token/owner and conditional-record fixtures also run against independent PostgreSQL
-schemas in CI. The generic `verify` replay command currently supports SQLite only.
+Token/owner, conditional records, pagination, filtering and nested-write fixtures also
+run against independent PostgreSQL schemas in CI. Built Flask and shared-helper wheels
+are installed and tested separately from their editable source packages. The generic `verify` replay command currently supports SQLite only.
+
+Stock `DjangoFilterBackend` supports qualified automatic scalar filters, including
+repeated parameters, CSV inputs and detail filtering. Custom filtersets, related/date
+filters and unsupported lookups remain blocking gaps. Filter errors preserve field
+order and source validation messages. JSON body-limit behavior is captured from the
+source parser. Enforced limits preserve the source error response without writes;
+a source parser that accepts the request does not acquire an invented rejection.
+
+Stock database sessions are supported when every migrated view uses exact
+`SessionAuthentication` with `IsAuthenticated`, the stock database session backend,
+JSON session serialization, timezone-aware expiry (`USE_TZ=True`), `ModelBackend`,
+and the captured session/auth/CSRF
+middleware. Existing signed sessions, key fallback rotation, expiry, CSRF tokens,
+Origin/HTTPS Referer checks and cookie effects are preserved by the qualified
+contract. Signing keys are explicit target environment inputs, never generated
+values. Login/logout endpoints are not invented. Mixed authentication policies,
+custom user lookup/hash behavior and unrepresented settings remain blocking gaps.
+
+| Authentication profile | Retained Django ORM | Standalone SQLAlchemy |
+| --- | --- | --- |
+| No authentication / AllowAny | Qualified stock ViewSets | Qualified JSON contracts |
+| Default Session then Basic, no middleware | Basic works; session cookies are inert | Blocking gap |
+| Token with captured owner/member permissions | Outside retained ViewSet scope | Qualified captured contracts |
+| Stock database session with IsAuthenticated and CSRF | Middleware remains a gap | Qualified bounded contract above |
+| Custom or combined authenticators | Only the documented APIView subset | Blocking gap |
 
 Explicit scalar validators whose limits, messages or error ordering cannot be
 represented block conversion. Native decimal fields with non-integer bounds,
 custom rounding, localization or normalized output also block conversion rather
 than silently changing validation or response values.
 
-Session/Basic authentication, browsable HTML, multipart/form parsing, custom middleware,
+Basic or combined authenticators, browsable HTML, multipart/form parsing, custom middleware,
 signals, arbitrary serializer hooks, and historical RunPython/RunSQL migrations remain
 blocking gaps in this profile. Custom view carryover supports the recognized
 conditional-response recipe or strict literal response transformations after the
@@ -70,7 +96,9 @@ custom actions remain gaps. `USE_TZ=False` with
 automatic timestamp fields is also blocked until its whole request contract is qualified. Existing APIView/form conversions remain available in
 the Django ORM profile below. Selecting SQLAlchemy never silently drops these features.
 Source introspection imports application code; run scans only in a trusted source
-execution environment. Static inventory is not a sandbox for untrusted Python.
+execution environment. Static inventory flags recognized raw SQL, network, email and storage operations,
+alongside lifecycle hooks and data migrations; it does not resolve arbitrary dynamic
+Python behavior and is not a sandbox for untrusted Python.
 
 Generated dependencies are resolved in checked-in `uv.lock` profiles and hash-locked
 pip requirements. The generated README includes environment setup, migration commands,

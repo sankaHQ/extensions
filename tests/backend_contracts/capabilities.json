@@ -247,7 +247,7 @@
       "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_nested.py::test_nested_source_and_standalone_target",
       "source_success": {
         "status": 201,
-        "database_effect": "Parent and child create atomically; captured domain rejection rolls both back."
+        "database_effect": "SQLite and PostgreSQL parent/child writes, rollback and successful writes after rollback match."
       }
     },
     {
@@ -264,7 +264,7 @@
       "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py::test_generated_page_limit_search_ordering_matches_source_without_source_imports",
       "source_success": {
         "status": 200,
-        "database_effect": "Seeded rows yield identical bodies, counts and cursor/page links."
+        "database_effect": "SQLite and PostgreSQL source/target bodies, headers, row snapshots and cursor/page traversal match."
       }
     },
     {
@@ -327,6 +327,50 @@
         "database_effect": "one record is created; later update/PATCH and delete effects match after literal response transformations"
       },
       "target_difference": "Only fully recognized literal transformations after the matching stock CRUD call qualify; arbitrary Python and renderer-owned headers remain unsupported."
+    },
+    {
+      "id": "flask-native-django-filter",
+      "capabilities": [
+        "listing.django_filter",
+        "validation.filter_errors"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py::test_stock_django_filters_match_source_without_source_imports",
+      "source_success": {
+        "status": 200,
+        "database_effect": "Source and target listing/detail filtering and validation errors match without changing rows."
+      }
+    },
+    {
+      "id": "flask-native-request-size",
+      "capabilities": [
+        "request.body_limit",
+        "write.denied_no_effect"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py::test_request_body_limit_matches_source",
+      "source_success": {
+        "status": 201,
+        "database_effect": "Requests accepted by the source persist rows; source-enforced size rejection preserves its error response and performs no write."
+      }
+    },
+    {
+      "id": "flask-native-session-csrf",
+      "capabilities": [
+        "auth.session",
+        "auth.csrf",
+        "write.denied_no_effect"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py::test_database_session_auth_and_csrf_match_source",
+      "source_success": {
+        "status": 201,
+        "database_effect": "Authenticated writes with valid CSRF succeed; denied requests preserve application rows and source session lifecycle effects."
+      },
+      "target_difference": "Only the captured stock database-session and IsAuthenticated profile qualifies; signing keys must be supplied through the generated environment contract."
     }
   ]
 }

@@ -93,6 +93,19 @@ def test_native_generation_is_portable_between_source_roots(tmp_path, monkeypatc
         monkeypatch.setenv("TZ", "UTC" if seed == 0 else "Asia/Tokyo")
         root = tmp_path / folder
         native_project(root)
+        # The source bytes match even when directory insertion order and mtimes differ.
+        if seed:
+            sources = {
+                path.relative_to(root): path.read_bytes()
+                for path in root.rglob("*")
+                if path.is_file()
+            }
+            shutil.rmtree(root)
+            for relative, content in sorted(sources.items(), reverse=True):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+                os.utime(path, (946684800, 946684800))
         assert call(root, "scan", config)["outcome"] == "success"
         result = call(root, "plan", config)
         assert result["outcome"] == "success", result
