@@ -2113,9 +2113,28 @@ def _defines_custom_validation(cls: type[Any]) -> bool:
     return False
 
 
-def standard_field_validators(field: Any) -> bool:
+def standard_field_validators(field: Any, model: Any) -> bool:
     """The scalar IR represents stock field validators, not additional validator runs."""
     unique_validator = importlib.import_module("rest_framework.validators").UniqueValidator
+    unique = [item for item in field.validators if type(item) is unique_validator]
+    if unique:
+        if len(unique) != 1 or model is None:
+            return False
+        models_module = importlib.import_module("django.db.models")
+        validator = unique[0]
+        if type(validator.queryset) not in {models_module.Manager, models_module.QuerySet}:
+            return False
+        queryset = validator.queryset.all()
+        if (
+            validator.lookup != "exact"
+            or queryset.model is not model
+            or type(model._default_manager) is not models_module.Manager
+            or type(queryset) is not models_module.QuerySet
+            or queryset.query.where
+            or queryset.db != model._default_manager.db
+            or str(queryset.query) != str(model._default_manager.all().query)
+        ):
+            return False
     observed = [item for item in field.validators if type(item) is not unique_validator]
     expected = type(field)(
         *field._args, **{key: value for key, value in field._kwargs.items() if key != "validators"}
@@ -2215,7 +2234,7 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
     if kind in {"boolean", "uuid"}:
         allowed_validators = (drf_validators.UniqueValidator,)
     supported = all(type(item) in allowed_validators for item in field.validators) and (
-        standard_field_validators(field)
+        standard_field_validators(field, model)
     )
     if any(
         getattr(field, key, None) is not None and _maybe_int(getattr(field, key)) is None

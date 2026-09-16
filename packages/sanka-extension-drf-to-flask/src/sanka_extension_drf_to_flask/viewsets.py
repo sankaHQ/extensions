@@ -67,7 +67,9 @@ def model_serializer(cls: Any, name: str) -> str | None:
         )
         if type(field) not in allowed:
             return None
-        if type(field) is not serializers.ListSerializer and not standard_field_validators(field):
+        if type(field) is not serializers.ListSerializer and not standard_field_validators(
+            field, cls.Meta.model
+        ):
             return None
         spec = {
             "kind": type(field).__name__,
@@ -132,13 +134,6 @@ def model_serializer(cls: Any, name: str) -> str | None:
                 return None
         for validator in field.validators:
             if type(validator) is UniqueValidator:
-                if (
-                    validator.lookup != "exact"
-                    or validator.queryset.model is not cls.Meta.model
-                    or str(validator.queryset.all().query)
-                    != str(cls.Meta.model._default_manager.all().query)
-                ):
-                    return None
                 spec["unique"] = str(validator.message)
             elif type(validator).__module__ not in {
                 "django.core.validators",

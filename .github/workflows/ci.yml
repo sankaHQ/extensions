@@ -86,3 +86,4 @@ jobs:
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_access.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_records.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_datetime.py
+          packages/sanka-extension-drf-to-flask/tests/test_validator_qualification.py

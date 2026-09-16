@@ -130,3 +130,63 @@ print(json.dumps(results))
     plan = call(tmp_path, "plan", config)
     assert plan["outcome"] == "error", plan
     assert "serializer-writes" in plan["error"]["message"]
+
+
+@pytest.mark.parametrize("orm", ["sqlalchemy", "django"])
+@pytest.mark.parametrize("variant", ["iexact", "filtered", "duplicate"])
+def test_unique_query_semantics_cannot_be_dropped(tmp_path, orm, variant):
+    native_project(tmp_path)
+    validators = {
+        "iexact": "UniqueValidator(Gadget.objects.all(), lookup='iexact')",
+        "filtered": "UniqueValidator(Gadget.objects.filter(quantity=1))",
+        "duplicate": "UniqueValidator(Gadget.objects.all()), UniqueValidator(Gadget.objects.all())",
+    }[variant]
+    serializer = tmp_path / "inventory/serializers.py"
+    serializer.write_text(
+        "from rest_framework.validators import UniqueValidator\n"
+        + serializer.read_text().replace(
+            "class GadgetSerializer(serializers.ModelSerializer):",
+            "class GadgetSerializer(serializers.ModelSerializer):\n"
+            "    name = serializers.CharField(max_length=80, validators=[" + validators + "])",
+        )
+    )
+    script = """import json, django, sys
+django.setup()
+from django.db import connection
+from inventory.models import Gadget
+from rest_framework.test import APIClient
+with connection.schema_editor() as editor:
+    editor.create_model(Gadget)
+Gadget.objects.create(name='foo', quantity=2)
+name = 'Foo' if sys.argv[1] == 'iexact' else 'foo'
+response = APIClient().post('/api/gadgets/', {'name': name, 'quantity': 3}, format='json')
+print(json.dumps([response.status_code, response.json(), Gadget.objects.count()]))
+"""
+    source = subprocess.run(
+        [sys.executable, "-c", script, variant],
+        cwd=tmp_path,
+        env=os.environ
+        | {
+            "DJANGO_SETTINGS_MODULE": "crud_config.settings",
+            "SANKA_TEST_DB": str(tmp_path / "source.db"),
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    status, body, count = json.loads(source.stdout)
+    if variant == "filtered":
+        assert status == 201 and count == 2
+    else:
+        assert status == 400 and count == 1
+        assert len(body["name"]) == (2 if variant == "duplicate" else 1)
+    config = {"settings_module": "crud_config.settings", "orm": orm}
+    scan = call(tmp_path, "scan", config)
+    assert scan["outcome"] == "success", scan
+    plan = call(tmp_path, "plan", config)
+    if orm == "sqlalchemy":
+        assert plan["outcome"] == "error", plan
+        assert "serializer-writes" in plan["error"]["message"]
+    else:
+        assert plan["data"]["needs_adaptation_routes"] > 0, plan

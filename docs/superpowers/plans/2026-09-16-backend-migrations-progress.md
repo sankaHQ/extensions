@@ -165,6 +165,11 @@ Main was fetched and pulled with `--ff-only` before changes.
 - The generic `sanka-drf-replay` command remains SQLite-only. This change adds
   PostgreSQL qualification for the named fixtures, not arbitrary-project replay.
 - Candidate helper/converter versions change explicitly; no package is published.
+- Independent review identified custom uniqueness lookups/querysets as another
+  unrepresentable validator path. Regression coverage and qualification checks
+  require full-table exact uniqueness instead of silently substituting it.
+- At initial follow-up head `5fd4ee7`, CI passed the dedicated PostgreSQL HTTP
+  cases, source-schema adoption and modern DRF checks. Final-head CI remains the gate.
 
 The audit also found non-integer decimal bounds were dropped by integer-only bound
 capture. Native capture now blocks these bounds and decimal formatting/rounding
@@ -183,7 +188,8 @@ Remaining parity priorities from source inspection:
 Local validation: 14 source/target and validation-qualification cases passed;
 3 PostgreSQL cases skipped because the dedicated service is absent locally.
 An additional focused compatibility run passed 50 cases with 1 platform skip.
-Packaging tests passed 23 cases; lint, formatting, mypy and repository boundary
+Six additional uniqueness regressions passed after the review fix; a focused
+validation/stock-unique compatibility run passed 20 cases. Packaging tests passed 23 cases; lint, formatting, mypy and repository boundary
 checks passed. All 194 canonical release artifacts and manifest hashes validate.
 The full service-enabled suite is an authoritative CI gate: another repository's
 broad pytest run was active on this Mac, so no competing broad local run was started.
