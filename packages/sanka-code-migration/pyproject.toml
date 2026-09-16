@@ -1,6 +1,6 @@
 [project]
 name = "sanka-code-migration"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Deterministic backend migration contracts for Sanka extensions"
 requires-python = ">=3.12"
 license = "Apache-2.0"

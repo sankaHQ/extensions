@@ -49,6 +49,13 @@ permissions, atomic nested writes, stock page-number/limit-offset/cursor paginat
 search and ordering, and stock Common/Security/XFrame middleware. Recognized database
 delete policies execute in the request transaction. Each supported contract has
 source/target response and database-effect checks in the converter test suite.
+Token/owner and conditional-record fixtures also run against independent PostgreSQL
+schemas in CI. The generic `verify` replay command currently supports SQLite only.
+
+Explicit scalar validators whose limits, messages or error ordering cannot be
+represented block conversion. Native decimal fields with non-integer bounds,
+custom rounding, localization or normalized output also block conversion rather
+than silently changing validation or response values.
 
 Session/Basic authentication, browsable HTML, multipart/form parsing, custom middleware,
 signals, arbitrary serializer hooks, and historical RunPython/RunSQL migrations remain

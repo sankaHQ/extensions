@@ -145,3 +145,49 @@ No Go generator, speculative repository wrapper or deployment was added.
 
 Local tests use isolated fixture databases and test clients; no local service was started.
 No release has been published and no production database has been changed.
+
+## Follow-up: validation qualification and PostgreSQL HTTP parity
+
+Base: `bafac554b7e4245c0b1f7da16005692d481c1ec4` (merged PR58).
+Main was fetched and pulled with `--ff-only` before changes.
+
+- The scalar validator audit found that explicit minimum/maximum validators could
+  be accepted without their source constraints. The source can emit multiple
+  ordered errors; reducing these to one effective bound loses behavior. Recognizers
+  now require representable stock validator sequences and block unsupported ones.
+- Existing Token/owner and conditional-record response tests now run on SQLite and
+  PostgreSQL. Each PostgreSQL case uses independent source and target schemas in
+  the dedicated CI service, with cleanup on failure. Django creates the source
+  schema; generated Alembic creates the target schema. Tests compare HTTP status,
+  body, headers, and persisted rows, and prevent target imports of source frameworks.
+- Owner tests cover successful create/update/delete and denied writes. Record tests
+  cover decimals, datetimes, conditional reads/writes, invalid input and deletion.
+- The generic `sanka-drf-replay` command remains SQLite-only. This change adds
+  PostgreSQL qualification for the named fixtures, not arbitrary-project replay.
+- Candidate helper/converter versions change explicitly; no package is published.
+
+The audit also found non-integer decimal bounds were dropped by integer-only bound
+capture. Native capture now blocks these bounds and decimal formatting/rounding
+options not represented by the runtime. Retained Django's existing decimal guard
+remains in place.
+
+Remaining parity priorities from source inspection:
+
+| Area | Current boundary | Next proof needed |
+| --- | --- | --- |
+| Custom view methods | Native Flask recognizes only the fixed conditional-response recipe; FastAPI carries a wider set of methods | Independent response and write-effect cases for each added recipe |
+| Authentication | Native Token/owner/member support and retained Django auth support differ | Explicit profile matrix; separately qualify stock session/CSRF before adding it |
+| Serializer logic | Unsupported validator sequences, hooks and decimal options block conversion | Ordered validator IR and exact error/DB-state parity before widening support |
+| PostgreSQL replay | Owner and record fixtures compare both dialects | Extend generic replay with safe independent DB lifecycle, then listing/nested-write cases |
+
+Local validation: 14 source/target and validation-qualification cases passed;
+3 PostgreSQL cases skipped because the dedicated service is absent locally.
+An additional focused compatibility run passed 50 cases with 1 platform skip.
+Packaging tests passed 23 cases; lint, formatting, mypy and repository boundary
+checks passed. All 194 canonical release artifacts and manifest hashes validate.
+The full service-enabled suite is an authoritative CI gate: another repository's
+broad pytest run was active on this Mac, so no competing broad local run was started.
+
+Full custom-method support,
+stock session/CSRF authentication and arbitrary serializer logic remain outside
+this bounded fix. Go remains behind the Flask qualification gate.

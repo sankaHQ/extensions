@@ -8,6 +8,8 @@ import inspect
 import textwrap
 from typing import Any
 
+from sanka_code_migration.drf.scan import standard_field_validators
+
 from .native import _function, isolated_module
 
 
@@ -64,6 +66,8 @@ def model_serializer(cls: Any, name: str) -> str | None:
             getattr(serializers, "BigIntegerField", serializers.IntegerField),
         )
         if type(field) not in allowed:
+            return None
+        if type(field) is not serializers.ListSerializer and not standard_field_validators(field):
             return None
         spec = {
             "kind": type(field).__name__,

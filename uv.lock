@@ -1116,7 +1116,7 @@ wheels = [
 
 [[package]]
 name = "sanka-code-migration"
-version = "0.1.0a1"
+version = "0.1.0a2"
 source = { editable = "packages/sanka-code-migration" }
 
 [[package]]
@@ -1209,7 +1209,7 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 
 [[package]]
 name = "sanka-extension-drf-to-fastapi"
-version = "0.1.0a14"
+version = "0.1.0a15"
 source = { editable = "packages/sanka-extension-drf-to-fastapi" }
 dependencies = [
     { name = "sanka-code-migration" },
@@ -1226,7 +1226,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-extension-drf-to-flask"
-version = "0.1.0a8"
+version = "0.1.0a9"
 source = { editable = "packages/sanka-extension-drf-to-flask" }
 dependencies = [
     { name = "sanka-code-migration" },

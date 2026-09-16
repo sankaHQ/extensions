@@ -19,7 +19,9 @@ from sanka_extension_drf_to_flask.sqlalchemy import qualify_routes, render_sqlal
 
 
 @pytest.mark.parametrize("timezone", ["UTC", "Asia/Tokyo"])
-def test_conditional_record_responses_and_database_effects(tmp_path: Path, timezone: str) -> None:
+def test_conditional_record_responses_and_database_effects(
+    tmp_path: Path, timezone: str, contract_databases
+) -> None:
     fixture = (
         Path(__file__).resolve().parents[2]
         / "sanka-extension-drf-to-fastapi/tests/fixtures/drf_records_project"
@@ -30,6 +32,8 @@ def test_conditional_record_responses_and_database_effects(tmp_path: Path, timez
     settings.write_text(
         settings.read_text() + "\nTIME_ZONE='UTC'\nREST_FRAMEWORK['DEFAULT_PARSER_CLASSES']="
         "['rest_framework.parsers.JSONParser']\n"
+        "import os,json\n"
+        "DATABASES={'default':json.loads(os.environ['SANKA_SOURCE_TEST_DATABASE'])}\n"
     )
     body = {
         "label": "First",
@@ -81,7 +85,10 @@ assert results[7][3][0]['amount']==__import__('decimal').Decimal('45.60')
 print(json.dumps({'scan':scan.to_dict(),'schema':capture_schema([Record]),
  'overrides':capture_sqlalchemy_overrides(scan),'results':results},default=str))
 """
+    source_database, target_url = contract_databases
     env = dict(os.environ)
+    env["SANKA_SOURCE_TEST_DATABASE"] = json.dumps(source_database)
+    env["TZ"] = timezone
     run = subprocess.run(
         [sys.executable, "-c", capture, str(source)],
         env=env,
@@ -120,7 +127,7 @@ print(json.dumps({'scan':scan.to_dict(),'schema':capture_schema([Record]),
         p.write_text(text)
     (target / "cases.json").write_text(json.dumps(cases))
     (target / "results.json").write_text(json.dumps(facts["results"]))
-    env["SANKA_DATABASE_URL"] = "sqlite:///" + str(target / "target.sqlite3")
+    env["SANKA_DATABASE_URL"] = target_url
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=target,
@@ -160,6 +167,7 @@ for (method,path,body,condition),expected in zip(cases,expected_results,strict=T
               {k:r.headers.get(k) for k in ['ETag','Cache-Control','Vary','Allow']},rows]
     observed=json.loads(json.dumps(observed,default=str))
     assert observed==expected,(method,path,condition,observed,expected)
+app.extensions['sanka_engine'].dispose()
 """
     run = subprocess.run(
         [sys.executable, "-c", probe],

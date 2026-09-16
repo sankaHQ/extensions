@@ -15,7 +15,7 @@ from sanka_extension_drf_to_flask.database import render_database
 from sanka_extension_drf_to_flask.sqlalchemy import qualify_routes, render_sqlalchemy
 
 
-def test_native_token_owner_contract_and_denied_writes(tmp_path: Path) -> None:
+def test_native_token_owner_contract_and_denied_writes(tmp_path: Path, contract_databases) -> None:
     source = tmp_path / "source"
     app = source / "catalog"
     app.mkdir(parents=True)
@@ -23,7 +23,8 @@ def test_native_token_owner_contract_and_denied_writes(tmp_path: Path) -> None:
     (source / "settings.py").write_text("""
 SECRET_KEY = 'fixture-only'
 INSTALLED_APPS = ['django.contrib.auth', 'django.contrib.contenttypes', 'rest_framework', 'catalog']
-DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}
+import os, json
+DATABASES = {'default': json.loads(os.environ['SANKA_SOURCE_TEST_DATABASE'])}
 ROOT_URLCONF = 'urls'
 AUTH_USER_MODEL = 'catalog.Account'
 MIDDLEWARE = []
@@ -125,17 +126,22 @@ cases = [
  ('GET', '/posts/', None, 'Token ÿ'),
  ('GET', '/posts/', None, 'Token' + chr(160) + 'alice'),
  ('PATCH', '/posts/1/', {'title': 'denied whitespace'}, 'Token alice' + chr(160)),
+ ('DELETE', '/posts/1/', None, 'Token alice'),
+ ('GET', '/posts/1/', None, 'Token alice'),
 ]
 client = APIClient()
 responses = []
 for method, path, body, header in cases:
     response = client.generic(method, path, json.dumps(body) if body is not None else '',
                               content_type='application/json', HTTP_AUTHORIZATION=header)
-    responses.append({'status': response.status_code, 'body': json.loads(response.content),
+    responses.append({'status': response.status_code,
+        'body': json.loads(response.content) if response.content else None,
         'allow': response.headers.get('Allow'),
         'authenticate': response.headers.get('WWW-Authenticate'),
         'database': list(Post.objects.order_by('id').values('id', 'author_id', 'title'))})
 assert responses[8]['status'] == 201
+assert responses[-2]['status'] == 204 and responses[-1]['status'] == 404
+assert len(responses[-1]['database']) == 2
 assert responses[9]['status'] == responses[10]['status'] == 403
 assert responses[9]['database'] == responses[8]['database'] == responses[10]['database']
 from catalog.views import PostSerializer
@@ -150,7 +156,9 @@ print(json.dumps({'scan': scan.to_dict(), 'schema': capture_schema([Post, Creden
                   'overrides': capture_sqlalchemy_overrides(scan),
                   'cases': cases, 'responses': responses}))
 """
+    source_database, target_url = contract_databases
     env = dict(os.environ)
+    env["SANKA_SOURCE_TEST_DATABASE"] = json.dumps(source_database)
     result = subprocess.run(
         [sys.executable, "-c", capture, str(source)],
         env=env,
@@ -175,7 +183,7 @@ print(json.dumps({'scan': scan.to_dict(), 'schema': capture_schema([Post, Creden
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
     (target / "reference.json").write_text(json.dumps(facts))
-    env["SANKA_DATABASE_URL"] = "sqlite:///" + str(target / "auth.sqlite3")
+    env["SANKA_DATABASE_URL"] = target_url
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=target,
@@ -205,8 +213,8 @@ with engine.begin() as connection:
             id=pk, username=name, is_active=active, is_superuser=False, password=''))
         connection.execute(sa.insert(TABLES['catalog_credential']).values(key=name, user_id=pk))
     connection.execute(sa.insert(TABLES['catalog_post']), [
-        {'id': 1, 'author_id': 1, 'title': 'alice original'},
-        {'id': 2, 'author_id': 2, 'title': 'bob original'}])
+        {'author_id': 1, 'title': 'alice original'},
+        {'author_id': 2, 'title': 'bob original'}])
 facts = json.loads(Path('reference.json').read_text())
 client = app.test_client()
 for (method, path, body, header), expected in zip(facts['cases'], facts['responses'], strict=True):
@@ -221,6 +229,7 @@ for (method, path, body, header), expected in zip(facts['cases'], facts['respons
         'authenticate': response.headers.get('WWW-Authenticate'),
         'database': rows}
     assert observed == expected, (method, path, header, observed, expected)
+engine.dispose()
 """
     result = subprocess.run(
         [sys.executable, "-c", probe],

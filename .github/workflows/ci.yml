@@ -49,6 +49,12 @@ jobs:
       - run: uv sync --frozen --all-packages
       - name: Validate native Flask database setup and Django schema adoption
         run: uv run python -m pytest packages/sanka-extension-drf-to-flask/tests/test_database_postgres.py -q
+      - name: Compare native Flask HTTP and database effects on PostgreSQL
+        run: >-
+          uv run python -m pytest
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_records.py
+          -k postgresql -q
       - run: make check
       - run: make build-release
       - run: make build-business-flows
