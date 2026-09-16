@@ -123,6 +123,8 @@ cases = [
  ('GET', '/posts/999/', None, 'Token alice'),
  ('GET', '/posts/', None, 'token alice'),
  ('GET', '/posts/', None, 'Token ÿ'),
+ ('GET', '/posts/', None, 'Token' + chr(160) + 'alice'),
+ ('PATCH', '/posts/1/', {'title': 'denied whitespace'}, 'Token alice' + chr(160)),
 ]
 client = APIClient()
 responses = []

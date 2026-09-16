@@ -47,6 +47,8 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --frozen --all-packages
+      - name: Validate native Flask database setup and Django schema adoption
+        run: uv run python -m pytest packages/sanka-extension-drf-to-flask/tests/test_database_postgres.py -q
       - run: make check
       - run: make build-release
       - run: make build-business-flows

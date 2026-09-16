@@ -138,3 +138,46 @@ assert {g["feature"] for g in schema["gaps"]} >= {"foreign-key-cycle"}
     env = os.environ | {"PYTHONPATH": str(Path(__file__).parents[1] / "src")}
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env)
     assert result.returncode == 0, result.stderr
+
+
+def test_postgresql_captures_django_identity_and_pattern_indexes_without_database(tmp_path):
+    script = r"""from django.conf import settings
+settings.configure(
+    INSTALLED_APPS=[],
+    DATABASES={"default": {"ENGINE": "django.db.backends.postgresql", "NAME": "unused"}},
+    USE_TZ=True,
+)
+import django
+django.setup()
+from django.db import models
+from sanka_code_migration.drf.models import capture_schema
+class Item(models.Model):
+    code = models.CharField(max_length=40, unique=True)
+    notes = models.TextField(db_index=True)
+    class Meta:
+        app_label = "fixture"
+from django.db.backends.base.base import BaseDatabaseWrapper
+def no_connection(_self):
+    raise AssertionError("scan connected to database")
+BaseDatabaseWrapper.ensure_connection = no_connection
+import json
+print(json.dumps(capture_schema([Item])))
+"""
+    env = os.environ | {"PYTHONPATH": str(Path(__file__).parents[1] / "src")}
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stderr
+    captured = json.loads(result.stdout)
+    assert captured["gaps"] == []
+    table = captured["tables"][0]
+    columns = {column["name"]: column for column in table["columns"]}
+    assert columns["id"]["identity"] == {"always": False}
+    assert columns["code"]["identity"] is None
+    assert columns["notes"]["identity"] is None
+    assert {
+        (tuple(index["columns"]), tuple(index["opclasses"]))
+        for index in table["indexes"]
+        if index["name"].endswith("_like")
+    } == {
+        (("code",), ("varchar_pattern_ops",)),
+        (("notes",), ("text_pattern_ops",)),
+    }

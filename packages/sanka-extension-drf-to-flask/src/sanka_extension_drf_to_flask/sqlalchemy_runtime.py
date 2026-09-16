@@ -260,15 +260,18 @@ def _authenticate(auth: dict[str, Any], tables: Any, sessions: Any) -> tuple[Any
         response.headers["WWW-Authenticate"] = messages["www_authenticate"]
         return None, response
 
-    parts = request.headers.get("Authorization", "").split()
-    if not parts or parts[0].lower() != auth["token_keyword"].lower():
+    try:
+        parts = request.headers.get("Authorization", "").encode("latin-1").split()
+    except UnicodeError:
+        return failure("invalid_characters")
+    if not parts or parts[0].lower() != auth["token_keyword"].encode().lower():
         return failure("no_credentials") if auth.get("require_authenticated") else (None, None)
     if len(parts) == 1:
         return failure("empty_header")
     if len(parts) > 2:
         return failure("spaced_header")
     try:
-        key = parts[1].encode("latin-1").decode("utf-8")
+        key = parts[1].decode("utf-8")
     except UnicodeError:
         return failure("invalid_characters")
     tokens = tables[auth["token_db_table"]]

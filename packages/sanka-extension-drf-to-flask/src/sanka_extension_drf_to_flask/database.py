@@ -49,6 +49,8 @@ def _column(column: dict[str, Any], *, defaults: bool) -> str:
             f"sa.ForeignKey({target!r}, deferrable={reference.get('deferrable', True)!r}, "
             f"initially={reference.get('initially', 'DEFERRED')!r})"
         )
+    if column.get("identity"):
+        args.append(f"sa.Identity(always={column['identity']['always']!r})")
     args += [f"primary_key={column['primary_key']!r}", f"nullable={column['nullable']!r}"]
     if column["unique"] and not column["primary_key"]:
         args.append("unique=True")
@@ -101,6 +103,14 @@ def _validated_tables(schema: dict[str, Any]) -> list[dict[str, Any]]:
         if unsafe_table_name(table["name"]):
             raise ValueError("schema-qualified or quoted table names are unsupported")
         for column in table["columns"]:
+            identity = column.get("identity")
+            if identity is not None and (
+                schema["dialect"] != "postgresql"
+                or identity != {"always": False}
+                or not column["primary_key"]
+                or not column["autoincrement"]
+            ):
+                raise ValueError("only PostgreSQL BY DEFAULT AutoField identity is supported")
             if (column.get("auto_now") or column.get("auto_now_add")) and column["kind"] not in {
                 "date",
                 "datetime",
@@ -123,6 +133,15 @@ def _validated_tables(schema: dict[str, Any]) -> list[dict[str, Any]]:
                 raise ValueError("on_delete application semantics are unsupported")
             if reference.get("on_delete") == "SET_NULL" and not column["nullable"]:
                 raise ValueError("SET_NULL requires a nullable foreign key")
+        for index in table["indexes"]:
+            opclasses = index.get("opclasses", [None] * len(index["columns"]))
+            if len(opclasses) != len(index["columns"]) or any(
+                opclass not in {None, "varchar_pattern_ops", "text_pattern_ops"}
+                for opclass in opclasses
+            ):
+                raise ValueError("native database index operator class is unsupported")
+            if any(opclasses) and schema["dialect"] != "postgresql":
+                raise ValueError("index operator classes require PostgreSQL")
     ordered, cycle = order_tables(schema["tables"])
     if cycle:
         raise ValueError("foreign-key cycle requires deferred constraint support")
@@ -222,14 +241,23 @@ def render_database(schema: dict[str, Any], *, module_prefix: str = "") -> dict[
                 f"TABLES[{name!r}].c[{col!r}]" + (".desc()" if descending else "")
                 for col, descending in zip(index["columns"], index["descending"], strict=True)
             ]
-            models.append(f"sa.Index({index['name']!r}, {', '.join(expressions)})")
+            opclasses = index.get("opclasses", [None] * len(index["columns"]))
+            postgresql_ops = {
+                column: opclass
+                for column, opclass in zip(index["columns"], opclasses, strict=True)
+                if opclass is not None
+            }
+            model_options = f", postgresql_ops={postgresql_ops!r}" if postgresql_ops else ""
+            models.append(f"sa.Index({index['name']!r}, {', '.join(expressions)}{model_options})")
             # Use the frozen SQL expression for descending indexes, never source text.
             index_fields = [
                 f"sa.column({col!r}).desc()" if descending else repr(col)
                 for col, descending in zip(index["columns"], index["descending"], strict=True)
             ]
+            migration_options = f", postgresql_ops={postgresql_ops!r}" if postgresql_ops else ""
             migration.append(
-                f"    op.create_index({index['name']!r}, {name!r}, [{', '.join(index_fields)}])"
+                f"    op.create_index({index['name']!r}, {name!r}, "
+                f"[{', '.join(index_fields)}]{migration_options})"
             )
     if not tables:
         migration.append("    pass")
@@ -352,6 +380,25 @@ def _matches_autoincrement_default(bind, table_name, column, found):
             "sequence": sequence, "table_name": table_name, "column_name": column.name,
         }))
 
+def _matches_identity(bind, column, found):
+    if column.identity is None:
+        return found.get("identity") is None
+    type_name = column.type.compile(dialect=bind.dialect).upper()
+    maximum = {
+        "SMALLINT": 32767,
+        "INTEGER": 2147483647,
+        "BIGINT": 9223372036854775807,
+    }.get(type_name)
+    return found.get("default") is None and found.get("identity") == {
+        "always": False,
+        "start": 1,
+        "increment": 1,
+        "minvalue": 1,
+        "maxvalue": maximum,
+        "cache": 1,
+        "cycle": False,
+    }
+
 def _named_constraints_match(actual, expected):
     unmatched = list(actual)
     for expected_name, expected_payload in expected:
@@ -381,7 +428,10 @@ def _actual_index_signature(bind, index):
     else:
         sorting = index.get("column_sorting") or {}
         descending = tuple("desc" in sorting.get(column, ()) for column in columns)
-    return index["name"], columns, descending, bool(index["unique"])
+    dialect_options = index.get("dialect_options") or {}
+    reflected_ops = dialect_options.get("postgresql_ops") or {}
+    opclasses = tuple(reflected_ops.get(column) for column in columns)
+    return index["name"], columns, descending, bool(index["unique"]), opclasses
 
 def _expected_index_signature(index):
     columns = []
@@ -389,7 +439,9 @@ def _expected_index_signature(index):
     for expression in index.expressions:
         descending.append(getattr(expression, "modifier", None) is sa.sql.operators.desc_op)
         columns.append(getattr(getattr(expression, "element", expression), "name"))
-    return index.name, tuple(columns), tuple(descending), bool(index.unique)
+    configured_ops = index.dialect_options["postgresql"]["ops"]
+    opclasses = tuple(configured_ops.get(column) for column in columns)
+    return index.name, tuple(columns), tuple(descending), bool(index.unique), opclasses
 
 def _sqlite_table_uses_autoincrement(bind, table_name):
     with _connection(bind) as connection:
@@ -433,7 +485,12 @@ def check_schema(bind):
             if found["nullable"] != column.nullable:
                 differences.append(name + "." + column.name + ": nullability differs")
             default = found.get("default")
-            if default is not None:
+            if column.identity is not None:
+                if not _matches_identity(bind, column, found):
+                    differences.append(name + "." + column.name + ": identity differs")
+            elif found.get("identity") is not None:
+                differences.append(name + "." + column.name + ": unexpected identity")
+            elif default is not None:
                 if not _matches_autoincrement_default(bind, name, column, found):
                     differences.append(name + "." + column.name + ": server default differs")
             elif (bind.dialect.name == "postgresql" and column.primary_key
