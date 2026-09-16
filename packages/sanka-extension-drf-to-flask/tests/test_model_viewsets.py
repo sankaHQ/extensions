@@ -172,8 +172,12 @@ with connection.schema_editor() as editor:
     editor.create_model(Part)
     editor.create_model(User)
 User.objects.create_user(username='reader',password='test-password')
+User.objects.create_user(username='inactive',password='test-password',is_active=False)
 results=[]
-def send(method,path,data=None,authorization=None):
+def send(method,path,data=None,authorization=None,session_cookie=None):
+    if session_cookie:
+        if os.environ['SIDE']=='source': client.cookies['sessionid']=session_cookie
+        else: client.set_cookie('sessionid',session_cookie)
     if os.environ['SIDE']=='source':
         headers={'HTTP_ACCEPT':'application/json','HTTP_HOST':'localhost'}
         if authorization: headers['HTTP_AUTHORIZATION']=authorization
@@ -185,7 +189,10 @@ def send(method,path,data=None,authorization=None):
         if authorization: headers['Authorization']=authorization
         r=client.open(path,method=method,json=data,headers=headers)
         payload=r.json if r.data else None
-    results.append([r.status_code,payload,r.headers.get('Allow'),
+    if session_cookie:
+        if os.environ['SIDE']=='source': del client.cookies['sessionid']
+        else: client.delete_cookie('sessionid')
+    results.append([r.status_code,payload,r.headers.get('Allow'),r.headers.get('WWW-Authenticate'),
                     Bundle.objects.count(),Part.objects.count()])
 send('POST','/api/bundles/',{'code':'valid','parts':[{'quantity':2,'cost':'1.20'}]})
 send('GET','/api/bundles/1/')
@@ -201,9 +208,16 @@ for data in [[],{}, {'code':'invalid','parts':[{'quantity':0,'cost':'12.345'}]},
              {'code':'baddecimal','parts':[{'quantity':1,'cost':'NaN'}]}]:
     send('POST','/api/bundles/',data)
 send('GET','/api/bundles/not-an-id/')
+send('GET','/api/bundles/')
 send('GET','/api/bundles/',authorization='Basic')
+send('GET','/api/bundles/',authorization='Basic !!!')
 send('GET','/api/bundles/',authorization='Basic bm9ib2R5Ondyb25n')
+send('GET','/api/bundles/',authorization='Basic aW5hY3RpdmU6dGVzdC1wYXNzd29yZA==')
 send('GET','/api/bundles/',authorization='Basic cmVhZGVyOnRlc3QtcGFzc3dvcmQ=')
+send('GET','/api/bundles/',session_cookie='not-a-session')
+send('GET','/api/bundles/',authorization='Basic cmVhZGVyOnRlc3QtcGFzc3dvcmQ=',
+     session_cookie='not-a-session')
+send('GET','/api/bundles/',authorization='Basic /zph')
 send('DELETE','/api/bundles/1/')
 print(json.dumps(results,sort_keys=True))
 """
@@ -219,6 +233,36 @@ print(json.dumps(results,sort_keys=True))
         assert result.returncode == 0, result.stderr
         results.append(json.loads(result.stdout))
     assert results[0] == results[1]
+    auth = results[0][16:25]
+    assert [row[0] for row in auth] == [200, 403, 403, 403, 403, 200, 200, 200, 403]
+    assert all(row[3] is None for row in auth)
+    assert auth[1][1] == {"detail": "Invalid basic header. No credentials provided."}
+    assert auth[2][1] == {
+        "detail": "Invalid basic header. Credentials not correctly base64 encoded."
+    }
+    assert auth[3][1] == {"detail": "Invalid username/password."}
+    assert auth[4][1] == {"detail": "Invalid username/password."}
+    assert auth[8][1] == {"detail": "Invalid username/password."}
+
+
+def test_real_session_middleware_stays_blocked(tmp_path: Path) -> None:
+    project(tmp_path, defaults=True)
+    settings = tmp_path / "settings.py"
+    settings.write_text(
+        settings.read_text()
+        .replace(
+            '"django.contrib.contenttypes","catalog"',
+            '"django.contrib.contenttypes","django.contrib.sessions","catalog"',
+        )
+        .replace(
+            "MIDDLEWARE=[]",
+            "MIDDLEWARE=['django.contrib.sessions.middleware.SessionMiddleware',"
+            "'django.contrib.auth.middleware.AuthenticationMiddleware']",
+        )
+    )
+    assert call(tmp_path, "scan")["outcome"] == "success"
+    plan = call(tmp_path, "plan")["data"]
+    assert plan["needs_adaptation_routes"] > 0
 
 
 @pytest.mark.parametrize("mutation", ["permissions", "queryset", "serializer", "settings"])

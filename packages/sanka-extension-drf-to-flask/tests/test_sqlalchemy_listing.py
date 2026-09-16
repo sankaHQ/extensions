@@ -400,7 +400,7 @@ def test_capture_listing_limits_cursor_positions_to_proven_types() -> None:
         capture_listing(View, listing)
 
 
-def test_capture_listing_uses_explicit_bounded_django_filter_fields() -> None:
+def test_capture_listing_rejects_spoofed_django_filter_backend() -> None:
     from rest_framework import serializers
 
     DjangoFilterBackend = type(
@@ -423,16 +423,13 @@ def test_capture_listing_uses_explicit_bounded_django_filter_fields() -> None:
             "score": ["gte", "lte"],
         }
 
-    assert capture_listing(View, None)["filters"] == [
-        {"param": "score__gte", "name": "score", "lookup": "gte"},
-        {"param": "score__lte", "name": "score", "lookup": "lte"},
-        {"param": "state", "name": "state", "lookup": "exact"},
-        {"param": "state__in", "name": "state", "lookup": "in"},
-    ]
+    with pytest.raises(ValueError, match="filter backend requires manual adaptation"):
+        capture_listing(View, None)
 
 
 def test_generated_page_limit_search_ordering_matches_source_without_source_imports(
     tmp_path: Path,
+    contract_databases,
 ) -> None:
     source = tmp_path / "source"
     app = source / "catalog"
@@ -442,7 +439,8 @@ def test_generated_page_limit_search_ordering_matches_source_without_source_impo
         """
 SECRET_KEY = 'fixture-only'
 INSTALLED_APPS = ['rest_framework', 'catalog']
-DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}
+import os,json
+DATABASES = {'default': json.loads(os.environ['SANKA_SOURCE_TEST_DATABASE'])}
 ROOT_URLCONF = 'urls'
 MIDDLEWARE = []
 ALLOWED_HOSTS = ['testserver']
@@ -486,7 +484,7 @@ class ListingBase(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     filter_backends = (filters.SearchFilter, filters.OrderingFilter)
     search_fields = ('label', 'category')
-    ordering_fields = ('score', 'label', 'posted_at')
+    ordering_fields = ('score', 'label', 'posted_at', 'id')
 class PageProducts(ListingBase):
     pagination_class = Pages
 class LimitProducts(ListingBase):
@@ -498,8 +496,9 @@ class CursorProducts(ListingBase):
     (source / "urls.py").write_text(
         """
 from rest_framework.routers import DefaultRouter
-from catalog.views import CursorProducts, LimitProducts, PageProducts
+from catalog.views import CursorProducts, LimitProducts, PageProducts, ListingBase
 router = DefaultRouter()
+router.register('products', ListingBase, basename='products')
 router.register('pages', PageProducts, basename='pages')
 router.register('limits', LimitProducts, basename='limits')
 router.register('cursors', CursorProducts, basename='cursors')
@@ -510,8 +509,11 @@ urlpatterns = router.urls
         "/pages/?page=2&tag=one&tag=two",
         "/pages/?search=ignored&search=Alpha%2Cops&ordering=-score",
         "/pages/?page=0",
-        "/limits/?limit=2&offset=1&ordering=-score",
+        "/limits/?limit=2&offset=1&ordering=-score,-id",
         "/limits/?limit=bad&offset=-2",
+        "/products/?search=ignored&search=Alpha&ordering=score,id",
+        "/pages/?page=1&page=2&ordering=-score&ordering=score,id",
+        "/limits/?limit=1&limit=2&offset=0&offset=1&ordering=score,id",
     ]
     capture = r"""
 import base64, json, sys
@@ -539,7 +541,12 @@ responses = []
 paths = json.loads(sys.argv[2])
 def request(path):
     response = client.get(path)
-    responses.append({'status': response.status_code, 'body': json.loads(response.content)})
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT id,label,category,score,posted_at FROM catalog_product ORDER BY id')
+        database = list(cursor.fetchall())
+    responses.append({'status': response.status_code, 'body': json.loads(response.content),
+        'headers': {key:response.headers.get(key) for key in ['Allow','Content-Type','Vary']},
+        'database': database})
     return responses[-1]
 def relative(url):
     parsed = urlsplit(url)
@@ -555,7 +562,7 @@ paths.append(second_path)
 back_path = relative(second['body']['previous'])
 back = request(back_path)
 paths.append(back_path)
-reverse_path = '/cursors/?ordering=posted_at'
+reverse_path = '/cursors/?ordering=posted_at,id'
 request(reverse_path)
 paths.append(reverse_path)
 invalid_path = '/cursors/?cursor=not-base64!'
@@ -573,9 +580,10 @@ request(tampered_path)
 paths.append(tampered_path)
 print(json.dumps({'scan': scan.to_dict(), 'schema': capture_schema([Product]),
                   'overrides': capture_sqlalchemy_overrides(scan),
-                  'scenarios': paths, 'responses': responses}))
+                  'scenarios': paths, 'responses': responses},default=str))
 """
-    env = dict(os.environ)
+    source_database, target_url = contract_databases
+    env = os.environ | {"SANKA_SOURCE_TEST_DATABASE": json.dumps(source_database)}
     result = subprocess.run(
         [sys.executable, "-c", capture, str(source), json.dumps(scenarios)],
         env=env,
@@ -587,17 +595,30 @@ print(json.dumps({'scan': scan.to_dict(), 'schema': capture_schema([Product]),
     facts = json.loads(result.stdout)
     scenarios = facts["scenarios"]
     assert facts["responses"][0]["body"]["count"] == 5
-    assert facts["responses"][2] == {"status": 404, "body": {"detail": "Invalid page."}}
+    assert [row["status"] for row in facts["responses"][:8]] == [
+        200,
+        200,
+        404,
+        200,
+        200,
+        200,
+        200,
+        200,
+    ]
+    assert facts["responses"][2]["body"] == {"detail": "Invalid page."}
+    assert [row["id"] for row in facts["responses"][5]["body"]] == [1, 3, 5]
+    assert [row["id"] for row in facts["responses"][6]["body"]["results"]] == [3, 4]
+    assert [row["id"] for row in facts["responses"][7]["body"]["results"]] == [2, 3]
+    assert all(row["database"] == facts["responses"][0]["database"] for row in facts["responses"])
     cursor_responses = facts["responses"][-6:]
     assert cursor_responses[0]["body"]["next"] == cursor_responses[2]["body"]["next"]
     assert cursor_responses[0]["body"]["previous"] == cursor_responses[2]["body"]["previous"]
-    assert {row["id"] for row in cursor_responses[0]["body"]["results"]} == {
-        row["id"] for row in cursor_responses[2]["body"]["results"]
-    }
-    assert cursor_responses[4] == {
-        "status": 404,
-        "body": {"detail": "Invalid cursor"},
-    }
+    assert [row["id"] for row in cursor_responses[0]["body"]["results"]] == [5, 4]
+    assert [row["id"] for row in cursor_responses[1]["body"]["results"]] == [3, 2]
+    assert cursor_responses[0]["body"]["results"] == cursor_responses[2]["body"]["results"]
+    assert [row["id"] for row in cursor_responses[3]["body"]["results"]] == [1, 2]
+    assert [row["status"] for row in cursor_responses] == [200, 200, 200, 200, 404, 404]
+    assert cursor_responses[4]["body"] == {"detail": "Invalid cursor"}
     assert cursor_responses[5] == cursor_responses[4]
 
     scan = FrameworkScan.from_dict(facts["scan"])
@@ -614,7 +635,7 @@ print(json.dumps({'scan': scan.to_dict(), 'schema': capture_schema([Product]),
         path = target / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
-    env["SANKA_DATABASE_URL"] = "sqlite:///" + str(target / "target.sqlite3")
+    env["SANKA_DATABASE_URL"] = target_url
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=target,
@@ -647,15 +668,26 @@ class NoSource(importlib.abc.MetaPathFinder):
             raise ImportError('source dependency forbidden: ' + name)
 sys.meta_path.insert(0, NoSource())
 from target_app import create_app
+from models import TABLES
+from sqlalchemy import select
 reference = json.loads(Path('reference.json').read_text())
-client = create_app({'TESTING': True}).test_client()
+app = create_app({'TESTING': True})
+client = app.test_client()
 observed = []
 for path in reference['scenarios']:
     response = client.get(path, base_url='http://testserver')
-    observed.append({'status': response.status_code, 'body': response.json})
+    table = TABLES['catalog_product']
+    with engine.connect() as connection:
+        rows = connection.execute(select(table.c.id,table.c.label,table.c.category,table.c.score,
+            table.c.posted_at).order_by(table.c.id)).all()
+    observed.append({'status': response.status_code, 'body': response.json,
+        'headers': {key:response.headers.get(key) for key in ['Allow','Content-Type','Vary']},
+        'database': json.loads(json.dumps([list(row) for row in rows],default=str))})
 assert observed == reference['responses'], json.dumps(
     {'observed': observed, 'expected': reference['responses']}, indent=2)
 assert not {'django', 'rest_framework', 'catalog'}.intersection(sys.modules)
+app.extensions['sanka_engine'].dispose()
+engine.dispose()
 '''
     result = subprocess.run(
         [sys.executable, "-c", probe],

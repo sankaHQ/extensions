@@ -235,3 +235,62 @@ and borrowed methods with a different class owner. Harmless intermediate classes
 remain supported. Keep-Alive and proxy authentication headers are blocked. The
 final focused response/ETag suite passed 35 tests with four PostgreSQL skips;
 Ruff and mypy passed. PostgreSQL behavior remains a final-head CI requirement.
+
+
+## Follow-up: Flask completion qualification
+
+Base: `a5f164fb3c3ca4acd0c075f769e15375dab4222a`, merged PR60.
+The approved tree matched the merge result, and post-merge CI 35076158677 passed.
+Latest main was pulled before branch `diodzaky/flask-qualification`.
+
+This continuation qualifies real stock django-filter behavior instead of accepting
+a lookalike backend. It preserves source filter order, aggregate validation errors,
+whitespace, repeated/CSV values, integer preparation and lookup bounds, and applies
+filters to detail requests before lookup. Unsupported custom filtersets and field
+kinds remain gaps. Existing pagination and nested-write differential fixtures now
+run on SQLite and PostgreSQL, including rollback followed by a successful write.
+
+Oversized JSON requests preserve Django's body limit and 400 response with no write.
+Static inventory recognizes bounded raw SQL, network, email and storage patterns
+without executing the modules being inventoried. It does not provide interprocedural
+Python analysis or isolate source imports. Native planning refuses those findings.
+The existing determinism check also varies file creation order and file timestamps.
+
+Stock database-session/CSRF qualification is implemented in this continuation;
+its acceptance gate includes signed session data, user authentication hashes, expiry,
+CSRF tokens and Origin/Referer checks, response cookies and database effects. No
+source secret is emitted: generated configuration names explicit environment inputs.
+Custom authentication behavior must remain blocked.
+
+CI additionally installs the built Flask/helper wheels with their declared published
+SDK dependency and reruns the native lifecycle and differential cases. PostgreSQL
+and Django 6 remain separate qualification lanes. Helper a3, Flask a11 and FastAPI a16
+are staged for candidate a30; replay stays a3. No publication is implied.
+
+Independent review found and closed custom hash/manager bypasses, mixed-route
+qualification, CSRF wildcard-port/cookie-repair differences, per-session expiry,
+concurrent session deletion, malformed signed identities and hash values. The
+session profile explicitly requires timezone-aware expiry. A 48-case CSRF comparison
+covers header presence, malformed values, allowed hosts, trusted origins/ports,
+Referer and cookie-domain behavior. Unrepresented settings remain gaps.
+
+Initial full local verification: 913 passed, 29 environment/platform skips, one
+existing Starlette warning, and one stale release-URL expectation while candidate
+manifests were being refreshed. After canonical artifact regeneration, marketplace
+and packaging checks passed 25 tests. The separate installed candidate, using SDK a4
+and verifying module locations inside its environment, passed 16 tests with two
+PostgreSQL skips. This exercise also caught the workspace SDK override interfering
+with installed-wheel resolution; CI disables workspace configuration for that install.
+All 194 candidate wheel hashes validate. Final-head full checks and service-enabled
+CI remain the completion evidence below.
+Generic PostgreSQL replay, untrusted-source isolation, private application benchmark
+qualification and release publication remain distinct gates. Go work remains deferred.
+
+
+Final local validation for this continuation: **915 passed, 29 documented
+service/platform skips**, with the existing Starlette warning. Ruff and formatting
+passed across 321 files; mypy passed across 123 source files. Marketplace/packaging
+checks passed 25 tests. Two canonical builds produced identical bytes for all
+194 wheels, and both artifact sets match the final manifests. Installed candidate
+checks passed 16 tests with two PostgreSQL skips using the published SDK a4.
+Final-head CI must establish PostgreSQL and modern-source results before merge.

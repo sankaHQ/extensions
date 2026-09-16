@@ -41,7 +41,10 @@ def capture_middleware() -> dict[str, Any]:
     bad_request = importlib.import_module("django.views.defaults").bad_request
 
     supported = {
+        "django.contrib.auth.middleware.AuthenticationMiddleware",
+        "django.contrib.sessions.middleware.SessionMiddleware",
         "django.middleware.common.CommonMiddleware",
+        "django.middleware.csrf.CsrfViewMiddleware",
         "django.middleware.security.SecurityMiddleware",
         "django.middleware.clickjacking.XFrameOptionsMiddleware",
     }
@@ -105,11 +108,48 @@ def capture_sqlalchemy_overrides(scan: FrameworkScan) -> dict[str, Any]:
         "object_not_found": {},
         "auth_messages": {},
         "listing": {},
+        "session_auth": {},
+        "session_serializers": {},
         "middleware": capture_middleware(),
         "format_query_param": api_settings.URL_FORMAT_OVERRIDE,
     }
+    from .sqlalchemy_sessions import capture_session_auth
+
+    for view in scan.view_details:
+        if not any(
+            route.view == view.name
+            and route.authentication == ("rest_framework.authentication.SessionAuthentication",)
+            for route in scan.routes
+        ):
+            continue
+        module, _, name = view.name.rpartition(".")
+        try:
+            view_class = getattr(importlib.import_module(module), name)
+            result["session_auth"][view.name] = capture_session_auth(view_class)
+            from sanka_code_migration.drf.scan import _serializer_ir
+
+            serializer_class = view_class.serializer_class
+            serializer_name = serializer_class.__module__ + "." + serializer_class.__qualname__
+            serializer = _serializer_ir(view_class, serializer_name)
+            if serializer is None:
+                raise ValueError("session serializer is outside the native contract")
+            result["session_serializers"][serializer_name] = json.loads(
+                json.dumps(asdict(serializer), allow_nan=False)
+            )
+        except (AttributeError, ImportError, TypeError, ValueError):
+            result["gaps"].append({"source": view.name, "feature": "session-authentication"})
     if api_settings.EXCEPTION_HANDLER is not api_views.exception_handler:
         result["gaps"].append({"source": "REST_FRAMEWORK", "feature": "exception-handler"})
+    session_middleware = {
+        "django.contrib.sessions.middleware.SessionMiddleware",
+        "django.contrib.auth.middleware.AuthenticationMiddleware",
+        "django.middleware.csrf.CsrfViewMiddleware",
+    }
+    if (
+        session_middleware.intersection(result["middleware"]["order"])
+        and not result["session_auth"]
+    ):
+        result["gaps"].append({"source": "MIDDLEWARE", "feature": "unqualified-session-middleware"})
     if api_settings.NON_FIELD_ERRORS_KEY != "non_field_errors":
         result["gaps"].append({"source": "REST_FRAMEWORK", "feature": "non-field-errors-key"})
     defaults = importlib.import_module("django.views.defaults")
@@ -194,6 +234,8 @@ def capture_sqlalchemy_overrides(scan: FrameworkScan) -> dict[str, Any]:
 
     for serializer in scan.serializer_details:
         capture_serializer(serializer)
+    for value in result["session_serializers"].values():
+        capture_serializer(SerializerIR.from_dict(value))
 
     def walk(
         patterns: Any,
@@ -428,10 +470,16 @@ def qualify_routes(
     scan: FrameworkScan, overrides: dict[str, Any] | None = None
 ) -> list[dict[str, Any]]:
     """Flask's own qualification; legacy FastAPI native flags are not reused."""
+    captured = overrides or {}
     serializers = {s.name: s for s in scan.serializer_details}
+    serializers.update(
+        {
+            name: SerializerIR.from_dict(value)
+            for name, value in captured.get("session_serializers", {}).items()
+        }
+    )
     views = {v.name: v for v in scan.view_details}
     roots = {r.path for r in scan.api_roots}
-    captured = overrides or {}
     rows = []
     for route in scan.routes:
         gaps = []
@@ -443,7 +491,20 @@ def qualify_routes(
             gaps.append("middleware-not-captured")
         if scan.skipped_routes:
             gaps.append("non-drf-routes")
-        if not route.supported:
+        session = bool(
+            route.view in captured.get("session_auth", {})
+            and route.authentication == ("rest_framework.authentication.SessionAuthentication",)
+            and route.permissions == ("rest_framework.permissions.IsAuthenticated",)
+        )
+        allowed_legacy_reasons = {
+            "SANKA_DRF_AUTH_PERMISSIONS_UNSUPPORTED",
+            "SANKA_DRF_MIDDLEWARE_UNSUPPORTED",
+        }
+        if not route.supported and not (
+            session
+            and route.adaptation_reasons
+            and all(reason.code in allowed_legacy_reasons for reason in route.adaptation_reasons)
+        ):
             gaps.append("route-pattern")
         view = views.get(route.view)
         token = bool(
@@ -453,9 +514,11 @@ def qualify_routes(
             and (view.auth.require_authenticated or view.access.get("permission"))
             and route.authentication == ("rest_framework.authentication.TokenAuthentication",)
         )
-        if route.authentication and not token:
+        if route.authentication and not (token or session):
             gaps.append("authentication")
-        if not token and any(p != "rest_framework.permissions.AllowAny" for p in route.permissions):
+        if not (token or session) and any(
+            p != "rest_framework.permissions.AllowAny" for p in route.permissions
+        ):
             gaps.append("permissions")
         metadata = route.options.get("anonymous", {})
         if metadata.get("renders") != ["application/json"]:
@@ -466,6 +529,7 @@ def qualify_routes(
             reason.code
             for reason in route.adaptation_reasons
             if reason.code != "SANKA_DRF_MIDDLEWARE_UNSUPPORTED"
+            and not (session and reason.code == "SANKA_DRF_AUTH_PERMISSIONS_UNSUPPORTED")
             and not (
                 route.view in captured.get("listing", {})
                 and reason.code
@@ -481,6 +545,8 @@ def qualify_routes(
         view = views.get(route.view)
         root_path = route.path.replace("<drf_format_suffix:format>", "")
         is_root = root_path in roots or route.path in roots
+        if captured.get("session_auth") and not session and not is_root:
+            gaps.append("mixed-session-authentication")
         if is_root:
             pass
         elif (
@@ -509,7 +575,7 @@ def qualify_routes(
             if view.name not in captured.get("listing", {}):
                 gaps.append("listing-not-captured")
             if (
-                not token
+                not (token or session)
                 and view.auth
                 and (
                     view.auth.require_authenticated
@@ -619,7 +685,10 @@ def render_sqlalchemy(
         ]
         return resource
 
-    for serializer in scan.serializer_details:
+    serializers = list(scan.serializer_details) + [
+        SerializerIR.from_dict(value) for value in overrides.get("session_serializers", {}).values()
+    ]
+    for serializer in serializers:
         resources[serializer.name] = build_resource(serializer)
     views = {}
     for view in scan.view_details:
@@ -628,8 +697,9 @@ def render_sqlalchemy(
         value["response_overrides"] = capture_response_overrides(view.carryover)
         value.pop("carryover", None)
         value["listing"] = overrides["listing"][view.name]
-        auth = value.get("auth")
-        if auth and auth["token_keyword"]:
+        auth = overrides.get("session_auth", {}).get(view.name) or value.get("auth")
+        value["auth"] = auth
+        if auth and auth.get("token_keyword"):
             if view.name not in overrides["auth_messages"]:
                 raise ValueError("token authentication messages were not captured")
             auth["messages"] = overrides["auth_messages"][view.name]
@@ -701,6 +771,10 @@ def render_sqlalchemy(
         "native_contract.json": json.dumps(contract, sort_keys=True, indent=2, allow_nan=False)
         + "\n",
     }
+    if any(v.get("auth", {}).get("kind") == "session" for v in views.values()):
+        files["sanka_native/sqlalchemy_sessions.py"] = (
+            Path(__file__).with_name("sqlalchemy_sessions.py").read_text()
+        )
     if any(
         r.get("create_contract", {}).get("style") == "nested"
         for r in resources.values()

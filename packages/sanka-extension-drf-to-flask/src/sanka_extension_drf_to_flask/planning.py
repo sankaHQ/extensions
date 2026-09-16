@@ -10,7 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from sanka_code_migration.drf.model import FrameworkScan
+from sanka_code_migration.drf.model import FrameworkScan, SerializerIR
 from sanka_code_migration.ir import (
     BackendIR,
     EffectiveInputs,
@@ -176,6 +176,16 @@ def plan_native(
             + json.dumps(scan["behavior_inventory"], sort_keys=True)
         )
     schema = scan["database_schema"]
+    serializers = {serializer.name: serializer for serializer in backend.serializer_details}
+    serializers.update(
+        {
+            name: SerializerIR.from_dict(value)
+            for name, value in scan["sqlalchemy_overrides"].get("session_serializers", {}).items()
+        }
+    )
+    backend = replace(
+        backend, serializer_details=tuple(serializers[name] for name in sorted(serializers))
+    )
     operations = _service_operations(backend, schema)
     facts = BackendIR(
         source_content_digest=scan["source_hash"],
@@ -228,6 +238,14 @@ def plan_native(
         + "]\n\n[tool.uv]\npackage = false\n"
     )
     files[".env.example"] = "SANKA_DATABASE_URL=\n"
+    session_auth = scan["sqlalchemy_overrides"].get("session_auth", {})
+    if session_auth:
+        files[".env.example"] += (
+            "# Supply the source Django signing key through your secret manager.\n"
+            "SANKA_DJANGO_SECRET_KEY=\n"
+            "# JSON array of source fallback signing keys; use [] when none are configured.\n"
+            "SANKA_DJANGO_SECRET_KEY_FALLBACKS=[]\n"
+        )
     files[".gitignore"] = ".env\n.venv/\n__pycache__/\n*.db\n"
     files["tests/test_generated_backend.py"] = _TEST.replace(
         "__DIALECT__", schema["dialect"]
@@ -253,11 +271,23 @@ def plan_native(
             ),
         ),
     )
-    inputs = EffectiveInputs(facts, profile, "drf-to-flask/0.1.0a10")
+    inputs = EffectiveInputs(facts, profile, "drf-to-flask/0.1.0a11")
     files["migration-inputs.json"] = inputs.to_json() + "\n"
     files["README.md"] = _README.replace(
         "database.", (module_prefix + "." if module_prefix else "") + "database."
     )
+    if session_auth:
+        files["README.md"] += (
+            "\n## Existing database sessions\n\n"
+            "Set `SANKA_DJANGO_SECRET_KEY` to the source Django signing key and "
+            "`SANKA_DJANGO_SECRET_KEY_FALLBACKS` to a JSON array containing the source "
+            "fallback keys, in order. Inject these through your deployment secret manager; "
+            "no source secret is included in the generated project.\n\n"
+            "Preserve the session and user tables when adopting the existing database. "
+            "The generated API validates existing database sessions and the captured "
+            "CSRF cookie/header contract. It does not add login or logout endpoints. "
+            "Verify session expiry, key rotation, cookies and denied writes before cutover.\n"
+        )
     generated_hashes = {
         name: hashlib.sha256(content.encode()).hexdigest()
         for name, content in sorted(files.items())

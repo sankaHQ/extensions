@@ -9,7 +9,7 @@
   "distribution": {
     "executable": "sanka-extension-drf-to-flask",
     "name": "sanka-extension-drf-to-flask",
-    "version": "0.1.0a10"
+    "version": "0.1.0a11"
   },
   "id": "sanka/drf-to-flask",
   "kind": "migration",
@@ -43,32 +43,32 @@
   "targets": [
     "flask"
   ],
-  "version": "0.1.0a10",
+  "version": "0.1.0a11",
   "wheels": [
     {
       "name": "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
       "sha256": "34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a29/sanka_connector_sdk-0.1.0a12-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a30/sanka_connector_sdk-0.1.0a12-py3-none-any.whl"
     },
     {
       "name": "sanka_drf_replay-0.1.0a3-py3-none-any.whl",
       "sha256": "eb813dab30952cc283d96fd7748a33eb97e84d3cdc51f8a9a932f0773ff8cdc3",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a29/sanka_drf_replay-0.1.0a3-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a30/sanka_drf_replay-0.1.0a3-py3-none-any.whl"
     },
     {
-      "name": "sanka_code_migration-0.1.0a2-py3-none-any.whl",
-      "sha256": "49673642fab61aa370c971a3d7ef83f12ea36fb366fa3632a9047acaf2912d0c",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a29/sanka_code_migration-0.1.0a2-py3-none-any.whl"
+      "name": "sanka_code_migration-0.1.0a3-py3-none-any.whl",
+      "sha256": "7f4f16034a3fae2bc4d39ffe32a36976944bad9b44240b5c2a5cae497b4134d2",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a30/sanka_code_migration-0.1.0a3-py3-none-any.whl"
     },
     {
       "name": "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
       "sha256": "f1a6655095ab81e549137e1d9604492bda2a31677d674c6359b0a39a2da96307",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a29/sanka_extension_sdk-0.1.0a4-py3-none-any.whl"
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a30/sanka_extension_sdk-0.1.0a4-py3-none-any.whl"
     },
     {
-      "name": "sanka_extension_drf_to_flask-0.1.0a10-py3-none-any.whl",
-      "sha256": "60ff702011cdb3323f98bee084c36e90e942ebeb392e929f216ff41f4a06b77d",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a29/sanka_extension_drf_to_flask-0.1.0a10-py3-none-any.whl"
+      "name": "sanka_extension_drf_to_flask-0.1.0a11-py3-none-any.whl",
+      "sha256": "4326441d0f3f95fbda59419f482c579ffbd9d19a9d2959719c263233e9e41db4",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a30/sanka_extension_drf_to_flask-0.1.0a11-py3-none-any.whl"
     }
   ]
 }
