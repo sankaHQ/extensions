@@ -250,7 +250,7 @@ filters to detail requests before lookup. Unsupported custom filtersets and fiel
 kinds remain gaps. Existing pagination and nested-write differential fixtures now
 run on SQLite and PostgreSQL, including rollback followed by a successful write.
 
-Oversized JSON requests preserve Django's body limit and 400 response with no write.
+Source-enforced JSON body limits preserve Django's 400 response with no write.
 Static inventory recognizes bounded raw SQL, network, email and storage patterns
 without executing the modules being inventoried. It does not provide interprocedural
 Python analysis or isolate source imports. Native planning refuses those findings.
@@ -294,3 +294,17 @@ checks passed 25 tests. Two canonical builds produced identical bytes for all
 194 wheels, and both artifact sets match the final manifests. Installed candidate
 checks passed 16 tests with two PostgreSQL skips using the published SDK a4.
 Final-head CI must establish PostgreSQL and modern-source results before merge.
+
+
+PR61 CI exposed a source-version distinction: Django 6.0.6 / DRF 3.17.1 JSON parsing accepts
+requests above DATA_UPLOAD_MAX_MEMORY_SIZE, while Django 6.1 / DRF 3.18 enforces
+that limit. Capture must record the actual stock parser behavior and generated Flask
+must preserve it. The differential test retains successful writes for accepted
+requests and unchanged rows for rejected requests; it must not force a 400 outcome
+onto both source versions. PostgreSQL fixture checks passed on the initial head.
+
+The source-aware fix passed both request-limit cases in each framework environment,
+and the full Django 6.0.6/DRF 3.17.1 Flask lane passed **88 tests, 9 PostgreSQL skips**
+in a separate Python 3.13 environment. Six installed-wheel request/lifecycle/
+determinism checks passed after rebuilding; both canonical 194-wheel sets again
+match byte-for-byte. Independent review found no blocker in the bounded probe.

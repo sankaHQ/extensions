@@ -319,7 +319,8 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         else None
     )
     app = Flask(__name__)
-    app.config.update(MAX_CONTENT_LENGTH=2_621_440)
+    if contract["request_body_limit"] is not None:
+        app.config.update(MAX_CONTENT_LENGTH=contract["request_body_limit"])
     app.config.update(config or {})
     app.url_map.merge_slashes = False
     app.url_map.converters["allpaths"] = _AllPaths

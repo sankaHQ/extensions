@@ -56,8 +56,9 @@ are installed and tested separately from their editable source packages. The gen
 Stock `DjangoFilterBackend` supports qualified automatic scalar filters, including
 repeated parameters, CSV inputs and detail filtering. Custom filtersets, related/date
 filters and unsupported lookups remain blocking gaps. Filter errors preserve field
-order and source validation messages. Oversized JSON requests preserve the source
-body limit and error response without database writes.
+order and source validation messages. JSON body-limit behavior is captured from the
+source parser. Enforced limits preserve the source error response without writes;
+a source parser that accepts the request does not acquire an invented rejection.
 
 Stock database sessions are supported when every migrated view uses exact
 `SessionAuthentication` with `IsAuthenticated`, the stock database session backend,

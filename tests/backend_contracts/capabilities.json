@@ -353,7 +353,7 @@
       "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py::test_request_body_limit_matches_source",
       "source_success": {
         "status": 201,
-        "database_effect": "Requests below and at the source body limit create rows; oversized requests return the source error without writes."
+        "database_effect": "Requests accepted by the source persist rows; source-enforced size rejection preserves its error response and performs no write."
       }
     },
     {

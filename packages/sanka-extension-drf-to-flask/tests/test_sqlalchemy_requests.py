@@ -55,8 +55,10 @@ for body in json.loads(Path(sys.argv[2]).read_text()):
     r=client.generic('POST','/api/gadgets/',body,content_type='application/json')
     observed.append([r.status_code,r.content.decode(),dict(r.headers),
                      list(Gadget.objects.order_by('id').values())])
-assert [r[0] for r in observed]==[201,201,400],observed
-assert observed[-1][3]==observed[-2][3]
+statuses=[r[0] for r in observed]
+assert statuses[:2]==[201,201] and statuses[-1] in {201,400},observed
+if statuses[-1]==400: assert observed[-1][3]==observed[-2][3]
+else: assert len(observed[-1][3])==len(observed[-2][3])+1
 print(json.dumps(observed))
 """
     result = subprocess.run(
@@ -67,6 +69,9 @@ print(json.dumps(observed))
         timeout=60,
     )
     assert result.returncode == 0, result.stderr
+    expected = json.loads(result.stdout)
+    contract = json.loads((target / "native_contract.json").read_text())
+    assert contract["request_body_limit"] == (2_621_440 if expected[-1][0] == 400 else None)
     expected_file = tmp_path / "expected.json"
     expected_file.write_text(result.stdout)
     env["SANKA_DATABASE_URL"] = "sqlite:///" + str(tmp_path / "target.sqlite3")

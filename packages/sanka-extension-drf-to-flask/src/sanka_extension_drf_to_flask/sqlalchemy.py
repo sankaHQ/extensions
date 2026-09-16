@@ -80,6 +80,35 @@ def capture_middleware() -> dict[str, Any]:
     }
 
 
+def _capture_request_body_limit() -> int | None:
+    """Probe the configured stock DRF JSON request path without invoking a view."""
+    settings = importlib.import_module("django.conf").settings
+    configured = settings.DATA_UPLOAD_MAX_MEMORY_SIZE
+    stock_default = importlib.import_module(
+        "django.conf.global_settings"
+    ).DATA_UPLOAD_MAX_MEMORY_SIZE
+    if configured != stock_default or type(configured) is not int or configured < 16:
+        raise ValueError("DATA_UPLOAD_MAX_MEMORY_SIZE is outside the native contract")
+    request_factory = importlib.import_module("django.test").RequestFactory()
+    drf_request = importlib.import_module("rest_framework.request").Request
+    json_parser = importlib.import_module("rest_framework.parsers").JSONParser
+    request_too_big = importlib.import_module("django.core.exceptions").RequestDataTooBig
+
+    def parse(size: int) -> None:
+        prefix = b'{"padding":"'
+        suffix = b'"}'
+        payload = prefix + b"x" * (size - len(prefix) - len(suffix)) + suffix
+        request = request_factory.generic("POST", "/", payload, content_type="application/json")
+        _ = drf_request(request, parsers=[json_parser()]).data
+
+    parse(configured)
+    try:
+        parse(configured + 1)
+    except request_too_big:
+        return configured
+    return None
+
+
 def capture_sqlalchemy_overrides(scan: FrameworkScan) -> dict[str, Any]:
     """Capture facts absent from the legacy scan, inside the caller's source worker.
 
@@ -111,6 +140,7 @@ def capture_sqlalchemy_overrides(scan: FrameworkScan) -> dict[str, Any]:
         "session_auth": {},
         "session_serializers": {},
         "middleware": capture_middleware(),
+        "request_body_limit": _capture_request_body_limit(),
         "format_query_param": api_settings.URL_FORMAT_OVERRIDE,
     }
     from .sqlalchemy_sessions import capture_session_auth
@@ -733,6 +763,7 @@ def render_sqlalchemy(
         "generic_messages": dict(scan.generic_messages),
         "http_security": scan.http_security,
         "middleware": overrides["middleware"],
+        "request_body_limit": overrides["request_body_limit"],
         "format_query_param": overrides["format_query_param"],
         "not_found_response": overrides["not_found_response"],
         "server_error_response": overrides["server_error_response"],
