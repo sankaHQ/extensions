@@ -7,7 +7,7 @@ check:
 	uv run python scripts/check_boundaries.py
 	uv run python scripts/check_terminology.py
 	uv run python scripts/check_catalog_docs.py
-	uv run pytest
+	uv run python -m pytest
 	uv run python -m pytest scripts/test_update_marketplace_hashes.py scripts/test_sdk_candidate.py -q
 
 .PHONY: build-release build-business-flows
