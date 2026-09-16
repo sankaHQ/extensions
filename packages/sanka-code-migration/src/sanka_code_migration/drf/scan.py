@@ -2113,6 +2113,44 @@ def _defines_custom_validation(cls: type[Any]) -> bool:
     return False
 
 
+def standard_field_validators(field: Any, model: Any) -> bool:
+    """The scalar IR represents stock field validators, not additional validator runs."""
+    unique_validator = importlib.import_module("rest_framework.validators").UniqueValidator
+    unique = [item for item in field.validators if type(item) is unique_validator]
+    if unique:
+        if len(unique) != 1 or model is None:
+            return False
+        models_module = importlib.import_module("django.db.models")
+        validator = unique[0]
+        if type(validator.queryset) not in {models_module.Manager, models_module.QuerySet}:
+            return False
+        queryset = validator.queryset.all()
+        if (
+            validator.lookup != "exact"
+            or queryset.model is not model
+            or type(model._default_manager) is not models_module.Manager
+            or type(queryset) is not models_module.QuerySet
+            or queryset.query.where
+            or queryset.db != model._default_manager.db
+            or str(queryset.query) != str(model._default_manager.all().query)
+        ):
+            return False
+    observed = [item for item in field.validators if type(item) is not unique_validator]
+    expected = type(field)(
+        *field._args, **{key: value for key, value in field._kwargs.items() if key != "validators"}
+    ).validators
+    if len(observed) != len(expected):
+        return False
+    return all(
+        type(actual) is type(stock)
+        and not callable(getattr(actual, "limit_value", None))
+        and getattr(actual, "limit_value", None) == getattr(stock, "limit_value", None)
+        and str(getattr(actual, "message", "")) == str(getattr(stock, "message", ""))
+        and getattr(actual, "code", None) == getattr(stock, "code", None)
+        for actual, stock in zip(observed, expected, strict=True)
+    )
+
+
 def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR:
     fields_module = importlib.import_module("rest_framework.fields")
     relations_module = importlib.import_module("rest_framework.relations")
@@ -2159,7 +2197,12 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
         kind = "char"
     elif type(field) is fields_module.DecimalField:
         kind = "decimal"
-        if not getattr(field, "coerce_to_string", True):
+        if (
+            not getattr(field, "coerce_to_string", True)
+            or field.rounding is not None
+            or field.localize
+            or field.normalize_output
+        ):
             return SerializerFieldIR(name=name, kind="unsupported", supported=False)
     elif type(field) is fields_module.ChoiceField:
         kind = "choice"
@@ -2190,7 +2233,14 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
     )
     if kind in {"boolean", "uuid"}:
         allowed_validators = (drf_validators.UniqueValidator,)
-    supported = all(isinstance(item, allowed_validators) for item in field.validators)
+    supported = all(type(item) in allowed_validators for item in field.validators) and (
+        standard_field_validators(field, model)
+    )
+    if any(
+        getattr(field, key, None) is not None and _maybe_int(getattr(field, key)) is None
+        for key in ("min_value", "max_value")
+    ):
+        supported = False
     unique = False
     unique_message: str | None = None
     for item in field.validators:

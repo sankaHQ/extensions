@@ -119,7 +119,7 @@ def main() -> int:
             if project.get("dependencies") != [
                 expected_dependency,
                 "sanka-drf-replay==0.1.0a3",
-                "sanka-code-migration==0.1.0a1",
+                "sanka-code-migration==0.1.0a2",
             ]:
                 errors.append(f"{package.name} must depend exactly on {expected_dependency}")
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:

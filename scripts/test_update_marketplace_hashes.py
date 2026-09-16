@@ -35,14 +35,14 @@ def test_hash_updater_records_each_manifest_dependency_closure(tmp_path: Path) -
         for name in names:
             _wheel(tmp_path, name)
 
-    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a27")
+    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a28")
 
     assert set(manifests) == UPDATED_MANIFESTS
     for package, payload in manifests.items():
         assert [wheel["name"] for wheel in payload["wheels"]] == list(MANIFEST_WHEELS[package])
         assert all(
             wheel["url"].startswith(
-                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a27/"
+                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a28/"
             )
             and len(wheel["sha256"]) == 64
             for wheel in payload["wheels"]
@@ -136,8 +136,8 @@ def test_hash_updater_rejects_an_incomplete_or_wrongly_tagged_wheel_set(tmp_path
     _wheel(tmp_path, "sanka_connector_sdk-0.1.0a12-py3-none-any.whl")
 
     with pytest.raises(RuntimeError, match="complete marketplace wheel set"):
-        update_manifests(tmp_path, release_tag="extensions-v0.1.0a27")
-    with pytest.raises(RuntimeError, match=r"extensions-v0\.1\.0a27"):
+        update_manifests(tmp_path, release_tag="extensions-v0.1.0a28")
+    with pytest.raises(RuntimeError, match=r"extensions-v0\.1\.0a28"):
         update_manifests(tmp_path, release_tag="extensions-v0.1.0a26")
 
 
@@ -207,20 +207,20 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
     packages = {
         "sanka-drf-replay": ("0.1.0a3", "sanka_drf_replay-0.1.0a3-py3-none-any.whl", ""),
         "sanka-code-migration": (
-            "0.1.0a1",
-            "sanka_code_migration-0.1.0a1-py3-none-any.whl",
+            "0.1.0a2",
+            "sanka_code_migration-0.1.0a2-py3-none-any.whl",
             "",
         ),
         "sanka-extension-drf-to-flask": (
-            "0.1.0a8",
-            "sanka_extension_drf_to_flask-0.1.0a8-py3-none-any.whl",
+            "0.1.0a9",
+            "sanka_extension_drf_to_flask-0.1.0a9-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-flask = sanka_extension_drf_to_flask.__main__:main\n",
         ),
         "sanka-extension-sdk": ("0.1.0a4", "sanka_extension_sdk-0.1.0a4-py3-none-any.whl", ""),
         "sanka-extension-drf-to-fastapi": (
-            "0.1.0a14",
-            "sanka_extension_drf_to_fastapi-0.1.0a14-py3-none-any.whl",
+            "0.1.0a15",
+            "sanka_extension_drf_to_fastapi-0.1.0a15-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-fastapi = sanka_extension_drf_to_fastapi.__main__:main\n",
         ),
@@ -259,7 +259,7 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
         )
         requirements = (
             (
-                "sanka-code-migration==0.1.0a1",
+                "sanka-code-migration==0.1.0a2",
                 "sanka-drf-replay==0.1.0a3",
                 "sanka-extension-sdk==0.1.0a4",
             )
@@ -296,8 +296,8 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
 @pytest.mark.parametrize(
     ("distribution", "version"),
     [
-        ("sanka-extension-drf-to-fastapi", "0.1.0a14"),
-        ("sanka-extension-drf-to-flask", "0.1.0a8"),
+        ("sanka-extension-drf-to-fastapi", "0.1.0a15"),
+        ("sanka-extension-drf-to-flask", "0.1.0a9"),
     ],
 )
 def test_converter_dependency_closures_resolve_without_an_index(
@@ -328,7 +328,7 @@ def test_converter_dependency_closures_resolve_without_an_index(
     )
 
     assert result.returncode == 0, result.stderr
-    assert "sanka-code-migration==0.1.0a1" in result.stderr
+    assert "sanka-code-migration==0.1.0a2" in result.stderr
     assert "sanka-drf-replay==0.1.0a3" in result.stderr
     assert "sanka-extension-sdk==0.1.0a4" in result.stderr
 
@@ -374,14 +374,14 @@ def test_release_validator_rejects_invalid_release_boundaries(
         manifest["wheels"][1]["sha256"] = "0" * 64
         manifest_path.write_text(json.dumps(manifest))
     elif case == "package_data":
-        fastapi = release / "sanka_extension_drf_to_fastapi-0.1.0a14-py3-none-any.whl"
+        fastapi = release / "sanka_extension_drf_to_fastapi-0.1.0a15-py3-none-any.whl"
         _metadata_wheel(
             release,
             name="sanka-extension-drf-to-fastapi",
-            version="0.1.0a14",
+            version="0.1.0a15",
             filename=fastapi.name,
             requirements=(
-                "sanka-code-migration==0.1.0a1",
+                "sanka-code-migration==0.1.0a2",
                 "sanka-drf-replay==0.1.0a3",
                 "sanka-extension-sdk==0.1.0a4",
             ),

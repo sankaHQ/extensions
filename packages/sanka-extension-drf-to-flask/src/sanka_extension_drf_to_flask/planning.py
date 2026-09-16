@@ -253,7 +253,7 @@ def plan_native(
             ),
         ),
     )
-    inputs = EffectiveInputs(facts, profile, "drf-to-flask/0.1.0a8")
+    inputs = EffectiveInputs(facts, profile, "drf-to-flask/0.1.0a9")
     files["migration-inputs.json"] = inputs.to_json() + "\n"
     files["README.md"] = _README.replace(
         "database.", (module_prefix + "." if module_prefix else "") + "database."

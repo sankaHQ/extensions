@@ -57,11 +57,11 @@ MIGRATION_MANIFEST: dict[str, Any] = {
     "schema_version": "sanka-extension-manifest/v2",
     "kind": "migration",
     "id": "sanka/drf-to-fastapi",
-    "version": "0.1.0a14",
+    "version": "0.1.0a15",
     "protocol_version": "sanka-extension/v1",
     "distribution": {
         "name": "sanka-extension-drf-to-fastapi",
-        "version": "0.1.0a14",
+        "version": "0.1.0a15",
         "executable": "sanka-extension-drf-to-fastapi",
     },
     "commands": ["apply", "plan", "scan", "test", "verify"],
@@ -153,12 +153,12 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
 FLASK_MANIFEST = {
     **MIGRATION_MANIFEST,
     "id": "sanka/drf-to-flask",
-    "version": "0.1.0a8",
+    "version": "0.1.0a9",
     "commands": ["apply", "plan", "scan", "test", "verify"],
     "targets": ["flask"],
     "distribution": {
         "name": "sanka-extension-drf-to-flask",
-        "version": "0.1.0a8",
+        "version": "0.1.0a9",
         "executable": "sanka-extension-drf-to-flask",
     },
 }
@@ -334,7 +334,7 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
             if missing:
                 errors.append(f"{name} wheel is missing required package data: {sorted(missing)}")
             if sorted(requirements) != [
-                "sanka-code-migration==0.1.0a1",
+                "sanka-code-migration==0.1.0a2",
                 "sanka-drf-replay==0.1.0a3",
                 "sanka-extension-sdk==0.1.0a4",
             ]:
