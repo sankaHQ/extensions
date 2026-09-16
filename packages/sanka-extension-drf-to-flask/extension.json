@@ -57,7 +57,7 @@
     },
     {
       "name": "sanka_code_migration-0.1.0a1-py3-none-any.whl",
-      "sha256": "0b5183dbff7aa9e42e7635b4346128dfa9f6893af5bba2d9bb29d8f36dbb0030",
+      "sha256": "dec2fa54a3ba271addaefbf0e6c34a0512648042e9f0ba0294c5ab2fcdf4ff2f",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a27/sanka_code_migration-0.1.0a1-py3-none-any.whl"
     },
     {
@@ -67,7 +67,7 @@
     },
     {
       "name": "sanka_extension_drf_to_flask-0.1.0a8-py3-none-any.whl",
-      "sha256": "8c4639ef752e967949b20adf8098786958732ddfc11f085129b422fc0f2d2ee8",
+      "sha256": "301374291cf9fef49bb1ff06e84234804796f95b97f837f64a8aa65c8e1c4a66",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a27/sanka_extension_drf_to_flask-0.1.0a8-py3-none-any.whl"
     }
   ]

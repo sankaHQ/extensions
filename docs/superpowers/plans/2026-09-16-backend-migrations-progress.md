@@ -106,6 +106,15 @@ No Go generator, speculative repository wrapper or deployment was added.
 
 ## Verification
 
+- Final runtime changes at `c3744f210d4c59c77375e0d0b8ef6a03ec2633f7` passed
+  **845 tests** in service-enabled CI, plus both PostgreSQL setup/adoption checks
+  and the modern source matrix. One existing Starlette warning remains.
+- That run caught a packaging-only hash mismatch: manual replacement wheels used
+  a different archive epoch. Both changed wheels were rebuilt through the canonical
+  release script (`SOURCE_DATE_EPOCH=315532800`); independent canonical builds now
+  match byte-for-byte and all 194 artifact hashes validate. Only manifest hashes
+  changed after that runtime qualification.
+
 - Combined local suite before the final PostgreSQL/header additions: **822 passed,
   19 skipped**, with one existing Starlette warning.
 - CI at `fd11fbc928d074ec04c6cd7c9481794db1db09f3`: **841 passed**, no skips in
