@@ -121,3 +121,43 @@ def echo():
     invalid = call(tmp_path, "verify", config)
     assert invalid["error"]["code"] == "SANKA_EXTENSION_REPLAY_INVALID", invalid
     assert not (tmp_path / "do-not-touch.sqlite3").exists()
+
+
+def test_native_application_factory_replay_uses_isolated_database(tmp_path: Path) -> None:
+    project(tmp_path)
+    with (tmp_path / "settings.py").open("a") as out:
+        out.write(
+            'import os\nDATABASES={"default":{"ENGINE":"django.db.backends.sqlite3",'
+            '"NAME":os.environ.get("SANKA_TEST_DB", "never-open.sqlite3")}}\n'
+        )
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    (candidate / "target_app.py").write_text("""from flask import Flask, jsonify, request
+from sqlalchemy import create_engine
+
+def create_app(config):
+    app = Flask(__name__)
+    app.extensions['sanka_engine'] = create_engine(config['DATABASE_URL'])
+    @app.get('/quotes/<int:quantity>/')
+    def quote(quantity):
+        response = jsonify({'label': request.args.get('label', 'quote'), 'total': quantity * 7})
+        response.headers['X-Quote'] = 'calculated'
+        return response
+    return app
+""")
+    (tmp_path / "scenarios.json").write_text(
+        json.dumps(
+            [{"id": "quote", "method": "GET", "path": "/quotes/3/", "expected_source_status": 200}]
+        )
+    )
+    result = call(tmp_path, "verify", {"candidate": "candidate", "scenarios": "scenarios.json"})
+    assert result["outcome"] == "success", result
+    assert not (tmp_path / "never-open.sqlite3").exists()
+    entrypoint = candidate / "target_app.py"
+    entrypoint.write_text(
+        entrypoint.read_text().replace("config['DATABASE_URL']", "'sqlite:///wrong.db'")
+    )
+    rejected = call(tmp_path, "verify", {"candidate": "candidate", "scenarios": "scenarios.json"})
+    assert rejected["outcome"] == "error"
+    assert "isolated SQLite path" in rejected["error"]["message"]
+    assert not (candidate / "wrong.db").exists()

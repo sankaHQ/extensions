@@ -2,8 +2,73 @@
 
 An Apache-2.0 migration extension using `sanka-extension/v1`. It scans Django's
 resolved DRF routes, creates a deterministic reviewed plan, and emits a native
-Flask target plus ORM-only Django settings and a machine-readable gap inventory.
+Flask target and a machine-readable gap inventory. The existing Django ORM profile
+remains the default; `orm=sqlalchemy` selects independent database and schema ownership.
 It never imports the Sanka runtime or the FastAPI extension.
+
+## Standalone SQLAlchemy profile
+
+Set `orm` to `sqlalchemy` when planning. `generation=minimal` keeps the application
+compact, `generation=full` places it in a `backend` package, and `generation=auto`
+selects from captured application boundaries. Use `--extension-config` for profile
+settings the installed CLI does not expose as flags:
+
+```json
+{
+  "orm": "sqlalchemy",
+  "generation": "auto",
+  "database": {"dialect": "preserve", "schema_mode": "adopt-existing"},
+  "layers": {"services": "auto", "repositories": "auto"},
+  "completion_policy": "strict"
+}
+```
+
+The generated project owns a Flask application factory, synchronous SQLAlchemy
+sessions, model tables, explicit Alembic migrations, dependency pins, configuration
+example, and runnable database/factory tests. Importing or booting the app never
+creates a table or runs a migration. Models are captured independently of serializers,
+including fields omitted from the HTTP interface. SQLite and PostgreSQL are separate
+profiles; changing the database dialect is rejected.
+
+For an empty destination, run the generated Alembic baseline explicitly. For an
+existing destination, run its read-only `database.check_schema(engine)` first, then
+call `database.adopt_existing(engine, reviewed_schema_hash)` only after reviewing the
+schema hash. Adoption refuses mismatches and preserves data; it does not rerun Django
+data migrations. Unsupported schema, application hooks, or HTTP behavior block native
+generation instead of producing successful placeholders.
+
+`architecture.json` explains layout and layer decisions. `migration-inputs.json`
+records effective inputs; `generated-files.json` records generated content hashes.
+The same captured source, configuration, and pinned generator/dependencies produce
+the same files across checkout locations. Existing outputs and hand edits are never
+overwritten. The reviewed plan also binds the local output location, so its review
+hash intentionally differs when that location changes.
+
+The standalone profile currently recognizes JSON CRUD and generic views, Token/owner
+permissions, atomic nested writes, stock page-number/limit-offset/cursor pagination,
+search and ordering, and stock Common/Security/XFrame middleware. Recognized database
+delete policies execute in the request transaction. Each supported contract has
+source/target response and database-effect checks in the converter test suite.
+
+Session/Basic authentication, browsable HTML, multipart/form parsing, custom middleware,
+signals, arbitrary serializer hooks, and historical RunPython/RunSQL migrations remain
+blocking gaps in this profile. Custom view carryover is limited to the recognized
+conditional-response recipe; other custom actions remain gaps. `USE_TZ=False` with
+automatic timestamp fields is also blocked until its whole request contract is qualified. Existing APIView/form conversions remain available in
+the Django ORM profile below. Selecting SQLAlchemy never silently drops these features.
+Source introspection imports application code; run scans only in a trusted source
+execution environment. Static inventory is not a sandbox for untrusted Python.
+
+Generated dependencies are resolved in checked-in `uv.lock` profiles and hash-locked
+pip requirements. The generated README includes environment setup, migration commands,
+factory tests and a production WSGI command. These runtime dependencies are installed
+in the destination project, independently of the extension's own environment.
+
+This profile is qualified by its explicit supported contracts, not by the size
+of an application. Run independent source/target scenarios and database-effect checks
+before cutover. A successful syntax or startup check is not production qualification.
+
+## Existing Django ORM profile
 
 This alpha converts recognized JSON APIView handlers, configuration-only
 APIView inheritance, and the stock ModelViewSet JSON scope described below. It preserves JSON parsing, isolated Django ORM modules,
