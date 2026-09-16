@@ -476,8 +476,14 @@ if "django" in sys.modules:
                != os.path.realpath(payload["database"])):
             raise SystemExit("candidate database must use the isolated SQLite path")
 app = getattr(module, "app", None)
+if app is None and payload["target"] == "flask" and callable(getattr(module, "create_app", None)):
+    app = module.create_app({"DATABASE_URL": "sqlite:///" + payload["database"], "TESTING": True})
+    engine = app.extensions.get("sanka_engine")
+    if (engine is None or engine.url.get_backend_name() != "sqlite"
+        or os.path.realpath(str(engine.url.database)) != os.path.realpath(payload["database"])):
+        raise SystemExit("candidate factory database must use the isolated SQLite path")
 if app is None:
-    raise SystemExit("candidate entrypoint does not expose `app`")
+    raise SystemExit("candidate entrypoint does not expose `app` or a supported Flask factory")
 if payload["target"] == "flask":
     from flask import Flask
     if not isinstance(app, Flask):

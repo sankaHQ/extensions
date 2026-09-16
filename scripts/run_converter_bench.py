@@ -37,6 +37,7 @@ CONVERTER_SOURCES = (
     ROOT / "packages/sanka-extension-sdk/src",
     ROOT / "packages/sanka-connector-sdk/src",
     ROOT / "packages/sanka-drf-replay/src",
+    ROOT / "packages/sanka-code-migration/src",
 )
 
 

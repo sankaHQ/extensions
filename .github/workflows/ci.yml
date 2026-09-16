@@ -66,3 +66,15 @@ jobs:
         run: uv pip install 'django==6.0.6' 'djangorestframework==3.17.1'
       - name: Compare real source and generated HTTP responses and database effects
         run: uv run --no-sync python -m pytest packages/sanka-extension-drf-to-fastapi/tests/test_big_integer.py packages/sanka-extension-drf-to-fastapi/tests/test_generic_views.py packages/sanka-extension-drf-to-fastapi/tests/test_uuid_boolean.py packages/sanka-extension-drf-to-fastapi/tests/test_access_contracts.py
+      - name: Compare standalone Flask contracts against the modern DRF source
+        run: >-
+          uv run --no-sync python -m pytest
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_nested.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_middleware.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_deletion.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_access.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_records.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_datetime.py

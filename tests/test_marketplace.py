@@ -6,14 +6,15 @@ from pathlib import Path
 
 import yaml
 
-RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a26/"
+RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/"
+NEW_RELEASE_PREFIX = RELEASE_PREFIX + "extensions-v0.1.0a27/"
 EXPECTED = {
     "sanka/drf-to-flask": {
         "kind": "migration",
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-flask",
-            "version": "0.1.0a7",
+            "version": "0.1.0a8",
             "executable": "sanka-extension-drf-to-flask",
         },
     },
@@ -22,7 +23,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-fastapi",
-            "version": "0.1.0a13",
+            "version": "0.1.0a14",
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },
@@ -96,7 +97,8 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
         if "providers" in expected:
             assert manifest["providers"] == expected["providers"]
         assert manifest["wheels"]
-        assert all(wheel["url"].startswith(RELEASE_PREFIX) for wheel in manifest["wheels"])
+        expected_prefix = NEW_RELEASE_PREFIX if expected["kind"] == "migration" else RELEASE_PREFIX
+        assert all(wheel["url"].startswith(expected_prefix) for wheel in manifest["wheels"])
         assert all(len(wheel["sha256"]) == 64 for wheel in manifest["wheels"])
 
 
