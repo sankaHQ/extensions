@@ -16,7 +16,7 @@ from sanka_code_migration.drf.scan import _to_fastapi_path
 from . import native_runtime
 from .model_runtime import ModelInput
 from .sqlalchemy_access import qualify_access
-from .sqlalchemy_carryover import capture_conditional
+from .sqlalchemy_carryover import capture_conditional, capture_response_overrides
 
 _KINDS = {
     "char",
@@ -266,6 +266,59 @@ def capture_sqlalchemy_overrides(scan: FrameworkScan) -> dict[str, Any]:
             view_name = f"{cls.__module__}.{cls.__qualname__}"
             captured_view = next((v for v in scan.view_details if v.name == view_name), None)
             if captured_view:
+                import builtins
+
+                if captured_view.carryover:
+                    source_class: type[Any] = cls
+                    mixins = importlib.import_module("rest_framework.mixins")
+                    stock_methods = {
+                        "create": mixins.CreateModelMixin.create,
+                        "list": mixins.ListModelMixin.list,
+                        "retrieve": mixins.RetrieveModelMixin.retrieve,
+                        "update": mixins.UpdateModelMixin.update,
+                        "partial_update": mixins.UpdateModelMixin.partial_update,
+                        "destroy": mixins.DestroyModelMixin.destroy,
+                    }
+                    carried_names = {
+                        method["name"] for method in captured_view.carryover["methods"]
+                    }
+                    for name in carried_names & stock_methods.keys():
+                        function = getattr(source_class, name)
+                        closure = dict(
+                            zip(
+                                function.__code__.co_freevars,
+                                (cell.cell_contents for cell in function.__closure__ or ()),
+                                strict=True,
+                            )
+                        )
+                        next_method = next(
+                            (
+                                vars(base)[name]
+                                for base in source_class.__mro__[1:]
+                                if name in vars(base)
+                            ),
+                            None,
+                        )
+                        if (
+                            closure.get("__class__") is not source_class
+                            or next_method is not stock_methods[name]
+                        ):
+                            result["gaps"].append({"source": raw, "feature": "custom-super-chain"})
+                    # Stock partial_update also dispatches through inherited self.update methods.
+                    if carried_names & {"update", "partial_update"}:
+                        for name in {"update", "partial_update"} - carried_names:
+                            if getattr(source_class, name) is not stock_methods[name]:
+                                result["gaps"].append(
+                                    {"source": raw, "feature": "custom-super-chain"}
+                                )
+                    for method in captured_view.carryover["methods"]:
+                        function = getattr(cls, method["name"])
+                        if (
+                            function.__globals__.get("super", builtins.super) is not builtins.super
+                            or function.__builtins__.get("super") is not builtins.super
+                            or "super" in function.__code__.co_freevars
+                        ):
+                            result["gaps"].append({"source": raw, "feature": "shadowed-super"})
                 from .sqlalchemy_listing import capture_listing
 
                 try:
@@ -447,7 +500,11 @@ def qualify_routes(
                 qualify_access(view.access, asdict(source))
             except (ValueError, TypeError, KeyError):
                 gaps.append("access")
-            if view.carryover and capture_conditional(view.carryover) is None:
+            if (
+                view.carryover
+                and capture_conditional(view.carryover) is None
+                and capture_response_overrides(view.carryover) is None
+            ):
                 gaps.append("carryover")
             if view.name not in captured.get("listing", {}):
                 gaps.append("listing-not-captured")
@@ -568,6 +625,7 @@ def render_sqlalchemy(
     for view in scan.view_details:
         value = asdict(view)
         value["conditional"] = capture_conditional(view.carryover)
+        value["response_overrides"] = capture_response_overrides(view.carryover)
         value.pop("carryover", None)
         value["listing"] = overrides["listing"][view.name]
         auth = value.get("auth")
@@ -655,7 +713,7 @@ def render_sqlalchemy(
         files["sanka_native/sqlalchemy_access.py"] = (
             Path(__file__).with_name("sqlalchemy_access.py").read_text()
         )
-    if any(v["conditional"] for v in views.values()):
+    if any(v["conditional"] or v["response_overrides"] for v in views.values()):
         files["sanka_native/sqlalchemy_carryover.py"] = (
             Path(__file__).with_name("sqlalchemy_carryover.py").read_text()
         )

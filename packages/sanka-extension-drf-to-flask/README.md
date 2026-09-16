@@ -59,8 +59,14 @@ than silently changing validation or response values.
 
 Session/Basic authentication, browsable HTML, multipart/form parsing, custom middleware,
 signals, arbitrary serializer hooks, and historical RunPython/RunSQL migrations remain
-blocking gaps in this profile. Custom view carryover is limited to the recognized
-conditional-response recipe; other custom actions remain gaps. `USE_TZ=False` with
+blocking gaps in this profile. Custom view carryover supports the recognized
+conditional-response recipe or strict literal response transformations after the
+matching stock CRUD call. The latter can set ordinary response headers, choose a
+2xx status (except 204/205), and wrap `response.data` with JSON literals. PATCH
+preserves the source update/partial-update order; validation and permission errors
+bypass successful response transformations. Custom parent method chains,
+renderer-owned/transport headers, dynamic expressions, request mutation and arbitrary
+custom actions remain gaps. `USE_TZ=False` with
 automatic timestamp fields is also blocked until its whole request contract is qualified. Existing APIView/form conversions remain available in
 the Django ORM profile below. Selecting SQLAlchemy never silently drops these features.
 Source introspection imports application code; run scans only in a trusted source
