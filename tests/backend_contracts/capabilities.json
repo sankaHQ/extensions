@@ -312,6 +312,21 @@
         "status": 201,
         "database_effect": "Scoped source and target responses and final rows match for create, denied writes, add/remove members and malformed requests."
       }
+    },
+    {
+      "id": "flask-native-response-overrides",
+      "capabilities": [
+        "routing.response_overrides",
+        "write.crud"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py::test_literal_responses_match_source",
+      "source_success": {
+        "status": 202,
+        "database_effect": "one record is created; later update/PATCH and delete effects match after literal response transformations"
+      },
+      "target_difference": "Only fully recognized literal transformations after the matching stock CRUD call qualify; arbitrary Python and renderer-owned headers remain unsupported."
     }
   ]
 }

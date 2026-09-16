@@ -662,6 +662,15 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             response = carryover.conditional_response(
                 response, request.headers.get("If-None-Match", "")
             )
+        overrides = view.get("response_overrides") or {}
+        if (
+            route["operation"] in overrides
+            and method in methods
+            and method != "OPTIONS"
+            and 200 <= response.status_code < 300
+        ):
+            carryover = importlib.import_module(__package__ + ".sqlalchemy_carryover")
+            response = carryover.override_response(response, overrides[route["operation"]])
         return finish(response)
 
     def dispatch(_path: str = "") -> Response:

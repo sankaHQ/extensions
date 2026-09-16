@@ -54,6 +54,7 @@ jobs:
           uv run python -m pytest
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_records.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py
           -k postgresql -q
       - run: make check
       - run: make build-release
@@ -87,3 +88,4 @@ jobs:
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_records.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_datetime.py
           packages/sanka-extension-drf-to-flask/tests/test_validator_qualification.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py

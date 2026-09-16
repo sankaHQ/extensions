@@ -199,3 +199,39 @@ broad pytest run was active on this Mac, so no competing broad local run was sta
 Full custom-method support,
 stock session/CSRF authentication and arbitrary serializer logic remain outside
 this bounded fix. Go remains behind the Flask qualification gate.
+
+## Follow-up: bounded custom CRUD response contracts
+
+Base: `de29b5967f27ab68cf9e0f9a77a7e281a2fe1d45`, merged PR59.
+The approved tree was identical to the merge result, and latest main was pulled
+before this follow-up branch. Post-merge CI 35072695093 passed independently.
+
+This slice extends standalone Flask beyond the fixed ETag recipe: literal headers,
+success statuses and JSON response wrappers after a matching stock CRUD call.
+It captures supported statements as data; it does not execute transplanted source
+methods. Unknown expressions, request mutations and renderer-owned/transport
+headers remain blocking gaps. PATCH must preserve update then partial_update
+ordering. Original validation, authorization and lookup errors remain unchanged.
+
+The existing fixture database helper runs the new real-source/target response and
+write-effect comparisons on SQLite and PostgreSQL. Both inherited and explicitly
+overridden partial_update paths are covered. The generated runtime is checked
+without source framework imports. The prior ETag contract remains a regression gate.
+
+Only the Flask distribution changes (candidate a10). The helper and FastAPI
+distributions retain their versions and bytes. Candidate release a29 is not a
+publication. Full arbitrary view-method conversion and Go remain outside this slice.
+
+Pre-review local `make check` passed: 866 tests, 25 environment/platform skips,
+one existing Starlette warning, and 23 packaging-script tests. Independent review
+found a custom-parent method chain that could be dropped and missing transport
+header exclusions. Both require fail-closed regressions before the final PR head.
+The candidate artifact set contains 194 wheels; helper and FastAPI wheels remain
+byte-identical to the previous candidate. Final source changes require regenerated
+hashes and final-head CI, including the PostgreSQL and modern DRF lanes.
+
+Review fixes now reject custom parent CRUD chains, inherited PATCH dependencies
+and borrowed methods with a different class owner. Harmless intermediate classes
+remain supported. Keep-Alive and proxy authentication headers are blocked. The
+final focused response/ETag suite passed 35 tests with four PostgreSQL skips;
+Ruff and mypy passed. PostgreSQL behavior remains a final-head CI requirement.

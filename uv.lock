@@ -1226,7 +1226,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-extension-drf-to-flask"
-version = "0.1.0a9"
+version = "0.1.0a10"
 source = { editable = "packages/sanka-extension-drf-to-flask" }
 dependencies = [
     { name = "sanka-code-migration" },
