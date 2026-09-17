@@ -2,6 +2,8 @@
 """Public marketplace contract for runtime extension discovery."""
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -122,3 +124,25 @@ def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> No
         "release-assets/sanka-connector-clickhouse.json",
     ]
     assert len(destinations) == len(set(destinations))
+
+
+def test_release_workflow_only_accepts_current_candidate_tag() -> None:
+    workflow = yaml.safe_load(Path(".github/workflows/publish.yml").read_text())
+    guard = next(
+        step["run"]
+        for step in workflow["jobs"]["build"]["steps"]
+        if "GITHUB_REF_TYPE" in step.get("run", "")
+    )
+    tag = NEW_RELEASE_PREFIX.removeprefix(RELEASE_PREFIX).rstrip("/")
+    for ref_type, ref_name, allowed in [
+        ("tag", tag, True),
+        ("branch", tag, False),
+        ("tag", "extensions-v0.1.0a27", False),
+        ("branch", "main", False),
+    ]:
+        result = subprocess.run(
+            ["sh", "-c", guard],
+            env={**os.environ, "GITHUB_REF_TYPE": ref_type, "GITHUB_REF_NAME": ref_name},
+            check=False,
+        )
+        assert (result.returncode == 0) is allowed
