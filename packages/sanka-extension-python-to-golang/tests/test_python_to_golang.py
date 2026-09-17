@@ -137,7 +137,7 @@ def test_profiles_and_source_boundaries(tmp_path: Path) -> None:
     assert configuration({"source_framework": "flask"})["target_framework"] == "fiber"
     for config in (
         {"source_framework": "django"},
-        {"source_framework": "flask", "database_layer": "pgx"},
+        {"source_framework": "flask", "database_layer": "unknown"},
         {"source_framework": "flask", "target_framework": "unknown"},
         {"source_framework": "flask", "source_file": "../app.py"},
     ):

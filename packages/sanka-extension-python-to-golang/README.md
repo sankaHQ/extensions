@@ -23,7 +23,8 @@ plans or existing output. Artifacts must be inside the project's `.sanka`
 directory; output is `golang/` within that artifact directory.
 
 `scan`, `plan`, and `apply` parse source without importing or executing it. The current capture accepts
-one top-level Python module and rejects unknown imports, decorators, configuration,
+one top-level endpoint module (plus the explicitly selected models module for pgx)
+and rejects unknown imports, decorators, configuration,
 request parameters, dynamic handlers, additional Python modules, and source
 symlinks. DRF endpoints require explicit public permission, no authentication,
 and JSON renderer declarations. Unsupported behavior blocks generation.
@@ -53,12 +54,44 @@ but changes to Go locks or the captured contract are rejected. A mismatch return
 an error with a report path. Each rerun invalidates its old report first, so a
 failed rerun cannot leave stale passing evidence.
 
+## PostgreSQL schema profile
+
+Select `database_layer: "pgx"` to generate a PostgreSQL baseline, Go model structs,
+and an embedded Goose migration command. The resolved configuration pins
+`database_dialect: "postgresql"`, `migration_tool: "goose"`, `schema_mode: "empty"`,
+and `models_file: "models.py"`. Other database/tool combinations are rejected.
+
+DRF models must directly inherit `models.Model` and declare `Meta.app_label`,
+`Meta.db_table`, and an explicit primary key. Flask/FastAPI models currently use
+SQLAlchemy 2 `DeclarativeBase`, `Mapped`, and `mapped_column` declarations in the
+selected models file. Models are captured statically; they are never imported by
+scan/plan/apply.
+
+Qualified schema fields are 32/64-bit integers, booleans, bounded strings, and
+text, with nullability, single integer primary keys, automatic IDs and single
+column uniqueness. Nullable Go fields use pointers. Defaults (including Python
+and server defaults), relationships, indexes, custom types, validators, managers,
+and model methods remain blockers. Generated structs do not implement validation.
+
+After reviewing the generated SQL, set `DATABASE_URL` and run
+`go run ./cmd/migrate up` from the generated directory. Migrations are embedded,
+transactional and protected by a PostgreSQL session advisory lock. The initial
+migration rejects existing application relations; it never adopts an existing
+schema or transfers data. Reapplying an applied baseline is a no-op.
+`go run ./cmd/migrate down` explicitly drops the generated tables and their data.
+Do not edit an applied baseline; later schema changes require new revisions.
+
+This profile does not yet migrate database-backed HTTP handlers or generate
+repositories/services. The current public `test`/`verify` commands still exercise
+only the captured GET contract; PostgreSQL schema, constraint, apply/reapply and
+rollback equivalence are checked separately by the opt-in integration suite.
+
 ## Remaining backend work
 
 1. Capture whole projects into a framework-neutral contract, with stable model,
    field, relationship, operation, validation and policy identities.
-2. Add explicit database profiles, schema/data migration plans and transactional
-   CRUD. Qualify each supported combination against a real database before
+2. Extend the initial pgx/Goose profile to richer schemas, data migration and
+   transactional CRUD. Qualify each supported combination against a real database before
    advertising it; reject incompatible combinations.
 3. Preserve validation/errors, auth/permissions, middleware, filtering,
    pagination, transactions and configuration. Introduce services only for
