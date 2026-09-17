@@ -16,6 +16,7 @@ members = ["packages/*"]
 [tool.uv.sources]
 sanka-code-migration = { workspace = true }
 sanka-drf-replay = { workspace = true }
+sanka-ts-capture = { workspace = true }
 sanka-connector-sdk = { workspace = true }
 sanka-extension-sdk = { workspace = true }
 
@@ -70,6 +71,8 @@ known-first-party = [
   "sanka_extension_business_flows",
   "sanka_extension_drf_to_fastapi",
   "sanka_extension_drf_to_flask",
+  "sanka_extension_typescript_to_rust",
+  "sanka_ts_capture",
 ]
 
 [tool.mypy]
