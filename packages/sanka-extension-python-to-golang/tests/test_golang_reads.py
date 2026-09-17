@@ -252,3 +252,37 @@ def test_read_plan_is_location_independent(tmp_path: Path) -> None:
         generate(root, "fastapi", "fiber", app_source=read_source("fastapi"))
         plans.append(json.loads((root / ".sanka/go/plan.json").read_text()))
     assert plans[0] == plans[1]
+
+
+@pytest.mark.parametrize("framework", SOURCES)
+def test_model_import_cannot_replace_framework_symbols(tmp_path: Path, framework: str) -> None:
+    text = read_source(framework)
+    models = model_source(framework)
+    if framework == "drf":
+        text = text.replace(
+            "from rest_framework.response import Response", "from models import Response"
+        )
+        models += """
+class Response(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    class Meta:
+        app_label = "catalog"
+        db_table = "responses"
+"""
+    else:
+        text = text.replace("from sqlalchemy.orm import Session", "from models import Session")
+        models += """
+class Session(Base):
+    __tablename__ = "sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+"""
+    (tmp_path / "app.py").write_text(text)
+    (tmp_path / "models.py").write_text(models)
+    plan = handle(
+        dataclasses.replace(
+            request(tmp_path, framework),
+            configuration={"source_framework": framework, "database_layer": "pgx"},
+        )
+    )
+    assert plan.data["files"] == {}
+    assert any("unsupported or duplicate import" in gap for gap in plan.data["capture"]["gaps"])

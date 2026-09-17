@@ -212,7 +212,6 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             }:
                 raise ValueError("models_file conflicts with runtime imports")
             models = capture_models(root / config["models_file"], framework)
-            allowed_imports[model_module] = {model["name"] for model in models}
             if framework != "drf":
                 allowed_imports.update(
                     {
@@ -221,6 +220,10 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                         "sqlalchemy.orm": {"Session"},
                     }
                 )
+            # Preserve symbol provenance: a model called Session/Response must not
+            # satisfy the framework constructor or ORM session contract.
+            reserved = {name for names in allowed_imports.values() for name in names}
+            allowed_imports[model_module] = {model["name"] for model in models} - reserved
         except (ValueError, TypeError, OSError, SyntaxError) as error:
             gaps.append("models: " + str(error))
     tree = ast.parse(path.read_text(), filename=filename)
