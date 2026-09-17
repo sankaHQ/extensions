@@ -1,0 +1,302 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Real framework clients and native Go adapters; no listening test servers."""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from sanka_extension_python_to_golang.adapter import handle
+from sanka_extension_python_to_golang.capture import SOURCES, TARGETS, capture, configuration
+
+from sanka_extensions.code import ExtensionRequest
+
+PAYLOAD = {"message": 'hello "world" 日本語', "items": [1, True, None], "nested": {"ok": False}}
+
+
+def source(framework: str) -> str:
+    body = repr(PAYLOAD)
+    if framework == "flask":
+        return f"""from flask import Flask, jsonify
+app = Flask(__name__)
+@app.get("/health")
+def health():
+    return jsonify({body})
+"""
+    if framework == "fastapi":
+        return f"""from fastapi import FastAPI
+app = FastAPI()
+@app.get("/health")
+async def health():
+    return {body}
+"""
+    return f"""from django.urls import path
+from rest_framework.decorators import (
+    api_view, authentication_classes, permission_classes, renderer_classes
+)
+from rest_framework.permissions import AllowAny
+from rest_framework.renderers import JSONRenderer
+from rest_framework.response import Response
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@renderer_classes([JSONRenderer])
+def health(request):
+    return Response({body})
+urlpatterns = [path("health", health)]
+"""
+
+
+def request(root: Path, framework: str = "flask", target: str = "fiber") -> ExtensionRequest:
+    return ExtensionRequest(
+        "test",
+        "plan",
+        str(root),
+        str(root / ".sanka" / "go"),
+        "sanka/python-to-golang",
+        "0.1.0a1",
+        "0" * 64,
+        {},
+        {"source_framework": framework, "target_framework": target},
+        (),
+        None,
+    )
+
+
+def apply(root: Path, framework: str, target: str) -> Path:
+    req = request(root, framework, target)
+    planned = handle(req)
+    assert planned.outcome == "success", planned.error
+    assert handle(req).data == planned.data
+    result = handle(
+        dataclasses.replace(
+            req,
+            command="apply",
+            reviewed_plan_hash="runtime-reviewed-plan",
+            configuration=req.configuration | {"extension_plan_hash": planned.data["plan_hash"]},
+        )
+    )
+    assert result.outcome == "success", result.error
+    return Path(str(result.data["output"]))
+
+
+@pytest.mark.parametrize("framework", SOURCES)
+def test_review_and_fail_closed(tmp_path: Path, framework: str) -> None:
+    (tmp_path / "app.py").write_text(source(framework))
+    req = request(tmp_path, framework)
+    plan = handle(req)
+    assert plan.outcome == "success", plan.error
+    assert plan.data["files"]
+    assert handle(dataclasses.replace(req, command="apply")).outcome == "error"
+    old_hash = plan.data["plan_hash"]
+    (tmp_path / "app.py").write_text(source(framework) + "\nSECRET = 'changed'\n")
+    blocked = handle(
+        dataclasses.replace(
+            req,
+            command="apply",
+            reviewed_plan_hash="runtime-reviewed-plan",
+            configuration=req.configuration | {"extension_plan_hash": old_hash},
+        )
+    )
+    assert blocked.outcome == "error"
+    assert not (tmp_path / ".sanka/go/golang").exists()
+    (tmp_path / "app.py").write_text(source(framework))
+    output = apply(tmp_path, framework, "fiber")
+    assert (output / "go.sum").is_file()
+    assert (
+        handle(
+            dataclasses.replace(
+                req,
+                command="apply",
+                reviewed_plan_hash="runtime-reviewed-plan",
+                configuration=req.configuration | {"extension_plan_hash": old_hash},
+            )
+        ).outcome
+        == "error"
+    )
+
+
+@pytest.mark.parametrize("addition", ["import os", "def helper():\n    return 1", "app = None"])
+def test_unknown_behavior_blocks(tmp_path: Path, addition: str) -> None:
+    (tmp_path / "app.py").write_text(source("flask") + "\n" + addition)
+    plan = handle(request(tmp_path))
+    assert plan.outcome == "success"
+    assert plan.data["files"] == {}
+
+
+def test_profiles_and_source_boundaries(tmp_path: Path) -> None:
+    assert configuration({"source_framework": "flask"})["target_framework"] == "fiber"
+    for config in (
+        {"source_framework": "django"},
+        {"source_framework": "flask", "database_layer": "pgx"},
+        {"source_framework": "flask", "target_framework": "unknown"},
+        {"source_framework": "flask", "source_file": "../app.py"},
+    ):
+        with pytest.raises(ValueError):
+            configuration(config)
+    (tmp_path / "app.py").write_text(source("flask"))
+    (tmp_path / "models.py").write_text("raise RuntimeError('must not execute')")
+    assert capture(tmp_path, configuration({"source_framework": "flask"}))["gaps"]
+    (tmp_path / "models.py").unlink()
+    (tmp_path / "link.py").symlink_to(tmp_path / "app.py")
+    assert handle(request(tmp_path)).outcome == "error"
+
+
+@pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="set SANKA_GO_TESTS=1 for Go matrix")
+@pytest.mark.parametrize("framework", SOURCES)
+@pytest.mark.parametrize("target", TARGETS)
+def test_source_go_parity(tmp_path: Path, framework: str, target: str) -> None:
+    (tmp_path / "app.py").write_text(source(framework))
+    probe = (
+        """import json
+from django.conf import settings
+settings.configure(SECRET_KEY="fixture", ROOT_URLCONF="app", ALLOWED_HOSTS=["testserver"],
+ REST_FRAMEWORK={"UNAUTHENTICATED_USER": None}, INSTALLED_APPS=[])
+import django
+django.setup()
+from django.test import Client
+response = Client().get("/health")
+print(json.dumps({"status": response.status_code, "body": response.json()}))
+"""
+        if framework == "drf"
+        else (
+            """import json
+from app import app
+from fastapi.testclient import TestClient
+response = TestClient(app).get("/health")
+print(json.dumps({"status": response.status_code, "body": response.json()}))
+"""
+            if framework == "fastapi"
+            else """import json
+from app import app
+response = app.test_client().get("/health")
+print(json.dumps({"status": response.status_code, "body": response.json}))
+"""
+        )
+    )
+    observed = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tmp_path,
+        check=True,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+    expected = json.loads(observed.stdout)
+    assert expected == {"status": 200, "body": PAYLOAD}
+    output = apply(tmp_path, framework, target)
+    (output / "expected.json").write_text(json.dumps(expected["body"]))
+    perform = (
+        """response, err := NewApp().Test(request)
+    if err != nil { t.Fatal(err) }
+    defer response.Body.Close()
+    status := response.StatusCode
+    body, err := io.ReadAll(response.Body)
+    if err != nil { t.Fatal(err) }"""
+        if target == "fiber"
+        else """recorder := httptest.NewRecorder()
+    NewApp().ServeHTTP(recorder, request)
+    status := recorder.Code
+    body := recorder.Body.Bytes()"""
+    )
+    io_import = '"io"' if target == "fiber" else ""
+    (output / "parity_test.go").write_text(f"""package backend
+import ("testing"; "net/http/httptest"; "encoding/json"; "os"; "reflect"; {io_import})
+func TestSourceParity(t *testing.T) {{
+    request := httptest.NewRequest("GET", "/health", nil)
+    {perform}
+    if status != {expected["status"]} {{ t.Fatalf("status: %d", status) }}
+    expectedBytes, err := os.ReadFile("expected.json")
+    if err != nil {{ t.Fatal(err) }}
+    var actual, expected any
+    if err := json.Unmarshal(body, &actual); err != nil {{ t.Fatal(err) }}
+    if err := json.Unmarshal(expectedBytes, &expected); err != nil {{ t.Fatal(err) }}
+    if !reflect.DeepEqual(actual, expected) {{ t.Fatalf("body: %s", body) }}
+}}
+""")
+    result = subprocess.run(
+        ["go", "test", "-mod=readonly", "-p=2", "./..."],
+        cwd=output,
+        env=os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"},
+        text=True,
+        capture_output=True,
+        timeout=240,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_plan_tampering_and_review_attestation(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(source("flask"))
+    req = request(tmp_path)
+    plan = handle(req)
+    approved = dataclasses.replace(
+        req,
+        command="apply",
+        reviewed_plan_hash="runtime-review",
+        configuration=req.configuration | {"extension_plan_hash": plan.data["plan_hash"]},
+    )
+    assert handle(dataclasses.replace(approved, reviewed_plan_hash=None)).outcome == "error"
+    stored = tmp_path / ".sanka/go/plan.json"
+    stored.write_text("{}")
+    assert handle(approved).outcome == "error"
+    assert not (tmp_path / ".sanka/go/golang").exists()
+    handle(req)
+    assert (
+        handle(
+            dataclasses.replace(
+                approved, configuration=approved.configuration | {"target_framework": "chi"}
+            )
+        ).outcome
+        == "error"
+    )
+
+
+def test_subprocess_protocol(tmp_path: Path) -> None:
+    from sanka_extensions.code import encode_request
+
+    (tmp_path / "app.py").write_text(source("fastapi"))
+    result = subprocess.run(
+        [sys.executable, "-m", "sanka_extension_python_to_golang"],
+        input=json.dumps(encode_request(request(tmp_path, "fastapi"))),
+        text=True,
+        capture_output=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    response = json.loads(result.stdout)
+    assert response["outcome"] == "success"
+    assert response["data"]["files"]["go.sum"]
+    approved = dataclasses.replace(
+        request(tmp_path, "fastapi"),
+        command="apply",
+        reviewed_plan_hash="runtime-review",
+        configuration={
+            "source_framework": "fastapi",
+            "extension_plan_hash": response["data"]["plan_hash"],
+        },
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "sanka_extension_python_to_golang"],
+        input=json.dumps(encode_request(approved)),
+        text=True,
+        capture_output=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    output = Path(json.loads(result.stdout)["data"]["output"])
+    assert (output / "app.go").is_file()
+
+
+def test_plan_is_independent_of_checkout_location(tmp_path: Path) -> None:
+    plans = []
+    for name in ("first", "second"):
+        root = tmp_path / name
+        root.mkdir()
+        (root / "app.py").write_text(source("flask"))
+        plans.append(handle(request(root)).data)
+    assert plans[0] == plans[1]
