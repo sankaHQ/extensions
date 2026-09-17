@@ -14,6 +14,7 @@ PACKAGES = ROOT / "packages"
 SDK_NAME = "sanka-connector-sdk"
 EXTENSION_SDK_NAME = "sanka-extension-sdk"
 EXTENSION_NAMES = ("sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask")
+GO_EXTENSION_NAME = "sanka-extension-python-to-golang"
 FLOW_EXTENSION_NAME = "sanka-extension-business-flows"
 HOSTED_SYSTEM_PROVIDERS = frozenset({"hubspot", "salesforce", "sendgrid"})
 
@@ -104,10 +105,17 @@ def main() -> int:
         extension_sdk,
         *(PACKAGES / name for name in EXTENSION_NAMES),
         PACKAGES / FLOW_EXTENSION_NAME,
+        PACKAGES / GO_EXTENSION_NAME,
     ):
         own_module = package.name.replace("-", "_")
         allowed_modules: tuple[str, ...] = (own_module,)
         project = _project(package)
+        if package.name == GO_EXTENSION_NAME:
+            allowed_modules += ("sanka_extension_sdk", "sanka_extensions")
+            if project.get("dependencies") != ["sanka-extension-sdk==0.1.0a4"]:
+                errors.append("Python to Golang depends only on the published SDK a4")
+            if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
+                errors.append("Python to Golang requires its isolated executable")
         if package.name == FLOW_EXTENSION_NAME:
             if project.get("dependencies") != ["sanka-extension-sdk==0.1.0a5"]:
                 errors.append("Business Flow definitions depend only on the published SDK a5")

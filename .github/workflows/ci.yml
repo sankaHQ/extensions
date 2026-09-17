@@ -123,3 +123,32 @@ jobs:
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_csrf.py
           packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
+
+  python-to-golang:
+    name: Python to Golang endpoint qualification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26.5"
+          cache: false
+      - run: uv sync --frozen --all-packages
+      - run: uv build --wheel --package sanka-extension-python-to-golang --out-dir release/python-to-golang
+      - name: Install the actual candidate wheel
+        run: |
+          uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/python-to-golang"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}]'
+          uv --no-config pip install --reinstall --no-index --find-links release/python-to-golang release/python-to-golang/sanka_extension_python_to_golang-*.whl
+          uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_python_to_golang as m; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve())"
+      - name: Compare all three Python sources with all four Go targets
+        env:
+          SANKA_GO_TESTS: "1"
+          GOTOOLCHAIN: local
+          GOWORK: "off"
+          GOMAXPROCS: "2"
+        run: uv run --no-sync python -m pytest packages/sanka-extension-python-to-golang/tests -q
