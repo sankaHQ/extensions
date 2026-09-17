@@ -167,6 +167,7 @@ def orders(root):
 def test_representative_backend_protocol(tmp_path, monkeypatch, database_backend, profile):
     if database_backend == "postgresql" and not os.environ.get(POSTGRES_ENV):
         pytest.skip(f"set {POSTGRES_ENV} to a dedicated PostgreSQL admin DSN")
+    monkeypatch.delenv("SANKA_TEST_DB", raising=False)
     settings_module, generation, scenarios, seed = profile(tmp_path)
     configure_database(tmp_path / (settings_module.replace(".", "/") + ".py"), database_backend)
     if profile is sessions:
@@ -178,6 +179,7 @@ def test_representative_backend_protocol(tmp_path, monkeypatch, database_backend
     config = {"settings_module": settings_module, "orm": "sqlalchemy", "generation": generation}
     scanned = call(tmp_path, "scan", config)
     assert scanned["outcome"] == "success", scanned
+    assert scanned["data"]["database_schema"]["dialect"] == database_backend
     planned = call(tmp_path, "plan", config)
     assert planned["outcome"] == "success", planned
     plan = planned["data"]
