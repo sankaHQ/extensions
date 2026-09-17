@@ -123,6 +123,11 @@ def _payload(
 ) -> dict[str, Any]:
     if node.type_params:
         raise ValueError("generic functions require additional capture")
+    if node.returns:
+        raise ValueError("response validation requires additional capture")
+    read = capture_read(node, framework, models)
+    if read is not None:
+        return {"read": read}
     args = node.args
     if (
         args.defaults
@@ -136,11 +141,8 @@ def _payload(
     expected = ["request"] if framework == "drf" else []
     if [arg.arg for arg in args.args] != expected:
         raise ValueError("request parameters require additional capture")
-    if node.returns or any(arg.annotation for arg in args.args):
+    if any(arg.annotation for arg in args.args):
         raise ValueError("type-driven response/request validation requires additional capture")
-    read = capture_read(node, framework, models)
-    if read is not None:
-        return {"read": read}
     if len(node.body) != 1 or not isinstance(node.body[0], ast.Return):
         raise ValueError("business logic and side effects are not qualified yet")
     value = node.body[0].value
@@ -220,6 +222,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                         "sqlalchemy.orm": {"Session"},
                     }
                 )
+            if framework == "flask":
+                allowed_imports["flask"].add("request")
             # Preserve symbol provenance: a model called Session/Response must not
             # satisfy the framework constructor or ORM session contract.
             reserved = {name for names in allowed_imports.values() for name in names}
@@ -233,7 +237,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     for node in tree.body:
         available = imports | assignments.keys() | functions.keys() | {"__name__"}
         if models and isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            available |= {"list", "dict", "row", "session"}
+            available |= {"list", "dict", "row", "session", "str"}
+            available |= {arg.arg for arg in node.args.args}
         unresolved = {
             item.id
             for item in ast.walk(node)
@@ -379,7 +384,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             )
         if (
             any("read" in route for route in routes)
-            and {"list", "dict", "row", "session"} & functions.keys()
+            and {"list", "dict", "row", "session", "str"} & functions.keys()
         ):
             raise ValueError("query symbols must not be shadowed")
         if engine is not None and not any("read" in route for route in routes):
