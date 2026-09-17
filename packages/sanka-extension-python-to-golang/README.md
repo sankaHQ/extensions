@@ -205,3 +205,9 @@ all single-byte encodings and malformed UTF-8 boundaries with real Python client
 
 Do not infer support from a framework appearing in the target choices: supported
 behavior is defined by the capture gaps and independently exercised contracts.
+
+The extension accepts `target` as an alias for `target_framework` for CLI integration.
+Both must agree when supplied together; invalid or conflicting values are rejected.
+If neither is supplied, Fiber remains the default. Both spellings produce the same
+normalized configuration and extension plan hash. CLI forwarding is a separate runtime
+change; this alias alone does not enable `--to` forwarding in existing CLI versions.
