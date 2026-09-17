@@ -15,6 +15,8 @@ SDK_NAME = "sanka-connector-sdk"
 EXTENSION_SDK_NAME = "sanka-extension-sdk"
 EXTENSION_NAMES = ("sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask")
 GO_EXTENSION_NAME = "sanka-extension-python-to-golang"
+RUST_EXTENSION_NAME = "sanka-extension-typescript-to-rust"
+TS_CAPTURE_NAME = "sanka-ts-capture"
 FLOW_EXTENSION_NAME = "sanka-extension-business-flows"
 HOSTED_SYSTEM_PROVIDERS = frozenset({"hubspot", "salesforce", "sendgrid"})
 
@@ -106,6 +108,7 @@ def main() -> int:
         *(PACKAGES / name for name in EXTENSION_NAMES),
         PACKAGES / FLOW_EXTENSION_NAME,
         PACKAGES / GO_EXTENSION_NAME,
+        PACKAGES / RUST_EXTENSION_NAME,
     ):
         own_module = package.name.replace("-", "_")
         allowed_modules: tuple[str, ...] = (own_module,)
@@ -116,6 +119,18 @@ def main() -> int:
                 errors.append("Python to Golang depends only on the published SDK a4")
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
                 errors.append("Python to Golang requires its isolated executable")
+        if package.name == RUST_EXTENSION_NAME:
+            allowed_modules += ("sanka_extension_sdk", "sanka_extensions", "sanka_ts_capture")
+            if project.get("dependencies") != [
+                "sanka-extension-sdk==0.1.0a4",
+                "sanka-ts-capture==0.1.0a1",
+            ]:
+                errors.append(
+                    "TypeScript to Rust depends only on the published SDK a4 "
+                    "and the TypeScript capture helper"
+                )
+            if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
+                errors.append("TypeScript to Rust requires its isolated executable")
         if package.name == FLOW_EXTENSION_NAME:
             if project.get("dependencies") != ["sanka-extension-sdk==0.1.0a5"]:
                 errors.append("Business Flow definitions depend only on the published SDK a5")
@@ -167,6 +182,31 @@ def main() -> int:
                 errors.append(
                     f"shared code helper imports runtime or extension: {source}: {module}"
                 )
+
+    ts_capture = PACKAGES / TS_CAPTURE_NAME
+    if _project(ts_capture).get("dependencies") != []:
+        errors.append(f"{TS_CAPTURE_NAME} must have zero installed runtime dependencies")
+    for source in (ts_capture / "src").rglob("*.py"):
+        if not source.read_text().startswith("# SPDX-License-Identifier: Apache-2.0"):
+            errors.append(f"missing Apache-2.0 SPDX header: {source.relative_to(ROOT)}")
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        for node in ast.walk(tree):
+            # Relative imports stay inside the helper; absolute ones must be stdlib.
+            if isinstance(node, ast.ImportFrom) and node.level:
+                continue
+            names = (
+                [alias.name for alias in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module]
+                if isinstance(node, ast.ImportFrom) and node.module
+                else []
+            )
+            for module in names:
+                if module.split(".")[0] not in sys.stdlib_module_names:
+                    errors.append(
+                        f"TypeScript capture must use only stdlib: "
+                        f"{source.relative_to(ROOT)}: {module}"
+                    )
 
     replay = PACKAGES / "sanka-drf-replay"
     if _project(replay).get("dependencies") != []:
