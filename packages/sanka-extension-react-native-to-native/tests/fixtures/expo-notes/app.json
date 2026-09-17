@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Notes",
+    "slug": "expo-notes",
+    "scheme": "notes",
+    "version": "1.0.0",
+    "ios": {
+      "bundleIdentifier": "com.example.notes"
+    },
+    "android": {
+      "package": "com.example.notes"
+    },
+    "plugins": [
+      "expo-router"
+    ]
+  }
+}

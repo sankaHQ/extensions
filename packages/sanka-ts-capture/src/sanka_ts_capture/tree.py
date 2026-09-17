@@ -93,13 +93,13 @@ def property_chain(node: Node) -> tuple[str, ...] | None:
     return None
 
 
-def call_parts(node: Node) -> tuple[Node, list[Node]] | None:
-    """Return ``(callee, arguments)`` for a plain call without type arguments."""
+def call_parts(node: Node, *, allow_type_arguments: bool = False) -> tuple[Node, list[Node]] | None:
+    """Return ``(callee, arguments)`` for a plain call; type arguments only when allowed."""
     node = unparenthesize(node)
     if (
         kind(node) != "CallExpression"
         or field(node, "questionDotToken") is not None
-        or field_list(node, "typeArguments")
+        or (field_list(node, "typeArguments") and not allow_type_arguments)
     ):
         return None
     callee = field(node, "expression")

@@ -21,6 +21,7 @@ members = [
     "sanka-extension-drf-to-fastapi",
     "sanka-extension-drf-to-flask",
     "sanka-extension-python-to-golang",
+    "sanka-extension-react-native-to-native",
     "sanka-extension-sdk",
     "sanka-extension-typescript-to-rust",
     "sanka-extensions-workspace",
@@ -1266,6 +1267,21 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
+
+[[package]]
+name = "sanka-extension-react-native-to-native"
+version = "0.1.0a1"
+source = { editable = "packages/sanka-extension-react-native-to-native" }
+dependencies = [
+    { name = "sanka-extension-sdk" },
+    { name = "sanka-ts-capture" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+    { name = "sanka-ts-capture", editable = "packages/sanka-ts-capture" },
+]
 
 [[package]]
 name = "sanka-extension-sdk"

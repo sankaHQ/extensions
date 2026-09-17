@@ -16,6 +16,7 @@ EXTENSION_SDK_NAME = "sanka-extension-sdk"
 EXTENSION_NAMES = ("sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask")
 GO_EXTENSION_NAME = "sanka-extension-python-to-golang"
 RUST_EXTENSION_NAME = "sanka-extension-typescript-to-rust"
+RN_EXTENSION_NAME = "sanka-extension-react-native-to-native"
 TS_CAPTURE_NAME = "sanka-ts-capture"
 FLOW_EXTENSION_NAME = "sanka-extension-business-flows"
 HOSTED_SYSTEM_PROVIDERS = frozenset({"hubspot", "salesforce", "sendgrid"})
@@ -109,6 +110,7 @@ def main() -> int:
         PACKAGES / FLOW_EXTENSION_NAME,
         PACKAGES / GO_EXTENSION_NAME,
         PACKAGES / RUST_EXTENSION_NAME,
+        PACKAGES / RN_EXTENSION_NAME,
     ):
         own_module = package.name.replace("-", "_")
         allowed_modules: tuple[str, ...] = (own_module,)
@@ -119,6 +121,18 @@ def main() -> int:
                 errors.append("Python to Golang depends only on the published SDK a4")
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
                 errors.append("Python to Golang requires its isolated executable")
+        if package.name == RN_EXTENSION_NAME:
+            allowed_modules += ("sanka_extension_sdk", "sanka_extensions", "sanka_ts_capture")
+            if project.get("dependencies") != [
+                "sanka-extension-sdk==0.1.0a4",
+                "sanka-ts-capture==0.1.0a1",
+            ]:
+                errors.append(
+                    "React Native to native depends only on the published SDK a4 "
+                    "and the TypeScript capture helper"
+                )
+            if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
+                errors.append("React Native to native requires its isolated executable")
         if package.name == RUST_EXTENSION_NAME:
             allowed_modules += ("sanka_extension_sdk", "sanka_extensions", "sanka_ts_capture")
             if project.get("dependencies") != [
