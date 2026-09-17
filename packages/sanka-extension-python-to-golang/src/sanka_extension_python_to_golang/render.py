@@ -7,6 +7,7 @@ from importlib.resources import files
 from typing import Any
 
 from .capture import canonical
+from .database import render_database
 
 MODULES = {
     "fiber": "github.com/gofiber/fiber/v3",
@@ -67,10 +68,17 @@ func NewApp() {return_type} {{
 }}
 '''
     # A library-shaped app avoids inventing deployment settings during endpoint qualification.
-    lock = files("sanka_extension_python_to_golang").joinpath("locks", target)
-    return {
+    lock_name = target + (
+        "-postgresql" if captured["configuration"]["database_layer"] == "pgx" else ""
+    )
+    lock = files("sanka_extension_python_to_golang").joinpath("locks", lock_name)
+    result = {
         "app.go": source,
         "go.mod": lock.joinpath("go.mod").read_text(),
         "go.sum": lock.joinpath("go.sum").read_text(),
         "contract.json": canonical(captured) + "\n",
     }
+
+    if captured["configuration"]["database_layer"] == "pgx":
+        result.update(render_database(captured))
+    return result

@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .models import capture_models
+
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
 VERSION = "0.1.0a1"
@@ -50,6 +52,10 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
         "source_file",
         "database_layer",
         "extension_plan_hash",
+        "database_dialect",
+        "migration_tool",
+        "schema_mode",
+        "models_file",
     }
     if set(raw) - allowed:
         raise ValueError("unknown configuration fields: " + ", ".join(sorted(set(raw) - allowed)))
@@ -65,8 +71,29 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
         raise ValueError("source_framework must be drf, fastapi or flask")
     if result["target_framework"] not in TARGETS:
         raise ValueError("target_framework must be fiber, chi, mux or gin")
-    if result["database_layer"] != "none":
-        raise ValueError("database-backed Go generation is not qualified yet; cannot generate it")
+    if result["database_layer"] not in {"none", "pgx"}:
+        raise ValueError("database_layer must be none or pgx")
+    database_keys = {"database_dialect", "migration_tool", "schema_mode", "models_file"}
+    if result["database_layer"] == "none" and database_keys & raw.keys():
+        raise ValueError("database options require database_layer=pgx")
+    if result["database_layer"] == "pgx":
+        for key, default in {
+            "database_dialect": "postgresql",
+            "migration_tool": "goose",
+            "schema_mode": "empty",
+            "models_file": "models.py",
+        }.items():
+            value = raw.get(key, default)
+            if type(value) is not str or (key != "models_file" and value != default):
+                raise ValueError(f"only {key}={default} is qualified")
+            result[key] = value
+        model_file = result["models_file"]
+        if (
+            Path(model_file).name != model_file
+            or not model_file.endswith(".py")
+            or model_file == result["source_file"]
+        ):
+            raise ValueError("models_file must be a distinct top-level Python filename")
     filename = result["source_file"]
     if Path(filename).name != filename or not filename.endswith(".py"):
         raise ValueError("source_file must be a top-level Python filename")
@@ -156,7 +183,11 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 raise ValueError("source exceeds experimental capture limits")
             content = source.read_bytes()
             records[relative.as_posix()] = hashlib.sha256(content).hexdigest()
-            if source.suffix == ".py" and source != path:
+            if (
+                source.suffix == ".py"
+                and source != path
+                and source != root / config.get("models_file", "")
+            ):
                 gaps.append(f"{relative}: additional Python modules require whole-project capture")
     tree = ast.parse(path.read_text(), filename=filename)
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
@@ -305,7 +336,13 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         gaps.append(str(error))
     if not routes:
         gaps.append("no qualified endpoints")
-    return {
+    models = []
+    if config["database_layer"] == "pgx":
+        try:
+            models = capture_models(root / config["models_file"], framework)
+        except (ValueError, TypeError, OSError, SyntaxError) as error:
+            gaps.append("models: " + str(error))
+    result = {
         "schema": "sanka.python-to-golang.capture/v1",
         "source_digest": digest(records),
         "configuration": config,
@@ -314,3 +351,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         "scope": "literal public JSON GET endpoints",
         "complete_backend": False,
     }
+
+    if config["database_layer"] == "pgx":
+        result["models"] = models
+        result["scope"] = "empty PostgreSQL schema baseline and literal public JSON GET endpoints"
+    return result

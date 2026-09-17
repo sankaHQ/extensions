@@ -98,7 +98,9 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 staging = Path(tempfile.mkdtemp(prefix=".golang-", dir=artifacts))
                 try:
                     for filename, content in generated.items():
-                        (staging / filename).write_text(content)
+                        destination = staging / filename
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        destination.write_text(content)
                     # mkdir reserves the destination without replacing concurrent work.
                     output.mkdir()
                     for source in staging.iterdir():
