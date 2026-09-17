@@ -124,7 +124,7 @@ def widgets():
 
 For Flask, wrap the returned list comprehension in `jsonify(...)`. Framework
 imports/app construction still follow the literal endpoint profile. This is not
-Flask-SQLAlchemy extension capture. Joins, filters, partial projections, dynamic
+Flask-SQLAlchemy extension capture. Joins, unsupported filters, partial projections, dynamic
 pagination, writes, custom sessions, and async database handlers block generation.
 
 When a captured route reads data, generated `NewApp(pool *pgxpool.Pool)` takes an
@@ -152,6 +152,43 @@ empty/populated results, nulls, Unicode, integer boundaries, order, source limit
 fixture mismatch detection, and safe database-error responses for all twelve
 source/target combinations.
 
+## Request-driven string filters
+
+Bounded reads can include one exact equality predicate on a captured string or
+text field, including nullable text fields. The request supplies a string;
+matching database NULL values is not part of this profile. Source forms are:
+
+- DRF: insert `.filter(name=request.query_params.get("q", "first"))` before
+  `.order_by(...)`.
+- Flask: import `request` from Flask and insert
+  `.where(Widget.name == request.args.get("q", "first"))` before `.order_by(...)`.
+- FastAPI: declare `q: str = "first"` in the synchronous handler signature and
+  insert `.where(Widget.name == q)` before `.order_by(...)`.
+
+The column name, query parameter name, and default are captured from the source;
+these examples are not reserved names. DRF and Flask require an explicit string
+default in `get`; FastAPI requires a plain `str` annotation and string default.
+Extra parameters, integer/boolean conversion, optional/null query values, custom
+query validators, additional predicates, and alternative comparison operators
+remain blockers. Unknown behavior is never replaced with an unfiltered read.
+
+Generated SQL binds the request value as a PostgreSQL parameter. User values are
+never interpolated into SQL. The source row limit and primary-key ordering still
+apply. Missing and empty query values remain distinct. Repeated parameters use
+Flask's first value or DRF/FastAPI's last value. The generated parser also
+preserves each source's percent-decoding and malformed UTF-8 behavior; it does
+not inherit whichever query parser the selected Go router happens to use.
+
+Public `test`/`verify` expand filtered routes into deterministic request cases:
+missing/empty values, repeated keys, Unicode, spaces/plus signs, percent escapes,
+semicolons, and SQL-looking text. Verification compares actual source and target
+HTTP responses for those requests against the supplied fixtures. Populate fixture
+values to exercise matching and non-matching rows; an empty fixture proves only
+empty-result behavior. CI seeds both varchar and nullable-text predicates,
+checks filter/order/limit behavior and unchanged row counts, and verifies that a
+changed candidate fixture is detected. Native parser tests additionally compare
+all single-byte encodings and malformed UTF-8 boundaries with real Python clients.
+
 ## Remaining backend work
 
 1. Capture whole projects into a framework-neutral contract, with stable model,
@@ -159,7 +196,7 @@ source/target combinations.
 2. Extend the initial pgx/Goose profile to richer schemas, data migration and
    transactional CRUD. Qualify each supported combination against a real database before
    advertising it; reject incompatible combinations.
-3. Preserve validation/errors, auth/permissions, middleware, filtering,
+3. Preserve validation/errors, auth/permissions, middleware, richer filtering,
    pagination, transactions and configuration. Introduce services only for
    captured business orchestration and repositories only for persistence needs.
 4. Extend source/Go replay through the public lifecycle to cover failure paths,
