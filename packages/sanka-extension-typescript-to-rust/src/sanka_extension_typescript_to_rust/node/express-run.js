@@ -67,7 +67,9 @@ function main() {
       console.error(String((error && error.message) || error));
       process.exitCode = 1;
     } finally {
-      server.close();
+      // Exit explicitly: a source application holding a database pool would otherwise
+      // keep the event loop alive after the server closes.
+      server.close(() => process.exit());
     }
   });
 }
