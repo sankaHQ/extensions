@@ -22,7 +22,7 @@ recomputes the plan from the current source and configuration, and refuses chang
 plans or existing output. Artifacts must be inside the project's `.sanka`
 directory; output is `golang/` within that artifact directory.
 
-Source is parsed without importing or executing it. The current capture accepts
+`scan`, `plan`, and `apply` parse source without importing or executing it. The current capture accepts
 one top-level Python module and rejects unknown imports, decorators, configuration,
 request parameters, dynamic handlers, additional Python modules, and source
 symlinks. DRF endpoints require explicit public permission, no authentication,
@@ -35,8 +35,23 @@ environment. No services or repositories are generated for stateless handlers.
 The current integration matrix compares successful JSON GET responses with the
 actual Python framework clients across all twelve source/target combinations.
 It does not establish default errors, HEAD/OPTIONS, redirects, middleware,
-content negotiation, deployment, or whole-backend parity. Runtime `test` and
-`verify` return unsupported until a complete replay contract is implemented.
+content negotiation, deployment, or whole-backend parity.
+
+`test` runs Go tests and exercises every captured GET route in a temporary copy of
+its generated package. `verify` additionally executes the captured Python module
+with its framework test client and compares status, parsed JSON body, and media
+type. Both require an unchanged saved plan, generated output, and Go 1.26.5 on
+PATH. The extension interpreter needs the source framework and its test-client
+dependencies installed. Go may download the checksum-pinned dependencies.
+
+Replay executes source and candidate code; the temporary directory is not a
+security sandbox. It does not start listening servers or alter candidate files.
+For DRF, the qualified fixture settings use no installed apps and no unauthenticated
+user model; external application settings and middleware are not captured.
+Reports include source and candidate digests. Manual handler repairs are tested,
+but changes to Go locks or the captured contract are rejected. A mismatch returns
+an error with a report path. Each rerun invalidates its old report first, so a
+failed rerun cannot leave stale passing evidence.
 
 ## Remaining backend work
 
@@ -48,7 +63,7 @@ content negotiation, deployment, or whole-backend parity. Runtime `test` and
 3. Preserve validation/errors, auth/permissions, middleware, filtering,
    pagination, transactions and configuration. Introduce services only for
    captured business orchestration and repositories only for persistence needs.
-4. Add source/Go replay through the public lifecycle, including failure paths,
+4. Extend source/Go replay through the public lifecycle to cover failure paths,
    database effects, rollback, generated deployment entrypoints and shutdown.
 5. Package/install verification and CI must pass before catalog publication.
 
