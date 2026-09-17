@@ -18,6 +18,7 @@ from sanka_extensions.code import (
 
 from .capture import VERSION, canonical, capture, configuration, digest
 from .render import render
+from .replay import replay
 
 
 def _safe(root: Path, path: Path) -> Path:
@@ -38,12 +39,15 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
         artifacts = _safe(root, Path(request.artifact_root))
         if not artifacts.is_relative_to(root / ".sanka"):
             raise ValueError("artifact_root must be under the project's .sanka directory")
+        if request.command in {"test", "verify"}:
+            # Never leave a previous passing report after a failed rerun.
+            _safe(root, artifacts / f"{request.command}.json").unlink(missing_ok=True)
         config = configuration(request.configuration)
         captured = capture(root, config)
         if request.command == "scan":
             data = captured
             name = "scan.json"
-        elif request.command in {"plan", "apply"}:
+        elif request.command in {"plan", "apply", "test", "verify"}:
             generated = render(captured) if not captured["gaps"] else {}
             data = {
                 "schema": "sanka.python-to-golang.plan/v1",
@@ -54,6 +58,30 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             plan_hash = digest(data)
             data["plan_hash"] = plan_hash
             name = "plan.json"
+            if request.command in {"test", "verify"}:
+                saved = _safe(root, artifacts / name)
+                if not saved.is_file() or json.loads(saved.read_text()) != data:
+                    raise ValueError("source or configuration differs from the applied plan")
+                output = _safe(root, artifacts / "golang")
+                report = replay(root, output, captured, request.command)
+                report["plan_hash"] = plan_hash
+                destination = _safe(root, artifacts / f"{request.command}.json")
+                destination.write_text(canonical(report) + "\n")
+                if not report["ok"]:
+                    return failure_response(
+                        request,
+                        code="SANKA_EXTENSION_PARITY_FAILED",
+                        message="Python and Go responses differ; inspect verify.json",
+                        details={"report": str(destination)},
+                    )
+                return success_response(
+                    request,
+                    data=report,
+                    artifacts=[str(destination)],
+                    limitations=[
+                        "Only captured GET contracts were exercised; not cutover readiness."
+                    ],
+                )
             if request.command == "apply":
                 if captured["gaps"]:
                     raise ValueError("capture has unsupported behavior; inspect plan gaps")
@@ -87,7 +115,7 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             return failure_response(
                 request,
                 code="SANKA_EXTENSION_UNSUPPORTED_COMMAND",
-                message="Runtime test/verify is not qualified; use the integration suite.",
+                message=f"Unsupported command: {request.command}",
             )
         artifacts.mkdir(parents=True, exist_ok=True)
         destination = _safe(root, artifacts / name)

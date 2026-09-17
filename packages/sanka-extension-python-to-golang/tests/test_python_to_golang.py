@@ -16,7 +16,11 @@ from sanka_extension_python_to_golang.capture import SOURCES, TARGETS, capture, 
 
 from sanka_extensions.code import ExtensionRequest
 
-PAYLOAD = {"message": 'hello "world" 日本語', "items": [1, True, None], "nested": {"ok": False}}
+PAYLOAD = {
+    "message": 'hello "world" 日本語',
+    "items": [1, True, None, 9223372036854775809],
+    "nested": {"ok": False},
+}
 
 
 def source(framework: str) -> str:
@@ -190,44 +194,21 @@ print(json.dumps({"status": response.status_code, "body": response.json}))
     expected = json.loads(observed.stdout)
     assert expected == {"status": 200, "body": PAYLOAD}
     output = apply(tmp_path, framework, target)
-    (output / "expected.json").write_text(json.dumps(expected["body"]))
-    perform = (
-        """response, err := NewApp().Test(request)
-    if err != nil { t.Fatal(err) }
-    defer response.Body.Close()
-    status := response.StatusCode
-    body, err := io.ReadAll(response.Body)
-    if err != nil { t.Fatal(err) }"""
-        if target == "fiber"
-        else """recorder := httptest.NewRecorder()
-    NewApp().ServeHTTP(recorder, request)
-    status := recorder.Code
-    body := recorder.Body.Bytes()"""
-    )
-    io_import = '"io"' if target == "fiber" else ""
-    (output / "parity_test.go").write_text(f"""package backend
-import ("testing"; "net/http/httptest"; "encoding/json"; "os"; "reflect"; {io_import})
-func TestSourceParity(t *testing.T) {{
-    request := httptest.NewRequest("GET", "/health", nil)
-    {perform}
-    if status != {expected["status"]} {{ t.Fatalf("status: %d", status) }}
-    expectedBytes, err := os.ReadFile("expected.json")
-    if err != nil {{ t.Fatal(err) }}
-    var actual, expected any
-    if err := json.Unmarshal(body, &actual); err != nil {{ t.Fatal(err) }}
-    if err := json.Unmarshal(expectedBytes, &expected); err != nil {{ t.Fatal(err) }}
-    if !reflect.DeepEqual(actual, expected) {{ t.Fatalf("body: %s", body) }}
-}}
-""")
-    result = subprocess.run(
-        ["go", "test", "-mod=readonly", "-p=2", "./..."],
-        cwd=output,
-        env=os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"},
-        text=True,
-        capture_output=True,
-        timeout=240,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+    before = {path.name: path.read_bytes() for path in output.iterdir()}
+    tested = handle(dataclasses.replace(request(tmp_path, framework, target), command="test"))
+    assert tested.outcome == "success", tested.error
+    verified = handle(dataclasses.replace(request(tmp_path, framework, target), command="verify"))
+    assert verified.outcome == "success", verified.error
+    assert verified.data["source"] == [
+        {
+            "path": "/health",
+            "status": expected["status"],
+            "body": expected["body"],
+            "media_type": "application/json",
+        }
+    ]
+    assert verified.data["candidate"] == verified.data["source"]
+    assert {path.name: path.read_bytes() for path in output.iterdir()} == before
 
 
 def test_plan_tampering_and_review_attestation(tmp_path: Path) -> None:
@@ -300,3 +281,39 @@ def test_plan_is_independent_of_checkout_location(tmp_path: Path) -> None:
         (root / "app.py").write_text(source("flask"))
         plans.append(handle(request(root)).data)
     assert plans[0] == plans[1]
+
+
+@pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="set SANKA_GO_TESTS=1 for Go replay")
+def test_replay_detects_candidate_changes(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(source("flask"))
+    output = apply(tmp_path, "flask", "fiber")
+    app = output / "app.go"
+    # Python equality treats True == 1; JSON contracts must preserve the type.
+    app.write_text(app.read_text().replace("[1,true,null", "[1,1,null"))
+    req = dataclasses.replace(request(tmp_path), command="verify")
+    response = handle(req)
+    assert response.outcome == "error"
+    assert response.error.code == "SANKA_EXTENSION_PARITY_FAILED"
+    report = json.loads((tmp_path / ".sanka/go/verify.json").read_text())
+    assert report["ok"] is False
+    assert report["candidate_digest"]
+    assert json.dumps(report["source"]) != json.dumps(report["candidate"])
+    lock = output / "go.mod"
+    lock.write_text(lock.read_text() + "\n// changed\n")
+    response = handle(req)
+    assert response.outcome == "error"
+    assert "go.mod differs" in response.error.message
+    assert not (tmp_path / ".sanka/go/verify.json").exists()
+
+
+def test_replay_requires_current_applied_plan(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(source("flask"))
+    req = dataclasses.replace(request(tmp_path), command="verify")
+    assert handle(req).outcome == "error"
+    output = apply(tmp_path, "flask", "fiber")
+    extra = output / "extra.go"
+    extra.symlink_to(tmp_path / "app.py")
+    assert "regular files" in handle(req).error.message
+    extra.unlink()
+    (tmp_path / "app.py").write_text(source("flask") + "\n# changed\n")
+    assert "differs from the applied plan" in handle(req).error.message
