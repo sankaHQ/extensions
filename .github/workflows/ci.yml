@@ -168,3 +168,39 @@ jobs:
           GOWORK: "off"
           GOMAXPROCS: "2"
         run: uv run --no-sync python -m pytest packages/sanka-extension-python-to-golang/tests -q
+
+  typescript-to-rust:
+    name: TypeScript to Rust endpoint qualification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.2"
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-17
+        with:
+          toolchain: "1.93.1"
+          components: rustfmt
+      - run: uv sync --frozen --all-packages
+      - name: Fetch the pinned TypeScript compiler bundle (digest-checked, not committed)
+        run: uv run python scripts/fetch_typescript_bundle.py
+      - run: uv build --wheel --package sanka-ts-capture --out-dir release/typescript-to-rust
+      - run: uv build --wheel --package sanka-extension-typescript-to-rust --out-dir release/typescript-to-rust
+      - name: Install the actual candidate wheels
+        run: |
+          uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/typescript-to-rust"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}]'
+          uv --no-config pip install --reinstall --no-index --find-links release/typescript-to-rust release/typescript-to-rust/sanka_extension_typescript_to_rust-*.whl
+          uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_typescript_to_rust as m, sanka_ts_capture as c; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; root = pathlib.Path(sys.prefix).resolve(); assert all(pathlib.Path(x.__file__).resolve().is_relative_to(root) for x in (m, c))"
+      - name: Install the pinned Express source toolset
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix packages/sanka-extension-typescript-to-rust/tests/node-tools
+      - name: Compare the Express source with the axum target
+        env:
+          SANKA_RUST_TESTS: "1"
+          SANKA_NODE_TESTS: "1"
+          CARGO_TERM_COLOR: never
+        run: uv run --no-sync python -m pytest packages/sanka-ts-capture/tests packages/sanka-extension-typescript-to-rust/tests -q
