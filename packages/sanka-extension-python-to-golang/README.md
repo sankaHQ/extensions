@@ -3,8 +3,8 @@
 Extension ID: `sanka/python-to-golang`. Sources: DRF, FastAPI, Flask.
 Targets: Fiber (default), chi, Gorilla mux, Gin.
 
-This first increment produces a Go `backend` package exposing `NewApp` for
-literal public JSON GET endpoints. It is **not a complete backend migration**,
+The current implementation produces a Go `backend` package exposing `NewApp` for
+literal public JSON GET endpoints and qualified bounded PostgreSQL reads. It is **not a complete backend migration**,
 not published in the extension catalog, and not qualified for production cutover.
 The full backend implementation remains in progress.
 
@@ -25,13 +25,13 @@ directory; output is `golang/` within that artifact directory.
 `scan`, `plan`, and `apply` parse source without importing or executing it. The current capture accepts
 one top-level endpoint module (plus the explicitly selected models module for pgx)
 and rejects unknown imports, decorators, configuration,
-request parameters, dynamic handlers, additional Python modules, and source
+request parameters, unsupported dynamic handlers, additional Python modules, and source
 symlinks. DRF endpoints require explicit public permission, no authentication,
 and JSON renderer declarations. Unsupported behavior blocks generation.
 
 Generated Go dependencies and checksums are pinned in this package; Go 1.26.5 is
 the qualification toolchain. No Go dependencies are installed into Sanka's Python
-environment. No services or repositories are generated for stateless handlers.
+environment. No services or repository interfaces are generated for these direct reads.
 
 The current integration matrix compares successful JSON GET responses with the
 actual Python framework clients across all twelve source/target combinations.
@@ -81,10 +81,76 @@ schema or transfers data. Reapplying an applied baseline is a no-op.
 `go run ./cmd/migrate down` explicitly drops the generated tables and their data.
 Do not edit an applied baseline; later schema changes require new revisions.
 
-This profile does not yet migrate database-backed HTTP handlers or generate
-repositories/services. The current public `test`/`verify` commands still exercise
-only the captured GET contract; PostgreSQL schema, constraint, apply/reapply and
-rollback equivalence are checked separately by the opt-in integration suite.
+PostgreSQL schema, constraint, apply/reapply and rollback equivalence are checked
+separately by the opt-in integration suite.
+
+## Bounded database reads
+
+The pgx profile also captures synchronous public GET handlers that return every
+field of one flat model, explicitly ordered by its primary key and limited to a
+literal 1–1000 rows. The limit is preserved from the source, never invented.
+Field projections must list all fields in declaration order. Examples for a
+model with fields `id` and `name`:
+
+```python
+# DRF: retain the explicit public/JSON decorators described above.
+from models import Widget
+
+
+def widgets(request):
+    return Response(list(Widget.objects.order_by("id").values("id", "name")[:100]))
+```
+
+```python
+# Flask/FastAPI: plain SQLAlchemy 2, with explicit environment-based setup.
+from models import Widget
+from os import environ
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+
+engine = create_engine(environ["DATABASE_URL"])
+
+
+@app.get("/widgets")
+def widgets():
+    with Session(engine) as session:
+        return [
+            dict(row)
+            for row in session.execute(
+                select(Widget.id, Widget.name).order_by(Widget.id).limit(100)
+            ).mappings()
+        ]
+```
+
+For Flask, wrap the returned list comprehension in `jsonify(...)`. Framework
+imports/app construction still follow the literal endpoint profile. This is not
+Flask-SQLAlchemy extension capture. Joins, filters, partial projections, dynamic
+pagination, writes, custom sessions, and async database handlers block generation.
+
+When a captured route reads data, generated `NewApp(pool *pgxpool.Pool)` takes an
+existing non-nil pool; its caller owns opening, configuring, and closing that
+pool. Pure schema/literal-endpoint projects retain `NewApp()`. Handlers use the
+request context, scan typed nullable fields, check iteration errors, close query
+rows, and encode the complete result before writing a response. Empty results
+are `[]`; database failures return a generic JSON 500 without driver details.
+That error response is a target safety contract, not Python default-error parity.
+
+Public `test` requires `SANKA_GO_TARGET_TEST_DATABASE_URL` for these handlers.
+`verify` additionally requires `SANKA_GO_SOURCE_TEST_DATABASE_URL`. Supply dedicated
+fixture databases with matching data and already-applied source/target schemas;
+ordinary `DATABASE_URL` is never used as an implicit replay destination. Use a
+PostgreSQL URL for DRF/Go and a `postgresql+psycopg://` SQLAlchemy URL for
+Flask/FastAPI. Keep fixture credentials outside migration configuration and plans.
+Use read-only fixture credentials: replay executes candidate code and is not a
+sandbox. The replay runner does not create schemas, migrate, or seed these databases.
+
+Both lifecycle commands require the captured successful status and JSON media
+type. Verify also compares real Python and Go response bodies. Reports describe
+only the supplied fixture observations, not unseen rows, transactional writes,
+or full schema equivalence. CI owns isolated source/target schemas and checks
+empty/populated results, nulls, Unicode, integer boundaries, order, source limits,
+fixture mismatch detection, and safe database-error responses for all twelve
+source/target combinations.
 
 ## Remaining backend work
 
