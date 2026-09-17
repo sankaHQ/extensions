@@ -313,3 +313,20 @@ Final cookie review also covers empty/short incoming session cookies on early
 responses, both SESSION_SAVE_EVERY_REQUEST settings, and untouched 500 responses.
 The source/target fixture compares cookie and Vary behavior and verifies lazy SQL
 access; valid untouched cookies remain unread when save-every-request is disabled.
+
+
+## Task 11: scalar field-presence contract (2026-09-18)
+
+The shared helper now contains an opt-in `InputValue` contract. An absent field
+uses `value_json=None`; explicit JSON null uses the text `"null"`. Boolean,
+integer and string values retain canonical JSON text, so null, false, zero and
+empty string remain distinct and large integers do not pass through float64.
+Existing BackendIR, TargetProfile and EffectiveInputs serialization is unchanged.
+A native Go map/RawMessage probe compares the same representation and runs in
+the Go CI lane. Focused checks passed 21 tests with Go 1.26.5.
+
+This is the scalar representation prerequisite, not a source validation policy
+or generated write support. Decimal/time/nested input contracts, source-specific
+coercion/errors, shared profile generalization, renderer adoption and transactional
+CRUD/PATCH remain open. No helper release or extension dependency update is made
+in this slice; published adoption requires a separately versioned helper release.
