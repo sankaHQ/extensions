@@ -350,3 +350,11 @@ print(json.dumps(columns))
     captured = capture_models(path, framework)[0]["fields"]
     expected = json.loads(result.stdout)
     assert [{key: field[key] for key in expected[0]} for field in captured] == expected
+
+
+@pytest.mark.parametrize("table", ["goose_db_version", "goose_db_version_id_seq"])
+def test_migration_bookkeeping_names_are_reserved(tmp_path: Path, table: str) -> None:
+    path = tmp_path / "models.py"
+    path.write_text(model_source("flask").replace("widgets", table))
+    with pytest.raises(ValueError, match="migration bookkeeping"):
+        capture_models(path, "flask")

@@ -258,7 +258,7 @@ def capture_models(path: Path, framework: str) -> list[dict[str, Any]]:
     if len({model["table"] for model in models}) != len(models):
         raise ValueError("duplicate database table")
     for model in models:
-        if model["table"] == "goose_db_version":
+        if model["table"] in {"goose_db_version", "goose_db_version_id_seq"}:
             raise ValueError("model table conflicts with migration bookkeeping")
         fields = model["fields"]
         if sum(field["primary_key"] for field in fields) != 1:
