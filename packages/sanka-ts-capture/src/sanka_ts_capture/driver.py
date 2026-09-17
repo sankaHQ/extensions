@@ -88,6 +88,11 @@ def node_version(executable: str) -> tuple[int, int, int]:
 def bundle_path() -> Path:
     """Return the vendored compiler bundle after checking its pinned digest."""
     path = NODE_ROOT / "typescript.js"
+    if not path.is_file():
+        raise TypeScriptDriverError(
+            "vendored TypeScript bundle is missing; in a source checkout run "
+            "scripts/fetch_typescript_bundle.py (wheels include it)"
+        )
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     if digest != TYPESCRIPT_SHA256:
         raise TypeScriptDriverError(

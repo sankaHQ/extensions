@@ -5,8 +5,12 @@ sources (currently `sanka/typescript-to-rust`; React Native capture will reuse i
 It is a helper library, not an executable extension or an SDK, and it has no
 Python dependencies.
 
-The package vendors the TypeScript compiler bundle (`typescript@5.9.3`,
-`lib/typescript.js`, Apache-2.0) and a small Node.js driver. Every invocation
+The package ships the TypeScript compiler bundle (`typescript@5.9.3`,
+`lib/typescript.js`, Apache-2.0) and a small Node.js driver. The 9 MB bundle is
+not committed: `scripts/fetch_typescript_bundle.py` downloads the pinned npm
+tarball, verifies the tarball and bundle digests, and places the file (git-ignored);
+`make check` runs it, and built wheels include the bundle so installed extensions
+never touch the network. Every invocation
 checks the bundle digest, then runs `node` with a cleared environment on exactly
 the texts it is given. The driver parses (`ts.createSourceFile`) or transpiles
 (`ts.transpileModule`) those texts. It never resolves imports, reads other files,

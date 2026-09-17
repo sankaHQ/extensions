@@ -17,5 +17,10 @@ Issues = "https://github.com/sankaHQ/extensions/issues"
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+# The compiler bundle is git-ignored (fetched by scripts/fetch_typescript_bundle.py)
+# but must ship inside the wheel so installed extensions never touch the network.
+artifacts = ["src/sanka_ts_capture/node/typescript.js"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/sanka_ts_capture"]

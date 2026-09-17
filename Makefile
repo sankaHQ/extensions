@@ -1,6 +1,11 @@
-.PHONY: check
+.PHONY: check typescript-bundle
 
-check:
+# sanka-ts-capture needs the pinned TypeScript compiler bundle, which is not
+# committed. The fetch is idempotent and digest-checked; no network when present.
+typescript-bundle:
+	uv run python scripts/fetch_typescript_bundle.py
+
+check: typescript-bundle
 	uv run ruff check .
 	uv run ruff format --check .
 	uv run mypy packages scripts
