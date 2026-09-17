@@ -60,6 +60,12 @@ jobs:
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py
           -k postgresql -q
+      - name: Verify PostgreSQL replay isolation and generated backend qualification
+        run: >-
+          uv run python -m pytest
+          packages/sanka-drf-replay/tests/test_postgres.py
+          packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
+          -q
       - run: make check
       - run: make build-release
       - run: make build-business-flows
@@ -70,6 +76,8 @@ jobs:
           uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_drf_to_flask, sanka_code_migration; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; root = pathlib.Path(sys.prefix).resolve(); assert all(pathlib.Path(m.__file__).resolve().is_relative_to(root) for m in (sanka_extension_drf_to_flask, sanka_code_migration))"
           uv run --no-sync python -m pytest \
             packages/sanka-extension-drf-to-flask/tests/test_native_plan.py \
+            packages/sanka-drf-replay/tests/test_postgres.py \
+            packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py \
             packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py \
             packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py \
             packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py \
@@ -114,3 +122,4 @@ jobs:
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_csrf.py
+          packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py

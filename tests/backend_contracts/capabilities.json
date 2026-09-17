@@ -371,6 +371,24 @@
         "database_effect": "Authenticated writes with valid CSRF succeed; denied requests preserve application rows and source session lifecycle effects."
       },
       "target_difference": "Only the captured stock database-session and IsAuthenticated profile qualifies; signing keys must be supplied through the generated environment contract."
+    },
+    {
+      "id": "flask-composed-backend-qualification",
+      "capabilities": [
+        "replay.postgresql",
+        "replay.sequence_state",
+        "architecture.yagni",
+        "auth.session",
+        "write.atomic_rollback"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py::test_representative_backend_protocol",
+      "source_success": {
+        "status": 201,
+        "database_effect": "Inventory CRUD, authenticated notes and nested orders preserve expected responses and database effects through the public migration lifecycle on SQLite and PostgreSQL."
+      },
+      "target_difference": "These bounded synthetic applications qualify represented contracts, not arbitrary customer code."
     }
   ]
 }

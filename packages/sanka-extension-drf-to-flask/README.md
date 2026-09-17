@@ -51,7 +51,8 @@ delete policies execute in the request transaction. Each supported contract has
 source/target response and database-effect checks in the converter test suite.
 Token/owner, conditional records, pagination, filtering and nested-write fixtures also
 run against independent PostgreSQL schemas in CI. Built Flask and shared-helper wheels
-are installed and tested separately from their editable source packages. The generic `verify` replay command currently supports SQLite only.
+are installed and tested separately from their editable source packages. Generic `verify` replay supports SQLite and explicitly configured PostgreSQL
+with isolated seeded database clones; see the [replay configuration](../sanka-drf-replay/README.md#postgresql-replay).
 
 Stock `DjangoFilterBackend` supports qualified automatic scalar filters, including
 repeated parameters, CSV inputs and detail filtering. Custom filtersets, related/date

@@ -3,8 +3,9 @@
 Shared standard-library replay engine for the DRF-to-FastAPI and DRF-to-Flask
 extensions. It is a helper library, not an executable extension or an SDK.
 Frameworks run in the source and candidate interpreters, never as dependencies
-of this package. Each scenario gets separate copies of a freshly seeded SQLite
-database. The configured database environment variable must select that database.
+of this package. SQLite is the default; each scenario gets separate copies of a
+freshly seeded database. PostgreSQL is an explicit opt-in described below. The
+configured database environment variable must select the allocated database.
 
 Local media is also isolated: preparation and each source/candidate replay receive
 separate copies of the seeded `MEDIA_ROOT`. Serving settings should inherit the
@@ -46,3 +47,59 @@ the original route, fields, filenames, authentication and setup. Expected respon
 come from executing the source, including its parser and validation behavior;
 neither successful writes nor rejection statuses are assumed. All contract probes
 share a 12-request cap. Use explicit scenarios for deeper or additional contexts.
+
+## PostgreSQL replay
+
+Set the extension verification configuration to:
+
+```json
+{
+  "database_backend": "postgresql",
+  "postgres_admin_dsn_env": "SANKA_REPLAY_POSTGRES_ADMIN_DSN",
+  "db_env": "SANKA_TEST_DB",
+  "candidate_db_env": "SANKA_TEST_DB",
+  "scenarios": "scenarios.json",
+  "seed": "seed.py",
+  "candidate": ".sanka/flask"
+}
+```
+
+With the CLI, pass those extra options through `--extension-config` and explicitly
+forward the named environment variable with `--extension-env`:
+
+```sh
+sanka verify . --settings settings --scenarios scenarios.json --seed seed.py \
+  --candidate .sanka/flask \
+  --extension-config '{"database_backend":"postgresql","postgres_admin_dsn_env":"SANKA_REPLAY_POSTGRES_ADMIN_DSN"}' \
+  --extension-env SANKA_REPLAY_POSTGRES_ADMIN_DSN
+```
+
+The named environment variable contains a PostgreSQL URL for a **dedicated test
+service**, with explicit host, user, password and database, and permission to create databases.
+Password-file, service-file and ambient libpq fallbacks are unsupported. Supply it through your execution
+environment; do not put its value in project configuration or scenario files.
+The source interpreter must provide psycopg 3. The helper itself remains
+standard-library-only, and verification does not install dependencies.
+
+Replay creates an empty database, runs source migrations and the supplied seed,
+then clones that prepared database independently for each source and candidate
+scenario. It never clones the configured application database. Clones preserve
+constraints, data and sequence state. Snapshots compare database rows and sequence
+state, including sequence changes caused by rolled-back writes. Setup requests
+and the scenario request share a clone; subsequent scenarios start from the
+original seed again.
+
+Source settings must read `db_env` as a PostgreSQL URL (SQLite mode supplies a
+filesystem path). A distinct `candidate_db_env` may be supplied for candidate
+settings. Native Flask factories receive the allocated SQLAlchemy database URL.
+Every supported connection must point at its allocated database; ignored or
+incompatible settings fail verification. Application imports are trusted Python
+execution, not sandboxed code.
+
+Cleanup runs on success or failure, including when `keep_temp` preserves local
+diagnostics. It checks a per-run ownership marker before terminating connections
+or dropping a database; it never discovers databases by a shared prefix. If a
+creation timeout leaves ownership unconfirmed, replay refuses deletion and reports
+the database name for manual inspection rather than risking an unrelated database. Reports contain backend and environment-variable names, not
+the maintenance URL. Missing permissions, incompatible settings or cleanup failures
+are errors, not successful verification.

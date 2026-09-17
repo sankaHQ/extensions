@@ -118,7 +118,7 @@ def main() -> int:
             expected_dependency = f"{EXTENSION_SDK_NAME}=={extension_version}"
             if project.get("dependencies") != [
                 expected_dependency,
-                "sanka-drf-replay==0.1.0a3",
+                "sanka-drf-replay==0.1.0a4",
                 "sanka-code-migration==0.1.0a3",
             ]:
                 errors.append(f"{package.name} must depend exactly on {expected_dependency}")
