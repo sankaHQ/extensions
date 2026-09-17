@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Static, fail-closed capture of literal public JSON endpoints. Never imports source."""
+"""Static, fail-closed capture of qualified public JSON GET endpoints. Never imports source."""
 
 from __future__ import annotations
 
@@ -8,10 +8,12 @@ import hashlib
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
 from .models import capture_models
+from .queries import capture_read
 
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
@@ -116,7 +118,9 @@ def _json_value(value: Any) -> None:
     )
 
 
-def _payload(node: ast.FunctionDef | ast.AsyncFunctionDef, framework: str) -> Any:
+def _payload(
+    node: ast.FunctionDef | ast.AsyncFunctionDef, framework: str, models: list[dict[str, Any]]
+) -> dict[str, Any]:
     if node.type_params:
         raise ValueError("generic functions require additional capture")
     args = node.args
@@ -134,6 +138,9 @@ def _payload(node: ast.FunctionDef | ast.AsyncFunctionDef, framework: str) -> An
         raise ValueError("request parameters require additional capture")
     if node.returns or any(arg.annotation for arg in args.args):
         raise ValueError("type-driven response/request validation requires additional capture")
+    read = capture_read(node, framework, models)
+    if read is not None:
+        return {"read": read}
     if len(node.body) != 1 or not isinstance(node.body[0], ast.Return):
         raise ValueError("business logic and side effects are not qualified yet")
     value = node.body[0].value
@@ -155,7 +162,7 @@ def _payload(node: ast.FunctionDef | ast.AsyncFunctionDef, framework: str) -> An
     if not isinstance(body, dict):
         raise ValueError("only JSON object responses are qualified")
     _json_value(body)
-    return body
+    return {"body": body}
 
 
 def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
@@ -189,12 +196,41 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 and source != root / config.get("models_file", "")
             ):
                 gaps.append(f"{relative}: additional Python modules require whole-project capture")
+    models = []
+    allowed_imports = {key: set(value) for key, value in IMPORTS[framework].items()}
+    if config["database_layer"] == "pgx":
+        try:
+            model_module = Path(config["models_file"]).stem
+            if not model_module.isidentifier() or model_module in sys.stdlib_module_names | {
+                "os",
+                "sqlalchemy",
+                "django",
+                "rest_framework",
+                "flask",
+                "fastapi",
+                "migration_source",
+            }:
+                raise ValueError("models_file conflicts with runtime imports")
+            models = capture_models(root / config["models_file"], framework)
+            allowed_imports[model_module] = {model["name"] for model in models}
+            if framework != "drf":
+                allowed_imports.update(
+                    {
+                        "os": {"environ"},
+                        "sqlalchemy": {"create_engine", "select"},
+                        "sqlalchemy.orm": {"Session"},
+                    }
+                )
+        except (ValueError, TypeError, OSError, SyntaxError) as error:
+            gaps.append("models: " + str(error))
     tree = ast.parse(path.read_text(), filename=filename)
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     imports: set[str] = set()
     assignments: dict[str, ast.expr] = {}
     for node in tree.body:
         available = imports | assignments.keys() | functions.keys() | {"__name__"}
+        if models and isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            available |= {"list", "dict", "row", "session"}
         unresolved = {
             item.id
             for item in ast.walk(node)
@@ -204,15 +240,11 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         }
         if unresolved:
             gaps.append(f"line {node.lineno}: unresolved symbols: {', '.join(sorted(unresolved))}")
-        if (
-            isinstance(node, ast.ImportFrom)
-            and node.level == 0
-            and node.module in IMPORTS[framework]
-        ):
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module in allowed_imports:
             for alias in node.names:
                 if (
                     alias.asname
-                    or alias.name not in IMPORTS[framework][node.module]
+                    or alias.name not in allowed_imports[node.module]
                     or alias.name in imports | assignments.keys() | functions.keys()
                 ):
                     gaps.append(f"line {node.lineno}: unsupported or duplicate import")
@@ -234,6 +266,13 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             gaps.append(f"line {node.lineno}: unsupported {type(node).__name__}")
     routes: list[dict[str, Any]] = []
     try:
+        engine = assignments.get("engine")
+        if engine is not None:
+            if framework == "drf" or not models or not {"create_engine", "environ"} <= imports:
+                raise ValueError("unsupported database engine setup")
+            expected_engine = ast.parse('create_engine(environ["DATABASE_URL"])', mode="eval").body
+            if ast.dump(engine) != ast.dump(expected_engine):
+                raise ValueError("engine must use create_engine(environ['DATABASE_URL'])")
         if framework == "drf":
             if set(assignments) != {"urlpatterns"} or "path" not in imports:
                 raise ValueError(
@@ -258,7 +297,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             constructor = "Flask" if framework == "flask" else "FastAPI"
             app = assignments.get("app")
             if (
-                set(assignments) != {"app"}
+                set(assignments) != ({"app", "engine"} if engine is not None else {"app"})
                 or constructor not in imports
                 or not isinstance(app, ast.Call)
             ):
@@ -320,14 +359,28 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 raise ValueError("jsonify must be imported from flask")
             if isinstance(function, ast.AsyncFunctionDef) and framework != "fastapi":
                 raise ValueError("async handlers are qualified only for FastAPI")
+            payload = _payload(function, framework, models)
+            if (
+                "read" in payload
+                and framework != "drf"
+                and (engine is None or not {"Session", "select"} <= imports)
+            ):
+                raise ValueError("database reads require an explicit engine, Session and select")
             routes.append(
                 {
                     "path": route_path,
                     "method": "GET",
                     "status": 200,
-                    "body": _payload(function, framework),
+                    **payload,
                 }
             )
+        if (
+            any("read" in route for route in routes)
+            and {"list", "dict", "row", "session"} & functions.keys()
+        ):
+            raise ValueError("query symbols must not be shadowed")
+        if engine is not None and not any("read" in route for route in routes):
+            raise ValueError("unused database engine setup requires additional capture")
         if used != set(functions):
             raise ValueError("unregistered functions require additional capture")
         if len({route["path"] for route in routes}) != len(routes):
@@ -336,12 +389,6 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         gaps.append(str(error))
     if not routes:
         gaps.append("no qualified endpoints")
-    models = []
-    if config["database_layer"] == "pgx":
-        try:
-            models = capture_models(root / config["models_file"], framework)
-        except (ValueError, TypeError, OSError, SyntaxError) as error:
-            gaps.append("models: " + str(error))
     result = {
         "schema": "sanka.python-to-golang.capture/v1",
         "source_digest": digest(records),
@@ -354,5 +401,5 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
 
     if config["database_layer"] == "pgx":
         result["models"] = models
-        result["scope"] = "empty PostgreSQL schema baseline and literal public JSON GET endpoints"
+        result["scope"] = "empty PostgreSQL schema baseline and captured public JSON GET endpoints"
     return result

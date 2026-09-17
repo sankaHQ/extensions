@@ -46,8 +46,8 @@ class Widget(Base):
 """
 
 
-def generate(root: Path, framework: str, target: str) -> Path:
-    (root / "app.py").write_text(source(framework))
+def generate(root: Path, framework: str, target: str, *, app_source: str | None = None) -> Path:
+    (root / "app.py").write_text(source(framework) if app_source is None else app_source)
     (root / "models.py").write_text(model_source(framework))
     req = request(root, framework, target)
     req = dataclasses.replace(req, configuration=req.configuration | {"database_layer": "pgx"})
@@ -81,15 +81,18 @@ def test_schema_generation(tmp_path: Path, framework: str, target: str) -> None:
     assert (output / "cmd/migrate/main.go").is_file()
     assert not (output / "services").exists()
     if os.getenv("SANKA_GO_TESTS") == "1":
-        result = subprocess.run(
-            ["go", "test", "-mod=readonly", "-p=2", "./..."],
-            cwd=output,
-            env=os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"},
-            text=True,
-            capture_output=True,
-            timeout=180,
+        verified = handle(
+            dataclasses.replace(
+                request(tmp_path, framework, target),
+                command="verify",
+                configuration={
+                    "source_framework": framework,
+                    "target_framework": target,
+                    "database_layer": "pgx",
+                },
+            )
         )
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert verified.outcome == "success", verified.error
 
 
 @pytest.mark.parametrize("framework", SOURCES)

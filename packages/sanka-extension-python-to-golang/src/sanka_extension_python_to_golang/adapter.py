@@ -71,7 +71,7 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                     return failure_response(
                         request,
                         code="SANKA_EXTENSION_PARITY_FAILED",
-                        message="Python and Go responses differ; inspect verify.json",
+                        message=f"GET contract checks failed; inspect {request.command}.json",
                         details={"report": str(destination)},
                     )
                 return success_response(
