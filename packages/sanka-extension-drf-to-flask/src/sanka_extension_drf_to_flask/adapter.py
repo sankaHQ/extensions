@@ -851,6 +851,12 @@ def _verify(request: ExtensionRequest) -> ExtensionResponse:
             raise ReplayError(f"{name} must be a non-empty path")
         return (root / value).absolute()
 
+    def option(name: str) -> str | None:
+        value = config.get(name)
+        if value is not None and (not isinstance(value, str) or not value):
+            raise ReplayError(f"{name} must be a non-empty string")
+        return value
+
     scenarios_path = path("scenarios")
     if scenarios_path is None:
         raise ReplayError("Flask verification requires --scenarios and a candidate app")
@@ -878,6 +884,9 @@ def _verify(request: ExtensionRequest) -> ExtensionResponse:
         candidate_root=path("candidate"),
         entrypoint=str(config.get("entrypoint") or "target_app.py"),
         db_env=str(config.get("db_env") or "SANKA_TEST_DB"),
+        candidate_db_env=option("candidate_db_env"),
+        database_backend=option("database_backend") or "sqlite",
+        postgres_admin_dsn_env=option("postgres_admin_dsn_env"),
         seed=path("seed"),
         ignored_tables=cast(list[str], ignored),
         all_headers=bool(config.get("all_headers")),

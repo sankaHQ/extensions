@@ -5,6 +5,7 @@ import base64
 import json
 from pathlib import Path
 
+import pytest
 from test_lifecycle import call, project
 
 
@@ -161,3 +162,38 @@ def create_app(config):
     assert rejected["outcome"] == "error"
     assert "isolated SQLite path" in rejected["error"]["message"]
     assert not (candidate / "wrong.db").exists()
+
+
+@pytest.mark.parametrize(
+    "configuration,message",
+    [
+        ({"database_backend": "mysql"}, "database_backend must be"),
+        (
+            {
+                "database_backend": "postgresql",
+                "postgres_admin_dsn_env": "SANKA_MISSING_REPLAY_ADMIN",
+            },
+            "requires postgres_admin_dsn_env",
+        ),
+        (
+            {"database_backend": "sqlite", "postgres_admin_dsn_env": "SANKA_MISSING_REPLAY_ADMIN"},
+            "requires database_backend=postgresql",
+        ),
+        ({"candidate_db_env": False}, "candidate_db_env must be a non-empty string"),
+    ],
+)
+def test_verify_rejects_invalid_database_configuration(
+    tmp_path, monkeypatch, configuration, message
+):
+    project(tmp_path)
+    monkeypatch.delenv("SANKA_MISSING_REPLAY_ADMIN", raising=False)
+    (tmp_path / "scenarios.json").write_text(
+        json.dumps(
+            [{"id": "read", "method": "GET", "path": "/records/", "expected_source_status": 200}]
+        )
+    )
+    result = call(tmp_path, "verify", {"scenarios": "scenarios.json", **configuration})
+    assert result["outcome"] == "error", result
+    assert result["error"]["code"] == "SANKA_EXTENSION_REPLAY_INVALID"
+    assert message in result["error"]["message"]
+    assert not list(tmp_path.rglob("*.sqlite3"))
