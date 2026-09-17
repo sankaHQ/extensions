@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from .capture import canonical, capture, digest
 from .render import render
@@ -169,6 +169,38 @@ def _snapshot(output: Path) -> dict[str, bytes]:
     return snapshot
 
 
+def request_paths(route: dict[str, Any]) -> list[str]:
+    path = route["path"]
+    filtered = route.get("read", {}).get("filter")
+    if not filtered:
+        return [path]
+    key = filtered["parameter"]
+    result = [path]
+    for value in (
+        "",
+        "first",
+        "last",
+        "sanka-filter",
+        "日本語",
+        "😀",
+        "x' OR '1'='1",
+        "a;b",
+        "a b",
+        "a+b",
+        "SANKA-FILTER",
+        "%ZZ",
+        "�",
+    ):
+        result.append(path + "?" + urlencode([(key, value)]))
+    result.append(path + "?" + urlencode([(key, "first"), (key, "last")]))
+    result.append(path + "?" + urlencode([(key, "last"), (key, "first")]))
+    encoded_key = urlencode([(key, "")])
+    # Native parsers accept semicolons and malformed percent escapes as values.
+    for raw in ("a;b", "%ZZ", "%FF", "%E2%82", "%ED%A0%80"):
+        result.append(path + "?" + encoded_key + raw)
+    return result
+
+
 def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> dict[str, Any]:
     if captured["gaps"]:
         raise ValueError("cannot replay unsupported source behavior")
@@ -230,7 +262,10 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
     )
     if capture(root, config) != captured:
         raise ValueError("source changed before replay")
-    paths = [route["path"] for route in captured["routes"]]
+    cases = [
+        (path, route["status"]) for route in captured["routes"] for path in request_paths(route)
+    ]
+    paths = [path for path, _ in cases]
     with tempfile.TemporaryDirectory(prefix="sanka-go-replay-") as temporary:
         workspace = Path(temporary)
         candidate = workspace / "candidate"
@@ -274,8 +309,10 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             "candidate": actual,
             "ok": len(actual) == len(paths)
             and all(
-                item["status"] == route["status"] and item["media_type"] == "application/json"
-                for item, route in zip(actual, captured["routes"], strict=True)
+                item["path"] == path
+                and item["status"] == status
+                and item["media_type"] == "application/json"
+                for item, (path, status) in zip(actual, cases, strict=True)
             ),
         }
         if command == "verify":

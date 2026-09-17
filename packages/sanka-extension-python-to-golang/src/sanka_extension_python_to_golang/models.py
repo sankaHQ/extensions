@@ -105,6 +105,9 @@ def _django(model: ast.ClassDef) -> dict[str, Any]:
             and len(node.targets) == 1
             and isinstance(node.targets[0], ast.Name)
         ):
+            field_name = node.targets[0].id
+            if field_name in {"pk", "objects"} or "__" in field_name or field_name.endswith("_"):
+                raise ValueError("Django field name conflicts with ORM lookup or manager semantics")
             call = node.value
             if not (
                 isinstance(call, ast.Call)
