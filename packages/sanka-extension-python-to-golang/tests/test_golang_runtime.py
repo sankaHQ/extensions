@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Generated Fiber process boundary: configuration, build, and shutdown wiring."""
+"""Generated Go process boundaries: configuration, build, and shutdown wiring."""
 
 from __future__ import annotations
 
@@ -8,33 +8,40 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from sanka_extension_python_to_golang.capture import TARGETS
 from test_golang_reads import read_source
 from test_golang_schema import generate
 from test_python_to_golang import apply, source
 
 
+@pytest.mark.parametrize("target", TARGETS)
 @pytest.mark.parametrize("database", [False, True])
-def test_fiber_runtime_is_generated_and_builds(tmp_path: Path, database: bool) -> None:
+def test_runtime_is_generated_and_builds(tmp_path: Path, target: str, database: bool) -> None:
     if database:
-        output = generate(tmp_path, "flask", "fiber", app_source=read_source("flask"))
+        output = generate(tmp_path, "flask", target, app_source=read_source("flask"))
     else:
         (tmp_path / "app.py").write_text(source("flask"))
-        output = apply(tmp_path, "flask", "fiber")
+        output = apply(tmp_path, "flask", target)
     command = output / "cmd/api/main.go"
     runtime_test = output / "cmd/api/main_test.go"
     assert command.is_file()
     assert runtime_test.is_file()
     text = command.read_text()
     assert "signal.NotifyContext" in text
-    assert "GracefulContext:" in text
-    assert "ShutdownTimeout:" in text
+    if target == "fiber":
+        assert "GracefulContext:" in text
+        assert "ShutdownTimeout:" in text
+    else:
+        assert "http.MaxBytesHandler" in text
+        assert "ReadHeaderTimeout:" in text
+        assert "server.Shutdown(shutdownCtx)" in text
     assert "DATABASE_URL is required" in text if database else "DATABASE_URL" not in text
     assert "PORT must be an integer between 1 and 65535" in text
-    app = (output / "app.go").read_text()
-    assert "ReadTimeout:" in app
-    assert "WriteTimeout:" in app
-    assert "IdleTimeout:" in app
-    assert "BodyLimit:" in app
+    limits = (output / "app.go").read_text() if target == "fiber" else text
+    assert "ReadTimeout:" in limits
+    assert "WriteTimeout:" in limits
+    assert "IdleTimeout:" in limits
+    assert "BodyLimit:" in limits if target == "fiber" else "MaxBytesHandler" in limits
     if os.getenv("SANKA_GO_TESTS") == "1":
         environment = os.environ | {
             "GOTOOLCHAIN": "local",
@@ -56,9 +63,3 @@ def test_fiber_runtime_is_generated_and_builds(tmp_path: Path, database: bool) -
                 timeout=180,
             )
             assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_other_frameworks_do_not_claim_a_runtime(tmp_path: Path) -> None:
-    (tmp_path / "app.py").write_text(source("flask"))
-    output = apply(tmp_path, "flask", "chi")
-    assert not (output / "cmd/api").exists()

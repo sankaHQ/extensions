@@ -20,7 +20,7 @@ MODULES = {
 }
 
 
-def _fiber_runtime(database: bool, database_configured: bool) -> dict[str, str]:
+def _runtime(target: str, database: bool, database_configured: bool) -> dict[str, str]:
     database_import = '"github.com/jackc/pgx/v5/pgxpool"' if database else ""
     database_field = "\n    databaseURL string" if database else ""
     database_config = (
@@ -55,6 +55,38 @@ def _fiber_runtime(database: bool, database_configured: bool) -> dict[str, str]:
         if database
         else ""
     )
+    if target == "fiber":
+        runtime_imports = '"github.com/gofiber/fiber/v3"'
+        serve = """    return app.Listen(cfg.address, fiber.ListenConfig{
+        DisableStartupMessage: true,
+        GracefulContext: runCtx,
+        ShutdownTimeout: 10*time.Second,
+    })"""
+    else:
+        runtime_imports = '"errors"\n    "net/http"'
+        serve = """    server := &http.Server{
+        Addr: cfg.address,
+        Handler: http.MaxBytesHandler(app, 1048576),
+        ReadHeaderTimeout: 5*time.Second,
+        ReadTimeout: 10*time.Second,
+        WriteTimeout: 30*time.Second,
+        IdleTimeout: 60*time.Second,
+        MaxHeaderBytes: 1048576,
+    }
+    serveErr := make(chan error, 1)
+    go func() { serveErr <- server.ListenAndServe() }()
+    select {
+    case err := <-serveErr:
+        if errors.Is(err, http.ErrServerClosed) { return nil }
+        return err
+    case <-runCtx.Done():
+        shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+        if err := server.Shutdown(shutdownCtx); err != nil { return err }
+        err := <-serveErr
+        if errors.Is(err, http.ErrServerClosed) { return nil }
+        return err
+    }"""
     main = f"""// SPDX-License-Identifier: Apache-2.0
 package main
 
@@ -67,7 +99,7 @@ import (
     "syscall"
     "time"
 
-    "github.com/gofiber/fiber/v3"
+    {runtime_imports}
     {database_import}
     backend "migrated.backend"
 )
@@ -92,11 +124,7 @@ func run() error {{
     if err != nil {{ return err }}
     runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer stop()
-{database_setup}    return app.Listen(cfg.address, fiber.ListenConfig{{
-        DisableStartupMessage: true,
-        GracefulContext: runCtx,
-        ShutdownTimeout: 10*time.Second,
-    }})
+{database_setup}{serve}
 }}
 
 func main() {{
@@ -136,8 +164,6 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     has_patch = any(
         route.get("write", {}).get("operation") == "patch" for route in captured["routes"]
     )
-    if has_writes and target != "fiber":
-        raise ValueError("writes are qualified only for Fiber")
     module = MODULES[target]
     error_key = "detail" if captured["configuration"]["source_framework"] == "fastapi" else "error"
     registrations = []
@@ -156,17 +182,20 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             write_models.add(model["name"])
             method = route["method"].title()
             status = route["status"]
-            lookup = ""
+            lookup_field = None
             if route["write"]["operation"] == "patch":
-                field = next(
+                lookup_field = next(
                     item for item in model["fields"] if item["name"] == route["write"]["lookup"]
                 )
-                bits = "32" if field["go_type"] == "int32" else "64"
-                lookup = f"""rawID, parseErr := strconv.ParseInt(c.Params({canonical(field["name"])}), 10, {bits})
+            argument = ", lookup" if lookup_field else ""
+            if target == "fiber":
+                lookup = ""
+                if lookup_field:
+                    bits = "32" if lookup_field["go_type"] == "int32" else "64"
+                    lookup = f"""rawID, parseErr := strconv.ParseInt(c.Params({canonical(lookup_field["name"])}), 10, {bits})
         if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
-        lookup := {field["go_type"]}(rawID)"""
-            argument = ", lookup" if lookup else ""
-            registrations.append(f"""app.{method}({path}, func(c fiber.Ctx) error {{
+        lookup := {lookup_field["go_type"]}(rawID)"""
+                registrations.append(f"""app.{method}({path}, func(c fiber.Ctx) error {{
         {lookup}
         item, err := writeRow{index}(c.Context(), pool, c.Body(){argument})
         if err != nil {{
@@ -180,6 +209,73 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         }}
         return c.Status({status}).JSON(item)
     }})""")
+            elif target == "gin":
+                lookup = ""
+                if lookup_field:
+                    bits = "32" if lookup_field["go_type"] == "int32" else "64"
+                    lookup = f"""rawID, parseErr := strconv.ParseInt(c.Param({canonical(lookup_field["name"])}), 10, {bits})
+        if parseErr != nil {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid lookup"}}); return }}
+        lookup := {lookup_field["go_type"]}(rawID)"""
+                registrations.append(f"""app.{method.upper()}({path}, func(c *gin.Context) {{
+        {lookup}
+        body, readErr := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, 1048576))
+        if readErr != nil {{
+            status := 400
+            var tooLarge *http.MaxBytesError
+            if errors.As(readErr, &tooLarge) {{ status = 413 }}
+            c.JSON(status, gin.H{{{canonical(error_key)}: "invalid request body"}})
+            return
+        }}
+        item, err := writeRow{index}(c.Request.Context(), pool, body{argument})
+        if err != nil {{
+            if errors.Is(err, errInvalidWrite) {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid request body"}}); return }}
+            if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{canonical(error_key)}: "not found"}}); return }}
+            c.JSON(500, gin.H{{"error": "database write failed"}})
+            return
+        }}
+        c.JSON({status}, item)
+    }})""")
+            else:
+                registered_path = route["path"]
+                lookup = ""
+                if lookup_field:
+                    registered_path = registered_path.replace(
+                        f":{lookup_field['name']}", f"{{{lookup_field['name']}}}"
+                    )
+                    bits = "32" if lookup_field["go_type"] == "int32" else "64"
+                    parameter = (
+                        f"chi.URLParam(r, {canonical(lookup_field['name'])})"
+                        if target == "chi"
+                        else f"mux.Vars(r)[{canonical(lookup_field['name'])}]"
+                    )
+                    lookup = f"""rawID, parseErr := strconv.ParseInt({parameter}, 10, {bits})
+        if parseErr != nil {{ writeResponse(w, 400, map[string]string{{{canonical(error_key)}: "invalid lookup"}}); return }}
+        lookup := {lookup_field["go_type"]}(rawID)"""
+                registration = (
+                    f'app.MethodFunc("{route["method"]}", {canonical(registered_path)},'
+                    if target == "chi"
+                    else f"app.HandleFunc({canonical(registered_path)},"
+                )
+                suffix = ")" if target == "chi" else f').Methods("{route["method"]}")'
+                registrations.append(f"""{registration} func(w http.ResponseWriter, r *http.Request) {{
+        {lookup}
+        body, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, 1048576))
+        if readErr != nil {{
+            status := 400
+            var tooLarge *http.MaxBytesError
+            if errors.As(readErr, &tooLarge) {{ status = 413 }}
+            writeResponse(w, status, map[string]string{{{canonical(error_key)}: "invalid request body"}})
+            return
+        }}
+        item, err := writeRow{index}(r.Context(), pool, body{argument})
+        if err != nil {{
+            if errors.Is(err, errInvalidWrite) {{ writeResponse(w, 400, map[string]string{{{canonical(error_key)}: "invalid request body"}}); return }}
+            if errors.Is(err, pgx.ErrNoRows) {{ writeResponse(w, 404, map[string]string{{{canonical(error_key)}: "not found"}}); return }}
+            writeResponse(w, 500, map[string]string{{"error": "database write failed"}})
+            return
+        }}
+        writeResponse(w, {status}, item)
+    }}{suffix}""")
             continue
         if "read" in route:
             model = next(
@@ -302,6 +398,14 @@ func NewApp({arguments}) {return_type} {{
 '''
     if has_writes:
         source += '\nvar errInvalidWrite = errors.New("invalid write")\n'
+        if target in {"chi", "mux"}:
+            source += """
+func writeResponse(w http.ResponseWriter, status int, payload any) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(status)
+    _ = json.NewEncoder(w).Encode(payload)
+}
+"""
     # A library-shaped app avoids inventing deployment settings during endpoint qualification.
     lock_name = target + (
         "-postgresql" if captured["configuration"]["database_layer"] == "pgx" else ""
@@ -316,10 +420,7 @@ func NewApp({arguments}) {return_type} {{
 
     if captured["configuration"]["database_layer"] == "pgx":
         result.update(render_database(captured))
-    if target == "fiber":
-        result.update(
-            _fiber_runtime(database, captured["configuration"]["database_layer"] == "pgx")
-        )
+    result.update(_runtime(target, database, captured["configuration"]["database_layer"] == "pgx"))
     if any("filter" in route.get("read", {}) for route in captured["routes"]):
         first = str(captured["configuration"]["source_framework"] == "flask").lower()
         result["query.go"] = QUERY_SOURCE.replace("QUERY_FIRST", first)

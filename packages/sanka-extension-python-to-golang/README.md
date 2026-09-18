@@ -4,8 +4,8 @@ Extension ID: `sanka/python-to-golang`. Sources: DRF, FastAPI, Flask.
 Targets: Fiber (default), chi, Gorilla mux, Gin.
 
 The current implementation produces a Go `backend` package exposing `NewApp` for
-literal public JSON GET endpoints, bounded PostgreSQL reads, and the first qualified Fiber
-create/PATCH profile. Fiber output also includes a runnable `cmd/api`. It is **not a complete backend migration**,
+literal public JSON GET endpoints, bounded PostgreSQL reads, and the first qualified
+create/PATCH profile. Every target includes a runnable `cmd/api`. It is **not a complete backend migration**,
 not published in the extension catalog, and not qualified for production cutover.
 The full backend implementation remains in progress.
 
@@ -55,13 +55,15 @@ but changes to Go locks or the captured contract are rejected. A mismatch return
 an error with a report path. Each rerun invalidates its old report first, so a
 failed rerun cannot leave stale passing evidence.
 
-## Fiber process entrypoint
+## Process entrypoint
 
-Fiber output includes `cmd/api/main.go` and a configuration test. `PORT` defaults to 8080 and
+Every target includes `cmd/api/main.go` and a configuration test. `PORT` defaults to 8080 and
 must be an integer from 1 through 65535. Database-backed handlers additionally require
 `DATABASE_URL`; startup parses and pings the pgx pool with a ten-second bound. The process owns
-and closes that pool. Fiber enforces a 1 MiB body limit plus read, write, and idle timeouts, and
-uses `SIGINT`/`SIGTERM` with Fiber's bounded graceful-shutdown configuration.
+and closes that pool. Each server enforces a body limit plus read, write, and idle timeouts; the
+standard servers also cap headers. Fiber uses its native shutdown configuration; chi, mux, and Gin
+run through a bounded standard `net/http` server. All targets handle `SIGINT` and `SIGTERM`
+gracefully.
 
 The API never applies migrations on boot. Review and run `go run ./cmd/migrate up` separately,
 then start it with `go run ./cmd/api`. Validate generated projects with:
@@ -71,8 +73,6 @@ go test ./...
 go vet ./...
 go build ./cmd/api
 ```
-
-chi, mux, and Gin remain library-shaped until their process boundaries are qualified separately.
 
 ## PostgreSQL schema profile
 
@@ -147,9 +147,9 @@ imports/app construction still follow the literal endpoint profile. This is not
 Flask-SQLAlchemy extension capture. Joins, unsupported filters, partial projections, dynamic
 pagination, custom sessions, and async database handlers block generation.
 
-## First Fiber write profile
+## First write profile
 
-Fiber with pgx accepts one bounded create/PATCH recipe for a captured flat model. DRF uses
+Fiber, chi, mux, and Gin with pgx accept one bounded create/PATCH recipe for a captured flat model. DRF uses
 `objects.create(...)`, `filter(primary_key=...).first()`, explicit field assignment and
 `save(update_fields=...)`. Flask and FastAPI use a synchronous SQLAlchemy `Session`, `add`,
 `get`, `commit`, and `refresh`. Routes must expose POST on a literal collection path and PATCH
@@ -159,11 +159,11 @@ outside the captured PostgreSQL width. Any changed statement, validation bound, 
 status, side effect, async handler, custom hook, or unsupported field leaves a capture gap.
 
 Generated handlers parse JSON without float conversion, distinguish missing from null/false/zero/
-empty string, use parameterized SQL, and execute each write through `pgx.BeginFunc`. Create returns
+empty string, enforce a 1 MiB request body limit, use parameterized SQL, and execute each write through `pgx.BeginFunc`. Create returns
 the inserted row with 201. PATCH updates only present fields, permits `{}` as a read-back, returns
 404 for a missing row, and returns the updated row with 200. Invalid input returns 400; other
-database failures return a generic 500. Write generation for chi, mux, and Gin remains blocked
-until each adapter passes the same lifecycle contract.
+database failures return a generic 500. Each router uses its native path-parameter API and passes
+the same generated lifecycle contract.
 
 Public `test`/`verify` fail closed for captured writes until the versioned shared HTTP scenario
 adapter can compare ordered requests and database effects safely. The extension does not reuse the
@@ -277,5 +277,5 @@ SANKA_GO_BOOTSTRAP_TESTS=1 uv run python -m pytest \
 
 The [transaction qualification contract](../../docs/python-to-golang-transactions.md)
 covers rollback, commit failure, cancellation, and connection reuse for the pgx primitive used
-by the first Fiber create/PATCH profile. PUT and broader serializer/schema validation remain
+by the first create/PATCH profile. PUT and broader serializer/schema validation remain
 outside the qualified profile.

@@ -11,7 +11,7 @@ from pathlib import Path
 from textwrap import indent
 
 import pytest
-from sanka_extension_python_to_golang.capture import capture, configuration
+from sanka_extension_python_to_golang.capture import TARGETS, capture, configuration
 from sanka_extension_python_to_golang.render import render
 from sanka_extension_python_to_golang.replay import replay
 from test_golang_schema import generate, model_source, schema_dsn
@@ -300,11 +300,15 @@ def write_contract() -> dict[str, object]:
     }
 
 
-def test_fiber_write_generation_preserves_presence_and_transactions(tmp_path: Path) -> None:
-    files = render(write_contract())
+@pytest.mark.parametrize("target", TARGETS)
+def test_write_generation_preserves_presence_and_transactions(tmp_path: Path, target: str) -> None:
+    captured = write_contract()
+    captured["configuration"]["target_framework"] = target  # type: ignore[index]
+    files = render(captured)
     source = files["app.go"]
-    assert 'app.Post("/widgets"' in source
-    assert 'app.Patch("/widgets/:id"' in source
+    assert '"/widgets"' in source
+    expected_path = '"/widgets/:id"' if target in {"fiber", "gin"} else '"/widgets/{id}"'
+    assert expected_path in source
     assert "map[string]json.RawMessage" in source
     assert "pgx.BeginFunc" in source
     assert 'INSERT INTO \\"widgets\\"' in source
@@ -324,13 +328,6 @@ def test_fiber_write_generation_preserves_presence_and_transactions(tmp_path: Pa
             timeout=180,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_writes_remain_fiber_only() -> None:
-    captured = write_contract()
-    captured["configuration"]["target_framework"] = "chi"  # type: ignore[index]
-    with pytest.raises(ValueError, match="writes are qualified only for Fiber"):
-        render(captured)
 
 
 def test_public_replay_fails_closed_until_shared_adapter_is_adopted(tmp_path: Path) -> None:
@@ -413,7 +410,7 @@ import (
     "context"
     "encoding/json"
     "github.com/jackc/pgx/v5/pgxpool"
-    "io"
+    EXTRA_IMPORT
     "net/http/httptest"
     "os"
     "strings"
@@ -442,16 +439,31 @@ func TestWriteLifecycle(t *testing.T) {
     for _, item := range cases {
         request := httptest.NewRequest(item.method, item.path, strings.NewReader(item.body))
         request.Header.Set("Content-Type", "application/json")
-        response, err := app.Test(request)
-        if err != nil { t.Fatal(err) }
-        body, err := io.ReadAll(response.Body)
-        response.Body.Close()
-        if err != nil || response.StatusCode != item.status || !json.Valid(body) {
-            t.Fatalf("%s %s: status=%d body=%s err=%v", item.method, item.path, response.StatusCode, body, err)
+        EXCHANGE
+        if status != item.status || !json.Valid(body) {
+            t.Fatalf("%s %s: status=%d body=%s", item.method, item.path, status, body)
         }
     }
 }
 """
+
+
+def go_write_test(target: str) -> str:
+    if target == "fiber":
+        exchange = """response, err := app.Test(request)
+        if err != nil { t.Fatal(err) }
+        body, err := io.ReadAll(response.Body)
+        response.Body.Close()
+        if err != nil { t.Fatal(err) }
+        status := response.StatusCode"""
+        extra_import = '"io"'
+    else:
+        exchange = """response := httptest.NewRecorder()
+        app.ServeHTTP(response, request)
+        body := response.Body.Bytes()
+        status := response.Code"""
+        extra_import = ""
+    return GO_WRITE_TEST.replace("EXTRA_IMPORT", extra_import).replace("EXCHANGE", exchange)
 
 
 @pytest.mark.skipif(
@@ -462,13 +474,14 @@ func TestWriteLifecycle(t *testing.T) {
     ("framework", "source"),
     [("flask", flask_write_source), ("fastapi", fastapi_write_source), ("drf", drf_write_source)],
 )
+@pytest.mark.parametrize("target", TARGETS)
 def test_write_lifecycle_and_database_effects(
-    tmp_path: Path, framework: str, source: object
+    tmp_path: Path, framework: str, source: object, target: str
 ) -> None:
     import psycopg
     from psycopg import sql
 
-    output = generate(tmp_path, framework, "fiber", app_source=source())  # type: ignore[operator]
+    output = generate(tmp_path, framework, target, app_source=source())  # type: ignore[operator]
     dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
     schema = "go_write_" + uuid.uuid4().hex
     with psycopg.connect(dsn, autocommit=True) as admin:
@@ -489,7 +502,7 @@ def test_write_lifecycle_and_database_effects(
                 capture_output=True,
                 timeout=180,
             )
-            (output / "write_contract_test.go").write_text(GO_WRITE_TEST)
+            (output / "write_contract_test.go").write_text(go_write_test(target))
             result = subprocess.run(
                 [
                     "go",
