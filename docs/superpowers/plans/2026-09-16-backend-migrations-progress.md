@@ -468,5 +468,21 @@ handlers without starting a listener.
 
 The shared HTTP replay package is still absent from `main`, so this slice does
 not create a competing replay implementation. Health/readiness policy, deployment
-packaging, hosted recipes, non-Fiber writes and write replay remain separate
+packaging, hosted recipes and write replay remain separate
 qualification work.
+
+
+## Task 12: all-target create/PATCH adapters (2026-09-18)
+
+The existing bounded flat-model create/PATCH contract now renders for Fiber,
+chi, mux and Gin. All adapters retain the same validation and field-presence
+contract, 1 MiB body limit, parameterized SQL, `pgx.BeginFunc` transaction,
+status mapping and generic database errors. Router-specific code is limited to
+path lookup, request-body access and JSON responses; no service or repository
+layer is added.
+
+Generated projects compile for every target. The PostgreSQL lifecycle matrix now
+applies migrations and exercises all three Python source recipes against all four
+Go routers when the explicit CI fixture is available. Shared public write replay,
+PUT/delete, relationships, decimal/time writes, auth, permissions and richer
+validation remain separate qualification work.
