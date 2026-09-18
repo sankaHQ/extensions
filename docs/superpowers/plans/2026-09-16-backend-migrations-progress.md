@@ -499,5 +499,16 @@ database errors remain generic.
 Generated projects compile for every router. The isolated PostgreSQL lifecycle
 matrix now verifies missing-row DELETE, successful deletion, repeated deletion,
 empty 204 bodies and final database state across all twelve source/target pairs.
-PUT, cascading/on-delete relationships, authorization and shared public write
-replay remain open.
+Cascading/on-delete relationships, authorization and shared public write replay remain open.
+
+## Task 12: bounded PUT adapters (2026-09-18)
+
+The same twelve source/target pairs now recognize one exact flat-model PUT recipe.
+The source must fully validate required fields, replace every writable field and
+return the updated row. Generated handlers decode the full body, execute a fixed
+parameterized PostgreSQL UPDATE inside `pgx.BeginFunc`, and map an absent row to
+the source-specific 404 response.
+
+The isolated lifecycle covers incomplete bodies, invalid and missing lookups,
+successful replacement and final deletion. Rich serializer coercion, relationships,
+authorization and shared public write replay remain open.

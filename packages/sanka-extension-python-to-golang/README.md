@@ -5,7 +5,7 @@ Targets: Fiber (default), chi, Gorilla mux, Gin.
 
 The current implementation produces a Go `backend` package exposing `NewApp` for
 literal public JSON GET endpoints, bounded PostgreSQL reads, and the first qualified
-create/PATCH/DELETE profile. Every target includes a runnable `cmd/api`. It is **not a complete backend migration**,
+create/PUT/PATCH/DELETE profile. Every target includes a runnable `cmd/api`. It is **not a complete backend migration**,
 not published in the extension catalog, and not qualified for production cutover.
 The full backend implementation remains in progress.
 
@@ -149,22 +149,25 @@ pagination, custom sessions, and async database handlers block generation.
 
 ## First write profile
 
-Fiber, chi, mux, and Gin with pgx accept one bounded create/PATCH/DELETE recipe for a captured flat model. DRF uses
+Fiber, chi, mux, and Gin with pgx accept one bounded create/PUT/PATCH/DELETE recipe for a captured flat model. DRF uses
 `objects.create(...)`, `filter(primary_key=...).first()`, explicit field assignment and
 `save(update_fields=...)`. Flask and FastAPI use a synchronous SQLAlchemy `Session`, `add`,
-`get`, `commit`, and `refresh`. Routes must expose POST on a literal collection path and PATCH
+`get`, `commit`, and `refresh`. Routes must expose POST on a literal collection path and PUT/PATCH
 on one integer primary-key path. The source handler must explicitly reject unknown fields,
 missing required create fields, nulls for non-null fields, wrong JSON scalar types, and integers
 outside the captured PostgreSQL width. Any changed statement, validation bound, response shape,
 status, side effect, async handler, custom hook, or unsupported field leaves a capture gap.
 DELETE on the same integer path must explicitly load the row, return the captured 404 for a
 missing row, delete and commit it, then return an empty 204 response.
+PUT on that path must validate the complete replacement, assign every writable field, save or
+commit it, and return the replaced row with 200.
 
 Generated handlers parse JSON without float conversion, distinguish missing from null/false/zero/
 empty string, enforce a 1 MiB request body limit, use parameterized SQL, and execute each write through `pgx.BeginFunc`. Create returns
 the inserted row with 201. PATCH updates only present fields, permits `{}` as a read-back, returns
 404 for a missing row, and returns the updated row with 200. Invalid input returns 400; other
-database failures return a generic 500. DELETE returns 404 or an empty 204 and commits through the
+database failures return a generic 500. PUT replaces all writable fields and returns 404 or the
+updated row with 200. DELETE returns 404 or an empty 204 and commits through the
 same transaction primitive. Each router uses its native path-parameter API and passes
 the same generated lifecycle contract.
 
@@ -280,5 +283,5 @@ SANKA_GO_BOOTSTRAP_TESTS=1 uv run python -m pytest \
 
 The [transaction qualification contract](../../docs/python-to-golang-transactions.md)
 covers rollback, commit failure, cancellation, and connection reuse for the pgx primitive used
-by the first create/PATCH/DELETE profile. PUT and broader serializer/schema validation remain
+by the first create/PUT/PATCH/DELETE profile. Broader serializer/schema validation remains
 outside the qualified profile.

@@ -164,11 +164,14 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     has_patch = any(
         route.get("write", {}).get("operation") == "patch" for route in captured["routes"]
     )
+    has_replace = any(
+        route.get("write", {}).get("operation") == "replace" for route in captured["routes"]
+    )
     has_delete = any(
         route.get("write", {}).get("operation") == "delete" for route in captured["routes"]
     )
     has_body_writes = any(
-        route.get("write", {}).get("operation") in {"create", "patch"}
+        route.get("write", {}).get("operation") in {"create", "replace", "patch"}
         for route in captured["routes"]
     )
     module = MODULES[target]
@@ -194,7 +197,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             method = route["method"].title()
             status = route["status"]
             lookup_field = None
-            if route["write"]["operation"] == "patch":
+            if route["write"]["operation"] in {"replace", "patch"}:
                 lookup_field = next(
                     item for item in model["fields"] if item["name"] == route["write"]["lookup"]
                 )
@@ -388,7 +391,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         imports.append('"encoding/json"')
     if has_patch:
         imports.extend(['"fmt"', '"strconv"', '"strings"'])
-    elif has_delete:
+    elif has_replace or has_delete:
         imports.append('"strconv"')
     if database:
         imports.append('"github.com/jackc/pgx/v5/pgxpool"')
@@ -592,6 +595,26 @@ def _write_helper(
     var saved {model["name"]}
     err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
         return tx.QueryRow(ctx, {canonical(query)}, {arguments}).Scan({destinations})
+    }})
+    return saved, err
+}}
+"""
+    elif operation == "replace":
+        lookup = next(field for field in fields if field["name"] == write["lookup"])
+        sets = ", ".join(
+            f'"{field["name"]}" = ${number}' for number, field in enumerate(writable, 1)
+        )
+        arguments = ", ".join("item." + go_name(field["name"]) for field in writable)
+        query = (
+            f'UPDATE "{model["table"]}" SET {sets} WHERE "{lookup["name"]}" = ${len(writable) + 1} '
+            f"RETURNING {returning}"
+        )
+        helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte, lookup {lookup["go_type"]}) ({model["name"]}, error) {{
+    item, _, err := decode{model["name"]}(body, false)
+    if err != nil {{ return {model["name"]}{{}}, err }}
+    var saved {model["name"]}
+    err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
+        return tx.QueryRow(ctx, {canonical(query)}, {arguments}, lookup).Scan({destinations})
     }})
     return saved, err
 }}

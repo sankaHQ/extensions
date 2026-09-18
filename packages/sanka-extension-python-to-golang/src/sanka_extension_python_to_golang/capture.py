@@ -276,6 +276,51 @@ def _sqlalchemy_write(
             expected_annotations = [""] if framework == "flask" else ["int"]
             write = {"operation": "delete", "model": model["name"], "lookup": primary["name"]}
             status = 204
+        elif method == "PUT":
+            primary = next((field for field in fields if field["primary_key"]), None)
+            if primary is None:
+                continue
+            assignments = "\n".join(
+                f"    item.{field['name']} = "
+                + (
+                    f"data.get({field['name']!r})"
+                    if field["nullable"]
+                    else f"data[{field['name']!r}]"
+                )
+                for field in writable
+            )
+            prefix = "data = request.get_json()\n" if framework == "flask" else ""
+            invalid = (
+                'return jsonify({"error": "invalid request body"}), 400'
+                if framework == "flask"
+                else 'raise HTTPException(status_code=400, detail="invalid request body")'
+            )
+            validation = _write_validation(fields, "data", False, invalid)
+            missing = (
+                'return jsonify({"error": "not found"}), 404'
+                if framework == "flask"
+                else 'raise HTTPException(status_code=404, detail="not found")'
+            )
+            result = f"jsonify({response})" if framework == "flask" else response
+            source = (
+                prefix
+                + validation
+                + f"""with Session(engine) as session:
+    item = session.get({model["name"]}, {primary["name"]})
+    if item is None:
+        {missing}
+{assignments}
+    session.commit()
+    session.refresh(item)
+    return {result}
+"""
+            )
+            expected_args = [primary["name"]] if framework == "flask" else [primary["name"], "data"]
+            expected_annotations = (
+                [""] * len(expected_args) if framework == "flask" else ["int", "dict"]
+            )
+            status = 200
+            write = {"operation": "replace", "model": model["name"], "lookup": primary["name"]}
         else:
             primary = next((field for field in fields if field["primary_key"]), None)
             if primary is None:
@@ -393,6 +438,42 @@ return Response(status=204)
             expected_args = ["request", primary["name"]]
             status = 204
             write = {"operation": "delete", "model": model["name"], "lookup": primary["name"]}
+        elif method == "PUT":
+            primary = next((field for field in fields if field["primary_key"]), None)
+            if primary is None:
+                continue
+            assignments = "\n".join(
+                f"item.{field['name']} = "
+                + (
+                    f"request.data.get({field['name']!r})"
+                    if field["nullable"]
+                    else f"request.data[{field['name']!r}]"
+                )
+                for field in writable
+            )
+            validation = _write_validation(
+                fields,
+                "request.data",
+                False,
+                'return Response({"error": "invalid request body"}, status=400)',
+            )
+            lookup = (
+                f"item = {model['name']}.objects.filter("
+                f"{primary['name']}={primary['name']}).first()\n"
+            )
+            source = (
+                validation
+                + lookup
+                + f"""if item is None:
+    return Response({{"error": "not found"}}, status=404)
+{assignments}
+item.save(update_fields={[field["name"] for field in writable]!r})
+return Response({response})
+"""
+            )
+            expected_args = ["request", primary["name"]]
+            status = 200
+            write = {"operation": "replace", "model": model["name"], "lookup": primary["name"]}
         else:
             primary = next((field for field in fields if field["primary_key"]), None)
             if primary is None:
@@ -612,12 +693,12 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                     and isinstance(route.func, ast.Attribute)
                     and isinstance(route.func.value, ast.Name)
                     and route.func.value.id == "app"
-                    and route.func.attr in {"get", "post", "patch", "delete"}
+                    and route.func.attr in {"get", "post", "put", "patch", "delete"}
                     and len(route.args) == 1
                     and (
                         (
                             not route.keywords
-                            and (framework == "flask" or route.func.attr in {"get", "patch"})
+                            and (framework == "flask" or route.func.attr in {"get", "put", "patch"})
                         )
                         or (
                             framework == "fastapi"
@@ -629,7 +710,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                         )
                     )
                 ):
-                    raise ValueError("only app.get/post/patch/delete(literal_path) is qualified")
+                    raise ValueError(
+                        "only app.get/post/put/patch/delete(literal_path) is qualified"
+                    )
                 bindings.append((ast.literal_eval(route.args[0]), name, route.func.attr.upper()))
         used: set[str] = set()
         for route_path, name, method in bindings:
@@ -642,6 +725,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                     method = "POST"
                 elif first == "api_view(['PATCH'])":
                     method = "PATCH"
+                elif first == "api_view(['PUT'])":
+                    method = "PUT"
                 elif first == "api_view(['DELETE'])":
                     method = "DELETE"
             match = FLASK_INT_PATH.fullmatch(route_path) if framework == "flask" else None
@@ -654,7 +739,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             invalid_path = (
                 type(route_path) is not str or not PATH.fullmatch(route_path) or "//" in route_path
             )
-            if invalid_path and not (method in {"PATCH", "DELETE"} and ":" in route_path):
+            if invalid_path and not (method in {"PUT", "PATCH", "DELETE"} and ":" in route_path):
                 raise ValueError("dynamic route parameters or nonliteral paths are not qualified")
             used.add(name)
             if framework == "drf":
@@ -685,9 +770,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 raise ValueError("jsonify must be imported from flask")
             if isinstance(function, ast.AsyncFunctionDef) and framework != "fastapi":
                 raise ValueError("async handlers are qualified only for FastAPI")
-            if method in {"POST", "PATCH", "DELETE"} and framework in {"flask", "fastapi"}:
+            if method in {"POST", "PUT", "PATCH", "DELETE"} and framework in {"flask", "fastapi"}:
                 payload = _sqlalchemy_write(function, framework, method, models)
-            elif method in {"POST", "PATCH", "DELETE"} and framework == "drf":
+            elif method in {"POST", "PUT", "PATCH", "DELETE"} and framework == "drf":
                 payload = _drf_write(function, method, models)
             else:
                 payload = _payload(function, framework, models)
