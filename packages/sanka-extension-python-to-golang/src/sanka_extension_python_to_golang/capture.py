@@ -51,6 +51,7 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
     allowed = {
         "source_framework",
         "target_framework",
+        "target",
         "source_file",
         "database_layer",
         "extension_plan_hash",
@@ -61,9 +62,14 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
     }
     if set(raw) - allowed:
         raise ValueError("unknown configuration fields: " + ", ".join(sorted(set(raw) - allowed)))
+    for key in ("target", "target_framework"):
+        if key in raw and (type(raw[key]) is not str or raw[key] not in TARGETS):
+            raise ValueError(f"{key} must be fiber, chi, mux or gin")
+    if "target" in raw and "target_framework" in raw and raw["target"] != raw["target_framework"]:
+        raise ValueError("target and target_framework must match")
     result = {
         "source_framework": raw.get("source_framework", ""),
-        "target_framework": raw.get("target_framework", "fiber"),
+        "target_framework": raw.get("target_framework", raw.get("target", "fiber")),
         "source_file": raw.get("source_file", "app.py"),
         "database_layer": raw.get("database_layer", "none"),
     }

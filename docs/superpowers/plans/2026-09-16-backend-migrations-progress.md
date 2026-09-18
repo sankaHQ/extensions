@@ -315,6 +315,22 @@ The source/target fixture compares cookie and Vary behavior and verifies lazy SQ
 access; valid untouched cookies remain unread when save-every-request is disabled.
 
 
+## Python-to-Golang coordination: target selection
+
+Implementation rebased onto main `5842af1` after approved filter PR70 merged.
+The extension now accepts `target` as an alias for `target_framework`, rejects
+invalid/conflicting selections and normalizes both spellings before capture and
+plan hashing. Fiber remains the default only when neither key is supplied.
+Tests cover all four targets, equivalent plans, apply and changed-target rejection
+in test/verify. Native parity tests also exercise the alias during test/verify.
+The runtime forwarding change remains separately owned; this does not claim that
+current CLI versions forward `--to` or that a marketplace manifest is published.
+
+Initial Go-enabled package checks passed 118 tests with 24 PostgreSQL service skips.
+The final focused native alias suite passed 43 tests. Post-rebase repository and Go
+checks are recorded in the PR; local PostgreSQL cases require the CI service.
+
+
 ## Task 11: scalar field-presence contract (2026-09-18)
 
 The shared helper now contains an opt-in `InputValue` contract. An absent field

@@ -195,9 +195,13 @@ print(json.dumps({"status": response.status_code, "body": response.json}))
     assert expected == {"status": 200, "body": PAYLOAD}
     output = apply(tmp_path, framework, target)
     before = {path.name: path.read_bytes() for path in output.iterdir()}
-    tested = handle(dataclasses.replace(request(tmp_path, framework, target), command="test"))
+    alias = dataclasses.replace(
+        request(tmp_path, framework, target),
+        configuration={"source_framework": framework, "target": target},
+    )
+    tested = handle(dataclasses.replace(alias, command="test"))
     assert tested.outcome == "success", tested.error
-    verified = handle(dataclasses.replace(request(tmp_path, framework, target), command="verify"))
+    verified = handle(dataclasses.replace(alias, command="verify"))
     assert verified.outcome == "success", verified.error
     assert verified.data["source"] == [
         {
@@ -317,3 +321,51 @@ def test_replay_requires_current_applied_plan(tmp_path: Path) -> None:
     extra.unlink()
     (tmp_path / "app.py").write_text(source("flask") + "\n# changed\n")
     assert "differs from the applied plan" in handle(req).error.message
+
+
+@pytest.mark.parametrize("target", TARGETS)
+def test_target_alias_plan_and_apply(tmp_path: Path, target: str) -> None:
+    (tmp_path / "app.py").write_text(source("flask"))
+    explicit = request(tmp_path, target=target)
+    alias = dataclasses.replace(
+        explicit, configuration={"source_framework": "flask", "target": target}
+    )
+    expected = handle(explicit)
+    planned = handle(alias)
+    assert planned.outcome == "success", planned.error
+    assert planned.data == expected.data
+    assert configuration(alias.configuration | {"target_framework": target}) == configuration(
+        explicit.configuration
+    )
+    result = handle(
+        dataclasses.replace(
+            alias,
+            command="apply",
+            reviewed_plan_hash="runtime-reviewed-plan",
+            configuration=alias.configuration | {"extension_plan_hash": planned.data["plan_hash"]},
+        )
+    )
+    assert result.outcome == "success", result.error
+    for command in ("test", "verify"):
+        changed = handle(
+            dataclasses.replace(
+                alias,
+                command=command,
+                configuration=alias.configuration | {"target": "gin" if target != "gin" else "chi"},
+            )
+        )
+        assert changed.outcome == "error"
+        assert changed.error is not None
+        assert "differs" in changed.error.message
+
+
+@pytest.mark.parametrize("value", [None, False, 0, "", "rust", [], {}])
+@pytest.mark.parametrize("key", ["target", "target_framework"])
+def test_invalid_target_alias(key: str, value: object) -> None:
+    with pytest.raises(ValueError, match="must be fiber"):
+        configuration({"source_framework": "flask", key: value})
+
+
+def test_conflicting_target_alias() -> None:
+    with pytest.raises(ValueError, match="must match"):
+        configuration({"source_framework": "flask", "target": "chi", "target_framework": "fiber"})
