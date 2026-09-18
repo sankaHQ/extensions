@@ -10,6 +10,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from textwrap import indent
 from typing import Any
 
 from .models import capture_models
@@ -207,6 +208,228 @@ def _write_validation(fields: list[dict[str, Any]], data: str, partial: bool, er
     ):
         {error}
 """
+
+
+def _normalize_pydantic(
+    tree: ast.Module, models: list[dict[str, Any]], framework: str
+) -> ast.Module:
+    """Lower explicit strict schemas to the existing, qualified write validator."""
+    schema_imports = {"BaseModel", "ConfigDict", "Field", "ValidationError"}
+    imported: set[str] = set()
+    classes: dict[str, ast.ClassDef] = {}
+    names: set[str] = set()
+    for node in tree.body:
+        declared = []
+        if isinstance(node, ast.ImportFrom):
+            declared = [a.asname or a.name for a in node.names]
+            if node.module == "pydantic":
+                if node.level or any(a.asname or a.name not in schema_imports for a in node.names):
+                    raise ValueError("only explicit Pydantic schema imports are qualified")
+                imported.update(a.name for a in node.names)
+        elif isinstance(node, ast.Assign):
+            declared = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            declared = [node.name]
+        if names.intersection(declared):
+            raise ValueError("schema symbols must not be reassigned")
+        names.update(declared)
+        if isinstance(node, ast.ClassDef):
+            if node.name in {"int", "str", "bool", "dict", "list", "set", "type"}:
+                raise ValueError("schema names must not shadow builtins")
+            classes[node.name] = node
+    if not imported:
+        return tree
+    if framework not in {"fastapi", "flask"} or not models:
+        raise ValueError("strict Pydantic schemas require a qualified SQLAlchemy write")
+    used: set[str] = set()
+    available: set[str] = set()
+    imported_so_far: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == "pydantic":
+            imported_so_far.update(a.name for a in node.names)
+        if isinstance(node, ast.ClassDef):
+            if not {"BaseModel", "ConfigDict", "Field"} <= imported_so_far:
+                raise ValueError("schema imports must precede their declarations")
+            available.add(node.name)
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        locals_ = {
+            n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+        }
+        locals_ |= {arg.arg for arg in node.args.args}
+        # The existing recipe checker still validates every remaining statement,
+        # argument, decorator and database operation after this replacement.
+        for index, statement in enumerate(node.body):
+            if not isinstance(statement, ast.Try):
+                continue
+            matched = False
+            for name in sorted(available - locals_):
+                for model in models:
+                    for partial in (False, True):
+                        lines = [
+                            f"class {name}(BaseModel):",
+                            "    model_config = ConfigDict(strict=True, extra='forbid')",
+                        ]
+                        for field in model["fields"]:
+                            if field["auto"]:
+                                continue
+                            key = field["name"]
+                            if key.startswith(("_", "model_")) or key in schema_imports | {
+                                "str",
+                                "int",
+                                "bool",
+                            }:
+                                raise ValueError("schema field conflicts with Pydantic names")
+                            kind = {
+                                "string": "str",
+                                "bool": "bool",
+                                "int32": "int",
+                                "int64": "int",
+                            }[field["go_type"]]
+                            if field["nullable"]:
+                                kind += " | None"
+                            options = ["default=None"] if partial or field["nullable"] else []
+                            if field["go_type"] in {"int32", "int64"}:
+                                bits = 32 if field["go_type"] == "int32" else 64
+                                options += [f"ge={-(2 ** (bits - 1))}", f"le={2 ** (bits - 1) - 1}"]
+                            lines.append(f"    {key}: {kind} = Field({', '.join(options)})")
+                        if ast.dump(classes[name]) != ast.dump(ast.parse("\n".join(lines)).body[0]):
+                            continue
+                        error = (
+                            'return jsonify({"error": "invalid request body"}), 400'
+                            if framework == "flask"
+                            else (
+                                "raise HTTPException(status_code=400, "
+                                'detail="invalid request body")'
+                            )
+                        )
+                        recipe = ast.parse(
+                            f"try:\n    data = {name}.model_validate(data)"
+                            ".model_dump(exclude_unset=True)\n"
+                            f"except ValidationError:\n    {error}\n"
+                        ).body[0]
+                        if (
+                            ast.dump(statement) != ast.dump(recipe)
+                            or "ValidationError" not in imported
+                        ):
+                            continue
+                        node.body[index] = ast.copy_location(
+                            ast.parse(
+                                _write_validation(model["fields"], "data", partial, error)
+                            ).body[0],
+                            statement,
+                        )
+                        used.add(name)
+                        matched = True
+                        break
+                    if matched:
+                        break
+                if matched:
+                    break
+    if used != classes.keys():
+        raise ValueError(
+            "unused or unsupported Pydantic schema; coercion, aliases, hooks "
+            "and nested fields require additional capture"
+        )
+    tree.body = [
+        node
+        for node in tree.body
+        if not isinstance(node, ast.ClassDef)
+        and not (isinstance(node, ast.ImportFrom) and node.module == "pydantic")
+    ]
+    return ast.fix_missing_locations(tree)
+
+
+def _normalize_drf_serializers(tree: ast.Module, models: list[dict[str, Any]]) -> ast.Module:
+    """Recognize strict BaseSerializer validation without executing serializer code."""
+    schema_imports = {"BaseSerializer", "ValidationError"}
+    imports: set[str] = set()
+    schemas: dict[str, list[dict[str, Any]]] = {}
+    used: set[str] = set()
+    result: list[ast.stmt] = []
+
+    class ValidatedData(ast.NodeTransformer):
+        def visit_Name(self, node: ast.Name) -> ast.expr:
+            if node.id == "data" and isinstance(node.ctx, ast.Load):
+                return ast.copy_location(ast.parse("request.data", mode="eval").body, node)
+            return node
+
+    if not any(
+        isinstance(node, ast.ImportFrom) and node.module == "rest_framework.serializers"
+        for node in tree.body
+    ):
+        return tree
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == "rest_framework.serializers":
+            if node.level or any(a.asname or a.name not in schema_imports for a in node.names):
+                raise ValueError(
+                    "only explicit BaseSerializer and ValidationError imports are qualified"
+                )
+            imports.update(a.name for a in node.names)
+            continue
+        if isinstance(node, ast.ClassDef):
+            if imports != schema_imports:
+                raise ValueError("serializer imports must precede their declarations")
+            for model in models:
+                error = 'raise ValidationError("invalid request body")'
+                source = (
+                    f"class {node.name}(BaseSerializer):\n"
+                    "    def to_internal_value(self, data):\n"
+                    "        if self.partial:\n"
+                    + indent(
+                        _write_validation(model["fields"], "data", True, error), "            "
+                    )
+                    + "        else:\n"
+                    + indent(
+                        _write_validation(model["fields"], "data", False, error), "            "
+                    )
+                    + "        return data\n"
+                )
+                if ast.dump(node) == ast.dump(ast.parse(source).body[0]):
+                    schemas[node.name] = model["fields"]
+                    break
+            else:
+                raise ValueError("serializer is outside the qualified strict BaseSerializer recipe")
+            continue
+        if isinstance(node, ast.FunctionDef):
+            locals_ = {
+                n.id
+                for n in ast.walk(node)
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+            }
+            locals_ |= {arg.arg for arg in node.args.args}
+            error = 'return Response({"error": "invalid request body"}, status=400)'
+            for name, fields in schemas.items():
+                if name in locals_:
+                    continue
+                matched = False
+                for partial in (False, True):
+                    prefix = ast.parse(
+                        f"serializer = {name}(data=request.data, partial={partial})\n"
+                        "if not serializer.is_valid():\n"
+                        f"    {error}\n"
+                        "data = serializer.validated_data\n"
+                    ).body
+                    if ast.dump(ast.Module(body=node.body[:3], type_ignores=[])) != ast.dump(
+                        ast.Module(body=prefix, type_ignores=[])
+                    ):
+                        continue
+                    remaining = ast.Module(body=node.body[3:], type_ignores=[])
+                    ValidatedData().visit(remaining)
+                    node.body = (
+                        ast.parse(_write_validation(fields, "request.data", partial, error)).body
+                        + remaining.body
+                    )
+                    used.add(name)
+                    matched = True
+                    break
+                if matched:
+                    break
+        result.append(node)
+    if not schemas or used != schemas.keys():
+        raise ValueError("unused serializer or unsupported serializer invocation")
+    tree.body = result
+    return ast.fix_missing_locations(tree)
 
 
 def _sqlalchemy_write(
@@ -600,6 +823,12 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         tree = normalize_routes(tree, framework)
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("routing: " + str(error))
+    try:
+        tree = _normalize_pydantic(tree, models, framework)
+        if framework == "drf":
+            tree = _normalize_drf_serializers(tree, models)
+    except (ValueError, TypeError, SyntaxError) as error:
+        gaps.append("validation: " + str(error))
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     imports: set[str] = set()
     assignments: dict[str, ast.expr] = {}

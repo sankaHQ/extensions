@@ -556,3 +556,37 @@ exercise grouped paths in the service-backed CI lane. Serializers, Pydantic requ
 models, auth/permissions, middleware, relationships and shared write replay remain
 open. Keep delivering coherent batches with one review checkpoint per batch;
 these routing capabilities do not close the full backend milestone.
+
+
+## Strict Pydantic validation batch (2026-09-18)
+
+PR85 merged as `d7c9126` with all required checks passing. Explicit strict Pydantic
+schemas now lower to the existing Flask/FastAPI SQLAlchemy write validator for
+Fiber, chi, mux and Gin. Capture requires flat fields matching captured database
+types, integer bounds, forbidden extras, explicit generic validation errors and
+presence-preserving dumps. Source schemas remain unchanged for execution; capture
+only inspects ASTs. Imported schema files remain included in the source hash.
+
+Native Go decoder tests compare acceptance, field values and presence with the
+original Pydantic classes. Original Flask/FastAPI clients check invalid JSON object
+responses. The existing PostgreSQL CRUD lifecycle also covers schema-based grouped
+routes in the opt-in CI lane. These checks do not claim general source/target write
+replay or native FastAPI 422 parity. DRF serializers, general Pydantic coercion and
+constraints, auth, middleware, relationships and shared replay remain unfinished;
+Task 14 remains open.
+
+
+## DRF strict serializer continuation (2026-09-18)
+
+PR86 was approved while CI was still running. Follow-on validation found that a
+schema named after a handler local could be normalized despite failing in Python.
+The PR is expanded before merge to reject those collisions for both schema paths;
+the final changed head requires renewed approval.
+
+DRF explicit strict `BaseSerializer.to_internal_value` methods now reuse the
+qualified write validator. Capture verifies the full method, imports, invocation,
+partial mode, generic error response and validated-data consumption, rejecting
+coercion and custom hooks. Native tests compare acceptance and values with Go and
+exercise original DRF POST/PUT/PATCH error responses. The PostgreSQL CI lane adds
+schema-based grouped CRUD for Fiber, chi, mux and Gin. General field-based DRF
+serializers and native field errors remain open, as do the broader Task 14 gates.

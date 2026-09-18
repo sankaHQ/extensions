@@ -72,7 +72,7 @@ and missing module globals block generation.
 A Flask factory may take no arguments, construct `app = Flask(__name__)`, register
 blueprints, and return the app, followed by `app = create_app()` at module scope.
 Factory configuration, hooks, nested router registration, custom dependencies,
-Pydantic models, DRF serializers/ViewSets and custom authentication still require
+General Pydantic models, DRF serializers/ViewSets and custom authentication still require
 additional capture. This routing support does not imply whole-project parity.
 
 ## Process entrypoint
@@ -276,6 +276,89 @@ empty-result behavior. CI seeds both varchar and nullable-text predicates,
 checks filter/order/limit behavior and unchanged row counts, and verifies that a
 changed candidate fixture is detected. Native parser tests additionally compare
 all single-byte encodings and malformed UTF-8 boundaries with real Python clients.
+
+## Strict Pydantic write schemas
+
+Flask and FastAPI can use explicit Pydantic validation before the existing
+SQLAlchemy POST/PUT/PATCH recipes. Capture recognizes flat `BaseModel` classes,
+including classes imported from flat local modules, with exactly
+`ConfigDict(strict=True, extra="forbid")`. Every writable database field must be
+declared with `Field(...)`; integer fields need the captured int32/int64 `ge`/`le`
+bounds. Nullable fields use `T | None` and `Field(default=None)`.
+
+```python
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+
+class WidgetInput(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    name: str = Field()
+    count: int = Field(ge=-2147483648, le=2147483647)
+    enabled: bool = Field()
+    note: str | None = Field(default=None)
+```
+
+Inside a qualified handler, replace its manual validation block with:
+
+```python
+try:
+    data = WidgetInput.model_validate(data).model_dump(exclude_unset=True)
+except ValidationError:
+    raise HTTPException(status_code=400, detail="invalid request body")
+```
+
+Flask uses `return jsonify({"error": "invalid request body"}), 400` instead.
+Its existing `data = request.get_json()` remains before validation. FastAPI keeps
+`data: dict`; automatic request-model injection and its native 422 error format
+are not captured by this recipe.
+
+PATCH uses a separate schema with `default=None` on every field, retaining
+nonnullable annotations for nonnullable columns. Pydantic does not validate these
+omitted defaults; `exclude_unset=True` removes them. Explicit null is still rejected
+for nonnullable fields. False, zero, empty string and explicit nullable null remain
+present. No source code runs during capture; qualified schemas lower to the same
+Go decoder as manual validation.
+
+Coercion, custom validators/serializers, aliases, nested schemas, different defaults,
+extra constraints, unused classes and inheritance beyond `BaseModel` block capture.
+Tests compare Pydantic outcomes and values with native Go decoders for all four
+routers, check invalid-object responses through original Python test clients, and
+exercise generated CRUD on PostgreSQL in CI. This is not full HTTP write replay:
+malformed/non-object body parity, native framework validation errors and DRF
+serializer behavior remain open.
+
+## Strict DRF BaseSerializer validation
+
+DRF can move its explicit strict flat-field validation into a `BaseSerializer`
+subclass. Capture accepts only a `to_internal_value(self, data)` method that
+branches on `self.partial`, performs the existing full/partial write validation,
+raises `ValidationError("invalid request body")` on failure, and returns `data`
+unchanged. Import `BaseSerializer` and `ValidationError` directly from
+`rest_framework.serializers`. Imported schema modules are captured and hashed.
+The [executable serializer fixture](tests/test_golang_drf_validation.py) defines
+the complete supported method and handlers.
+
+POST/PUT/PATCH handlers start with this sequence, using `partial=False` for
+POST/PUT and `partial=True` for PATCH:
+
+```python
+serializer = WidgetInput(data=request.data, partial=False)
+if not serializer.is_valid():
+    return Response({"error": "invalid request body"}, status=400)
+data = serializer.validated_data
+```
+
+The remaining qualified ORM recipe reads `data` instead of `request.data`.
+Missing fields, null, false, zero and empty strings retain their existing meaning.
+Source and Go tests compare accepted values and rejected payloads; native DRF
+requests check POST/PUT/PATCH error bodies without opening a server. Generated
+PostgreSQL CRUD fixtures cover grouped routes on all four targets in CI.
+
+Field-based `Serializer`/`ModelSerializer`, coercion, custom persistence methods,
+representation hooks, extra validation, `many=True` and native field-level error
+responses remain unsupported. This contract does not imply arbitrary serializer
+translation. Both Pydantic and DRF capture reject schema names shadowed by handler
+locals, so normalization cannot hide an unbound or incorrectly resolved name.
 
 ## Remaining backend work
 
