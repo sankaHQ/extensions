@@ -94,7 +94,11 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
             "models_file": "models.py",
         }.items():
             value = raw.get(key, default)
-            if type(value) is not str or (key != "models_file" and value != default):
+            if type(value) is not str:
+                raise ValueError(f"only {key}={default} is qualified")
+            if key == "schema_mode" and value not in {"empty", "adopt-existing"}:
+                raise ValueError("schema_mode must be empty or adopt-existing")
+            if key not in {"models_file", "schema_mode"} and value != default:
                 raise ValueError(f"only {key}={default} is qualified")
             result[key] = value
         model_file = result["models_file"]
@@ -831,5 +835,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
 
     if config["database_layer"] == "pgx":
         result["models"] = models
-        result["scope"] = "empty PostgreSQL schema baseline and captured JSON endpoints"
+        result["scope"] = (
+            f"{config['schema_mode']} PostgreSQL schema baseline and captured JSON endpoints"
+        )
     return result

@@ -78,8 +78,9 @@ go build ./cmd/api
 
 Select `database_layer: "pgx"` to generate a PostgreSQL baseline, Go model structs,
 and an embedded Goose migration command. The resolved configuration pins
-`database_dialect: "postgresql"`, `migration_tool: "goose"`, `schema_mode: "empty"`,
-and `models_file: "models.py"`. Other database/tool combinations are rejected.
+`database_dialect: "postgresql"`, `migration_tool: "goose"`, and
+`models_file: "models.py"`. `schema_mode` is `"empty"` by default or may be
+`"adopt-existing"`. Other database/tool combinations are rejected.
 
 DRF models must directly inherit `models.Model` and declare `Meta.app_label`,
 `Meta.db_table`, and an explicit primary key. Flask/FastAPI models currently use
@@ -96,9 +97,17 @@ and model methods remain blockers. Generated structs do not implement validation
 After reviewing the generated SQL, set `DATABASE_URL` and run
 `go run ./cmd/migrate up` from the generated directory. Migrations are embedded,
 transactional and protected by a PostgreSQL session advisory lock. The initial
-migration rejects existing application relations; it never adopts an existing
-schema or transfers data. Reapplying an applied baseline is a no-op.
-`go run ./cmd/migrate down` explicitly drops the generated tables and their data.
+migration in `empty` mode rejects existing application relations. Reapplying an
+applied baseline is a no-op. `go run ./cmd/migrate down` drops tables created by
+that baseline.
+
+`adopt-existing` is a validation-only baseline for a database already created by
+the captured Python models. It checks the table and ordered-column set, types,
+nullability, identity/sequence ownership, primary and unique constraints, and
+rejects extra application tables, unsupported constraints, user triggers and row
+security. Extra indexes are preserved. It takes `ACCESS SHARE` locks on captured
+tables during validation, so run it in a controlled schema-change window.
+Application rows are never changed; `down` only unregisters the Goose baseline.
 Do not edit an applied baseline; later schema changes require new revisions.
 
 PostgreSQL schema, constraint, apply/reapply and rollback equivalence are checked

@@ -523,3 +523,18 @@ Generated projects compile across all twelve combinations. Public replay uses a
 deterministic concrete ID against independently seeded PostgreSQL schemas and
 detects changed target rows or missing rows. Relationships, authorization, richer
 field types and broader handler shapes remain open.
+
+## PostgreSQL existing-schema adoption (2026-09-18)
+
+The pgx profile now accepts `schema_mode: "adopt-existing"` as a validation-only
+Goose baseline. It compares captured tables, ordered columns, types, nullability,
+automatic sequence semantics, primary and unique constraints, and blocks extra
+application relations, unsupported constraints, user triggers and row security.
+Captured tables are locked for the validation transaction. Application rows and
+extra indexes are preserved; rollback only unregisters the baseline.
+
+The existing `empty` mode and its destructive rollback contract are unchanged.
+Opt-in PostgreSQL qualification creates source schemas through Django or
+SQLAlchemy, preserves seeded rows across apply/reapply/down/up, and verifies that
+a mismatched schema is rejected without marking the baseline applied. Generic
+shared write replay and broader model semantics remain separate work.
