@@ -20,7 +20,7 @@ MODULES = {
 }
 
 
-def _fiber_runtime(database: bool, database_configured: bool) -> dict[str, str]:
+def _runtime(target: str, database: bool, database_configured: bool) -> dict[str, str]:
     database_import = '"github.com/jackc/pgx/v5/pgxpool"' if database else ""
     database_field = "\n    databaseURL string" if database else ""
     database_config = (
@@ -55,6 +55,38 @@ def _fiber_runtime(database: bool, database_configured: bool) -> dict[str, str]:
         if database
         else ""
     )
+    if target == "fiber":
+        runtime_imports = '"github.com/gofiber/fiber/v3"'
+        serve = """    return app.Listen(cfg.address, fiber.ListenConfig{
+        DisableStartupMessage: true,
+        GracefulContext: runCtx,
+        ShutdownTimeout: 10*time.Second,
+    })"""
+    else:
+        runtime_imports = '"errors"\n    "net/http"'
+        serve = """    server := &http.Server{
+        Addr: cfg.address,
+        Handler: http.MaxBytesHandler(app, 1048576),
+        ReadHeaderTimeout: 5*time.Second,
+        ReadTimeout: 10*time.Second,
+        WriteTimeout: 30*time.Second,
+        IdleTimeout: 60*time.Second,
+        MaxHeaderBytes: 1048576,
+    }
+    serveErr := make(chan error, 1)
+    go func() { serveErr <- server.ListenAndServe() }()
+    select {
+    case err := <-serveErr:
+        if errors.Is(err, http.ErrServerClosed) { return nil }
+        return err
+    case <-runCtx.Done():
+        shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+        if err := server.Shutdown(shutdownCtx); err != nil { return err }
+        err := <-serveErr
+        if errors.Is(err, http.ErrServerClosed) { return nil }
+        return err
+    }"""
     main = f"""// SPDX-License-Identifier: Apache-2.0
 package main
 
@@ -67,7 +99,7 @@ import (
     "syscall"
     "time"
 
-    "github.com/gofiber/fiber/v3"
+    {runtime_imports}
     {database_import}
     backend "migrated.backend"
 )
@@ -92,11 +124,7 @@ func run() error {{
     if err != nil {{ return err }}
     runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer stop()
-{database_setup}    return app.Listen(cfg.address, fiber.ListenConfig{{
-        DisableStartupMessage: true,
-        GracefulContext: runCtx,
-        ShutdownTimeout: 10*time.Second,
-    }})
+{database_setup}{serve}
 }}
 
 func main() {{
@@ -316,10 +344,7 @@ func NewApp({arguments}) {return_type} {{
 
     if captured["configuration"]["database_layer"] == "pgx":
         result.update(render_database(captured))
-    if target == "fiber":
-        result.update(
-            _fiber_runtime(database, captured["configuration"]["database_layer"] == "pgx")
-        )
+    result.update(_runtime(target, database, captured["configuration"]["database_layer"] == "pgx"))
     if any("filter" in route.get("read", {}) for route in captured["routes"]):
         first = str(captured["configuration"]["source_framework"] == "flask").lower()
         result["query.go"] = QUERY_SOURCE.replace("QUERY_FIRST", first)

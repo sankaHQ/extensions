@@ -454,16 +454,19 @@ baseline, exercises Fiber HTTP requests, and reads back database effects for all
 three captured source frameworks when the explicit CI fixture is available.
 
 
-## Task 12: Fiber process boundary (2026-09-18)
+## Task 12: target process boundaries (2026-09-18)
 
 Fiber output now has a runnable `cmd/api` with validated `PORT`, conditional
 `DATABASE_URL`, bounded pgx startup, pool ownership, HTTP body/read/write/idle
 limits, and Fiber's native signal-driven graceful shutdown with a ten-second
-shutdown bound. Database migrations remain an explicit `cmd/migrate` operation;
-the API never migrates on boot. Generated configuration tests and Go builds cover
-both database-free and database-backed applications without starting a listener.
+shutdown bound. chi, mux and Gin now use the same configuration and pgx ownership
+contract with a bounded standard `net/http` server, including body/header limits,
+timeouts and graceful shutdown. Database migrations remain an explicit `cmd/migrate`
+operation; the API never migrates on boot. Generated configuration tests and Go
+test, vet and build checks cover all four targets with and without database-backed
+handlers without starting a listener.
 
 The shared HTTP replay package is still absent from `main`, so this slice does
-not create a competing replay implementation. chi, mux and Gin process entrypoints,
-health/readiness policy, deployment packaging, hosted recipes, and write replay
-remain separate qualification work.
+not create a competing replay implementation. Health/readiness policy, deployment
+packaging, hosted recipes, non-Fiber writes and write replay remain separate
+qualification work.
