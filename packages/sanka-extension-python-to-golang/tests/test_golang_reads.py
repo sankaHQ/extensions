@@ -183,13 +183,23 @@ def test_detail_read_requires_matching_route_parameter(tmp_path: Path) -> None:
 )
 @pytest.mark.parametrize("framework", SOURCES)
 @pytest.mark.parametrize("target", TARGETS)
+@pytest.mark.parametrize("grouped", [False, True])
 def test_detail_read_database_lifecycle(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, framework: str, target: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, framework: str, target: str, grouped: bool
 ) -> None:
     import psycopg
     from psycopg import sql
+    from test_golang_routing import group_backend
 
-    output = generate(tmp_path, framework, target, app_source=detail_source(framework))
+    text = detail_source(framework)
+    if grouped:
+        (tmp_path / "routes.py").write_text(group_backend(text, framework))
+        text = (
+            "from routes import urlpatterns\n"
+            if framework == "drf"
+            else "from routes import app, engine\n"
+        )
+    output = generate(tmp_path, framework, target, app_source=text)
     dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
     schemas = ["go_detail_" + uuid.uuid4().hex for _ in range(2)]
     environment = os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"}

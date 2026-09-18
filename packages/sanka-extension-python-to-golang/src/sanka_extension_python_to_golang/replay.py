@@ -41,6 +41,7 @@ if models_file:
     model_module = importlib.util.module_from_spec(model_spec)
     sys.modules[model_spec.name] = model_module
     model_spec.loader.exec_module(model_module)
+sys.path.insert(0, str(Path(filename).parent))
 spec = importlib.util.spec_from_file_location("migration_source", filename)
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
@@ -66,7 +67,12 @@ if use_database == "1":
         from django.db import connections
         connections.close_all()
     else:
-        module.engine.dispose()
+        for loaded in tuple(sys.modules.values()):
+            origin = getattr(loaded, "__file__", None)
+            if origin and Path(origin).parent == Path(filename).parent:
+                engine = getattr(loaded, "engine", None)
+                if engine is not None:
+                    engine.dispose()
 """
 
 
@@ -266,6 +272,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
         if snapshot.get(name) != expected_files[name].encode():
             raise ValueError(f"candidate {name} differs from the applied plan")
     source_bytes = (root / config["source_file"]).read_bytes()
+    module_bytes = {name: (root / name).read_bytes() for name in captured.get("source_modules", [])}
     model_bytes = (
         (root / config["models_file"]).read_bytes() if config["database_layer"] == "pgx" else None
     )
@@ -328,6 +335,8 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             # Execute the exact captured source snapshot, not an import through PYTHONPATH.
             source_directory = workspace / "source"
             source_directory.mkdir()
+            for name, content in module_bytes.items():
+                (source_directory / name).write_bytes(content)
             model_file = ""
             if model_bytes is not None:
                 model_path = source_directory / config["models_file"]

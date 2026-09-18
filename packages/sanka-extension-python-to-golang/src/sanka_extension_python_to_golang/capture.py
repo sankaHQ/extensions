@@ -14,6 +14,7 @@ from typing import Any
 
 from .models import capture_models
 from .queries import capture_read
+from .routing import normalize_routes, project_tree
 
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
@@ -25,7 +26,7 @@ IMPORTS = {
     "flask": {"flask": {"Flask", "jsonify"}},
     "fastapi": {"fastapi": {"FastAPI", "HTTPException"}},
     "drf": {
-        "django.urls": {"path"},
+        "django.urls": {"path", "include"},
         "rest_framework.decorators": {
             "api_view",
             "authentication_classes",
@@ -534,6 +535,12 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     # Inspect all source files, excluding only known generated/tool environments.
     records: dict[str, str] = {}
     gaps: list[str] = []
+    modules: list[str] = []
+    tree = ast.parse(path.read_text(), filename=filename)
+    try:
+        tree, modules = project_tree(root, filename, config.get("models_file", ""))
+    except (ValueError, TypeError, SyntaxError) as error:
+        gaps.append("project: " + str(error))
     ignored = {".git", ".venv", ".sanka", "__pycache__"}
     total = 0
     for directory, names, filenames in os.walk(root, followlinks=False):
@@ -553,6 +560,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             if (
                 source.suffix == ".py"
                 and source != path
+                and relative.as_posix() not in modules
                 and source != root / config.get("models_file", "")
             ):
                 gaps.append(f"{relative}: additional Python modules require whole-project capture")
@@ -588,7 +596,10 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             allowed_imports[model_module] = {model["name"] for model in models} - reserved
         except (ValueError, TypeError, OSError, SyntaxError) as error:
             gaps.append("models: " + str(error))
-    tree = ast.parse(path.read_text(), filename=filename)
+    try:
+        tree = normalize_routes(tree, framework)
+    except (ValueError, TypeError, SyntaxError) as error:
+        gaps.append("routing: " + str(error))
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     imports: set[str] = set()
     assignments: dict[str, ast.expr] = {}
@@ -833,6 +844,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         "complete_backend": False,
     }
 
+    if modules:
+        result["source_modules"] = modules
     if config["database_layer"] == "pgx":
         result["models"] = models
         result["scope"] = (
