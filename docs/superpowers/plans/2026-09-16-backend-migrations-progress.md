@@ -512,3 +512,14 @@ the source-specific 404 response.
 The isolated lifecycle covers incomplete bodies, invalid and missing lookups,
 successful replacement and final deletion. Rich serializer coercion, relationships,
 authorization and shared public write replay remain open.
+
+## Task 12: bounded detail reads (2026-09-18)
+
+DRF, Flask and FastAPI now recognize one exact flat-model GET by integer primary
+key, including the source-specific not-found response. Fiber, chi, mux and Gin
+lower it to a parameterized pgx query and use each router's native path lookup.
+
+Generated projects compile across all twelve combinations. Public replay uses a
+deterministic concrete ID against independently seeded PostgreSQL schemas and
+detects changed target rows or missing rows. Relationships, authorization, richer
+field types and broader handler shapes remain open.

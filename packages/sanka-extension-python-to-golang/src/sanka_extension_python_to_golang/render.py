@@ -180,6 +180,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     helpers = []
     write_models: set[str] = set()
     has_reads = any("read" in route for route in captured["routes"])
+    has_detail_reads = any("lookup" in route.get("read", {}) for route in captured["routes"])
     for index, route in enumerate(captured["routes"]):
         path = canonical(route["path"])
         if "write" in route:
@@ -295,6 +296,12 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             model = next(
                 item for item in captured["models"] if item["name"] == route["read"]["model"]
             )
+            if "lookup" in route["read"]:
+                helpers.append(_detail_read_helper(index, route["read"], model))
+                registrations.append(
+                    _detail_read_registration(index, route, model, target, error_key)
+                )
+                continue
             helpers.append(_read_helper(index, route["read"], model))
             raw_query = {
                 "fiber": "string(c.Request().URI().QueryString())",
@@ -375,6 +382,8 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     imports = []
     if has_reads:
         imports.extend(['"context"', '"encoding/json"'])
+    if has_detail_reads:
+        imports.extend(['"errors"', '"strconv"', '"github.com/jackc/pgx/v5"'])
     if target == "fiber":
         imports.append('"time"')
     if has_writes:
@@ -472,6 +481,69 @@ def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str
     }}
     if err := rows.Err(); err != nil {{ return nil, err }}
     return json.Marshal(items)
+}}
+"""
+
+
+def _detail_read_registration(
+    index: int,
+    route: dict[str, Any],
+    model: dict[str, Any],
+    target: str,
+    error_key: str,
+) -> str:
+    field = next(item for item in model["fields"] if item["name"] == route["read"]["lookup"])
+    bits = "32" if field["go_type"] == "int32" else "64"
+    name = canonical(field["name"])
+    path = route["path"]
+    if target == "fiber":
+        return f"""app.Get({canonical(path)}, func(c fiber.Ctx) error {{
+        rawID, parseErr := strconv.ParseInt(c.Params({name}), 10, {bits})
+        if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
+        body, err := readRow{index}(c.Context(), pool, {field["go_type"]}(rawID))
+        c.Set("Content-Type", "application/json")
+        if errors.Is(err, pgx.ErrNoRows) {{ return c.Status(404).JSON(fiber.Map{{{canonical(error_key)}: "not found"}}) }}
+        if err != nil {{ return c.Status(500).Send([]byte(`{{"error":"database read failed"}}`)) }}
+        return c.Send(body)
+    }})"""
+    if target == "gin":
+        return f"""app.GET({canonical(path)}, func(c *gin.Context) {{
+        rawID, parseErr := strconv.ParseInt(c.Param({name}), 10, {bits})
+        if parseErr != nil {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid lookup"}}); return }}
+        body, err := readRow{index}(c.Request.Context(), pool, {field["go_type"]}(rawID))
+        if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{canonical(error_key)}: "not found"}}); return }}
+        if err != nil {{ c.Data(500, "application/json", []byte(`{{"error":"database read failed"}}`)); return }}
+        c.Data(200, "application/json", body)
+    }})"""
+    registered_path = path.replace(f":{field['name']}", f"{{{field['name']}}}")
+    parameter = f"chi.URLParam(r, {name})" if target == "chi" else f"mux.Vars(r)[{name}]"
+    registration = (
+        f'app.MethodFunc("GET", {canonical(registered_path)},'
+        if target == "chi"
+        else f"app.HandleFunc({canonical(registered_path)},"
+    )
+    suffix = ")" if target == "chi" else ').Methods("GET")'
+    return f"""{registration} func(w http.ResponseWriter, r *http.Request) {{
+        rawID, parseErr := strconv.ParseInt({parameter}, 10, {bits})
+        w.Header().Set("Content-Type", "application/json")
+        if parseErr != nil {{ w.WriteHeader(400); _ = json.NewEncoder(w).Encode(map[string]string{{{canonical(error_key)}: "invalid lookup"}}); return }}
+        body, err := readRow{index}(r.Context(), pool, {field["go_type"]}(rawID))
+        if errors.Is(err, pgx.ErrNoRows) {{ w.WriteHeader(404); _ = json.NewEncoder(w).Encode(map[string]string{{{canonical(error_key)}: "not found"}}); return }}
+        if err != nil {{ w.WriteHeader(500); _, _ = w.Write([]byte(`{{"error":"database read failed"}}`)); return }}
+        _, _ = w.Write(body)
+    }}{suffix}"""
+
+
+def _detail_read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str:
+    fields = model["fields"]
+    lookup = next(field for field in fields if field["name"] == read["lookup"])
+    columns = ", ".join('"' + field["name"] + '"' for field in fields)
+    destinations = ", ".join("&item." + go_name(field["name"]) for field in fields)
+    query = f'SELECT {columns} FROM "{model["table"]}" WHERE "{lookup["name"]}" = $1'
+    return f"""func readRow{index}(ctx context.Context, pool *pgxpool.Pool, lookup {lookup["go_type"]}) ([]byte, error) {{
+    var item {model["name"]}
+    if err := pool.QueryRow(ctx, {canonical(query)}, lookup).Scan({destinations}); err != nil {{ return nil, err }}
+    return json.Marshal(item)
 }}
 """
 

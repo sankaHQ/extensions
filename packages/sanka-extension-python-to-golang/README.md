@@ -147,6 +147,16 @@ imports/app construction still follow the literal endpoint profile. This is not
 Flask-SQLAlchemy extension capture. Joins, unsupported filters, partial projections, dynamic
 pagination, custom sessions, and async database handlers block generation.
 
+The same profile recognizes one exact integer-primary-key detail GET. DRF must
+use `filter(id=id).first()`; Flask and FastAPI must use `Session.get`. Each handler
+must return every field in declaration order and an explicit source-shaped 404.
+Generated Fiber, chi, mux, and Gin handlers parse the route ID, run one
+parameterized query, and return the captured object, 404, or a generic database
+error. Public replay replaces the captured parameter with a deterministic fixture
+ID and compares the real Python and Go responses against independently seeded
+PostgreSQL schemas.
+Malformed or negative path-parameter parity remains outside this bounded profile.
+
 ## First write profile
 
 Fiber, chi, mux, and Gin with pgx accept one bounded create/PUT/PATCH/DELETE recipe for a captured flat model. DRF uses
