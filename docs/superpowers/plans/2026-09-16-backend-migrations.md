@@ -488,7 +488,8 @@ rejected by configuration validation until implemented, not advertised as generi
 when reuse requires it. Bounded support already exists for all three sources.
 **Modify:** Go capability matrix as each additional behavior is qualified.
 
-- [ ] DRF scanner: expand serializers, views/routers, permissions and application
+- [ ] DRF scanner: explicit strict BaseSerializer validation is bounded support;
+  expand field-based serializers, views/routers, permissions and application
   settings without silently dropping unsupported behavior.
 
 - [ ] Flask scanner: application factories, Blueprints, installed ORM/schema libraries,

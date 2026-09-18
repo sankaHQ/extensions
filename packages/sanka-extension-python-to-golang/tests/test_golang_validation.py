@@ -79,6 +79,9 @@ def test_strict_schema_reuses_write_contract(tmp_path: Path, framework: str, tar
     [
         ("strict=True", "strict=False"),
         ("WidgetInput", "str"),
+        ("WidgetInput", "data"),
+        ("WidgetInput", "item"),
+        ("WidgetInput", "session"),
         ("extra='forbid'", "extra='ignore'"),
         ("le=2147483647", "le=2147483648"),
         ("name: str", "name: int"),
@@ -216,6 +219,10 @@ def test_python_schema_and_go_decoder_agree(
                     "expected": result,
                 }
             )
+    assert_go_decoder_parity(tmp_path, captured, cases)
+
+
+def assert_go_decoder_parity(tmp_path: Path, captured: dict, cases: list[dict]) -> None:
     output = tmp_path / "candidate"
     for name, contents in render(captured).items():
         destination = output / name

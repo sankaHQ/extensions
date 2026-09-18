@@ -327,6 +327,39 @@ exercise generated CRUD on PostgreSQL in CI. This is not full HTTP write replay:
 malformed/non-object body parity, native framework validation errors and DRF
 serializer behavior remain open.
 
+## Strict DRF BaseSerializer validation
+
+DRF can move its explicit strict flat-field validation into a `BaseSerializer`
+subclass. Capture accepts only a `to_internal_value(self, data)` method that
+branches on `self.partial`, performs the existing full/partial write validation,
+raises `ValidationError("invalid request body")` on failure, and returns `data`
+unchanged. Import `BaseSerializer` and `ValidationError` directly from
+`rest_framework.serializers`. Imported schema modules are captured and hashed.
+The [executable serializer fixture](tests/test_golang_drf_validation.py) defines
+the complete supported method and handlers.
+
+POST/PUT/PATCH handlers start with this sequence, using `partial=False` for
+POST/PUT and `partial=True` for PATCH:
+
+```python
+serializer = WidgetInput(data=request.data, partial=False)
+if not serializer.is_valid():
+    return Response({"error": "invalid request body"}, status=400)
+data = serializer.validated_data
+```
+
+The remaining qualified ORM recipe reads `data` instead of `request.data`.
+Missing fields, null, false, zero and empty strings retain their existing meaning.
+Source and Go tests compare accepted values and rejected payloads; native DRF
+requests check POST/PUT/PATCH error bodies without opening a server. Generated
+PostgreSQL CRUD fixtures cover grouped routes on all four targets in CI.
+
+Field-based `Serializer`/`ModelSerializer`, coercion, custom persistence methods,
+representation hooks, extra validation, `many=True` and native field-level error
+responses remain unsupported. This contract does not imply arbitrary serializer
+translation. Both Pydantic and DRF capture reject schema names shadowed by handler
+locals, so normalization cannot hide an unbound or incorrectly resolved name.
+
 ## Remaining backend work
 
 1. Capture whole projects into a framework-neutral contract, with stable model,

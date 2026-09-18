@@ -10,6 +10,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from textwrap import indent
 from typing import Any
 
 from .models import capture_models
@@ -252,13 +253,17 @@ def _normalize_pydantic(
             available.add(node.name)
         if not isinstance(node, ast.FunctionDef):
             continue
+        locals_ = {
+            n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+        }
+        locals_ |= {arg.arg for arg in node.args.args}
         # The existing recipe checker still validates every remaining statement,
         # argument, decorator and database operation after this replacement.
         for index, statement in enumerate(node.body):
             if not isinstance(statement, ast.Try):
                 continue
             matched = False
-            for name in sorted(available):
+            for name in sorted(available - locals_):
                 for model in models:
                     for partial in (False, True):
                         lines = [
@@ -332,6 +337,98 @@ def _normalize_pydantic(
         if not isinstance(node, ast.ClassDef)
         and not (isinstance(node, ast.ImportFrom) and node.module == "pydantic")
     ]
+    return ast.fix_missing_locations(tree)
+
+
+def _normalize_drf_serializers(tree: ast.Module, models: list[dict[str, Any]]) -> ast.Module:
+    """Recognize strict BaseSerializer validation without executing serializer code."""
+    schema_imports = {"BaseSerializer", "ValidationError"}
+    imports: set[str] = set()
+    schemas: dict[str, list[dict[str, Any]]] = {}
+    used: set[str] = set()
+    result: list[ast.stmt] = []
+
+    class ValidatedData(ast.NodeTransformer):
+        def visit_Name(self, node: ast.Name) -> ast.expr:
+            if node.id == "data" and isinstance(node.ctx, ast.Load):
+                return ast.copy_location(ast.parse("request.data", mode="eval").body, node)
+            return node
+
+    if not any(
+        isinstance(node, ast.ImportFrom) and node.module == "rest_framework.serializers"
+        for node in tree.body
+    ):
+        return tree
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == "rest_framework.serializers":
+            if node.level or any(a.asname or a.name not in schema_imports for a in node.names):
+                raise ValueError(
+                    "only explicit BaseSerializer and ValidationError imports are qualified"
+                )
+            imports.update(a.name for a in node.names)
+            continue
+        if isinstance(node, ast.ClassDef):
+            if imports != schema_imports:
+                raise ValueError("serializer imports must precede their declarations")
+            for model in models:
+                error = 'raise ValidationError("invalid request body")'
+                source = (
+                    f"class {node.name}(BaseSerializer):\n"
+                    "    def to_internal_value(self, data):\n"
+                    "        if self.partial:\n"
+                    + indent(
+                        _write_validation(model["fields"], "data", True, error), "            "
+                    )
+                    + "        else:\n"
+                    + indent(
+                        _write_validation(model["fields"], "data", False, error), "            "
+                    )
+                    + "        return data\n"
+                )
+                if ast.dump(node) == ast.dump(ast.parse(source).body[0]):
+                    schemas[node.name] = model["fields"]
+                    break
+            else:
+                raise ValueError("serializer is outside the qualified strict BaseSerializer recipe")
+            continue
+        if isinstance(node, ast.FunctionDef):
+            locals_ = {
+                n.id
+                for n in ast.walk(node)
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+            }
+            locals_ |= {arg.arg for arg in node.args.args}
+            error = 'return Response({"error": "invalid request body"}, status=400)'
+            for name, fields in schemas.items():
+                if name in locals_:
+                    continue
+                matched = False
+                for partial in (False, True):
+                    prefix = ast.parse(
+                        f"serializer = {name}(data=request.data, partial={partial})\n"
+                        "if not serializer.is_valid():\n"
+                        f"    {error}\n"
+                        "data = serializer.validated_data\n"
+                    ).body
+                    if ast.dump(ast.Module(body=node.body[:3], type_ignores=[])) != ast.dump(
+                        ast.Module(body=prefix, type_ignores=[])
+                    ):
+                        continue
+                    remaining = ast.Module(body=node.body[3:], type_ignores=[])
+                    ValidatedData().visit(remaining)
+                    node.body = (
+                        ast.parse(_write_validation(fields, "request.data", partial, error)).body
+                        + remaining.body
+                    )
+                    used.add(name)
+                    matched = True
+                    break
+                if matched:
+                    break
+        result.append(node)
+    if not schemas or used != schemas.keys():
+        raise ValueError("unused serializer or unsupported serializer invocation")
+    tree.body = result
     return ast.fix_missing_locations(tree)
 
 
@@ -728,6 +825,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         gaps.append("routing: " + str(error))
     try:
         tree = _normalize_pydantic(tree, models, framework)
+        if framework == "drf":
+            tree = _normalize_drf_serializers(tree, models)
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("validation: " + str(error))
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}

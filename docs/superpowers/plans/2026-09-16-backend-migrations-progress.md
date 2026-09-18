@@ -574,3 +574,19 @@ routes in the opt-in CI lane. These checks do not claim general source/target wr
 replay or native FastAPI 422 parity. DRF serializers, general Pydantic coercion and
 constraints, auth, middleware, relationships and shared replay remain unfinished;
 Task 14 remains open.
+
+
+## DRF strict serializer continuation (2026-09-18)
+
+PR86 was approved while CI was still running. Follow-on validation found that a
+schema named after a handler local could be normalized despite failing in Python.
+The PR is expanded before merge to reject those collisions for both schema paths;
+the final changed head requires renewed approval.
+
+DRF explicit strict `BaseSerializer.to_internal_value` methods now reuse the
+qualified write validator. Capture verifies the full method, imports, invocation,
+partial mode, generic error response and validated-data consumption, rejecting
+coercion and custom hooks. Native tests compare acceptance and values with Go and
+exercise original DRF POST/PUT/PATCH error responses. The PostgreSQL CI lane adds
+schema-based grouped CRUD for Fiber, chi, mux and Gin. General field-based DRF
+serializers and native field errors remain open, as do the broader Task 14 gates.
