@@ -265,7 +265,7 @@ def test_detail_read_database_lifecycle(
             assert mismatch.error.code == "SANKA_EXTENSION_PARITY_FAILED"
             report = json.loads((tmp_path / ".sanka/go/verify.json").read_text())
             assert report["candidate"][0] == {
-                "path": "/widgets/1",
+                "path": "/api/widgets/1" if grouped else "/widgets/1",
                 "status": 404,
                 "media_type": "application/json",
                 "body": {"detail" if framework == "fastapi" else "error": "not found"},
