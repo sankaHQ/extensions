@@ -361,3 +361,18 @@ exact decimal components. This is a representation contract only: source coercio
 rounding, database precision bounds, renderer adoption and write endpoints remain
 open. InputValue v1 and existing IR serialization are unchanged. Candidate helper
 hashes are refreshed and checked by a second canonical build; no publication occurs.
+
+
+## Task 11: timestamp representation (2026-09-18)
+
+`TimestampValue` preserves a canonical UTC instant with six fractional digits and
+the original integer offset in seconds. It rejects naive datetimes, fractional-
+second offsets, invalid dates and noncanonical wire timestamps. UTC/local year
+boundaries are validated without clipping. Python and native Go fixtures cover
+microseconds, unusual offsets, leap-day rollover and years 1/9999; DST fold fixtures
+keep the two instants distinct. The focused value-contract suite passes 60 tests.
+
+This freezes an instant plus fixed offset only. Named-zone identity, future DST
+arithmetic, source timezone defaults and coercion remain separate qualification
+work. Existing value schemas and generated endpoints remain unchanged. No hosted
+integration, write support or package publication is implied.

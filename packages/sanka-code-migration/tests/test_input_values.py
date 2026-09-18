@@ -5,11 +5,13 @@ import dataclasses
 import json
 import os
 import subprocess
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal, localcontext
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
-from sanka_code_migration.values import DecimalValue, InputValue
+from sanka_code_migration.values import DecimalValue, InputValue, TimestampValue
 
 
 @pytest.mark.parametrize("value", [None, False, True, 0, -1, 2**63, "", "日本語"])
@@ -148,3 +150,96 @@ func main() {
         timeout=60,
     )
     assert json.loads(result.stdout) == values
+
+
+@pytest.mark.parametrize("seconds", [0, 19800, -12600, 1, -1, 86399, -86399])
+def test_timestamp_exact_offset(seconds: int) -> None:
+    source = datetime(2024, 2, 29, 23, 59, 59, 123456, timezone(timedelta(seconds=seconds)))
+    value = TimestampValue.from_datetime(source)
+    restored = value.to_datetime()
+    assert restored == source
+    assert restored.isoformat() == source.isoformat()
+    assert value.offset_seconds == seconds
+    assert TimestampValue(value.utc, value.offset_seconds) == value
+
+
+def test_timestamp_dst_fold_preserves_instant() -> None:
+    zone = ZoneInfo("America/New_York")
+    first = TimestampValue.from_datetime(datetime(2024, 11, 3, 1, 30, tzinfo=zone, fold=0))
+    second = TimestampValue.from_datetime(datetime(2024, 11, 3, 1, 30, tzinfo=zone, fold=1))
+    assert first.utc == "2024-11-03T05:30:00.000000Z"
+    assert second.utc == "2024-11-03T06:30:00.000000Z"
+    assert (first.offset_seconds, second.offset_seconds) == (-14400, -18000)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        datetime(2024, 1, 1),
+        "2024-01-01",
+        datetime(2024, 1, 1, tzinfo=timezone(timedelta(microseconds=1))),
+    ],
+)
+def test_timestamp_ambiguous_or_unqualified_rejected(value: object) -> None:
+    with pytest.raises(ValueError):
+        TimestampValue.from_datetime(value)
+
+
+@pytest.mark.parametrize(
+    "utc, offset",
+    [
+        ("2024-02-30T00:00:00.000000Z", 0),
+        ("2024-01-01T00:00:60.000000Z", 0),
+        ("2024-01-01T00:00:00Z", 0),
+        ("2024-01-01T00:00:00.000000+00:00", 0),
+        ("2024-01-01T00:00:00.000000Z", True),
+        ("2024-01-01T00:00:00.000000Z", 86400),
+    ],
+)
+def test_timestamp_invalid_wire_rejected(utc: str, offset: object) -> None:
+    with pytest.raises(ValueError):
+        TimestampValue(utc, offset)
+
+
+@pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="requires qualified Go toolchain")
+def test_native_go_timestamp_contract(tmp_path: Path) -> None:
+    env = os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"}
+    probe = tmp_path / "timestamp.go"
+    probe.write_text(r"""package main
+import ("encoding/json"; "os"; "time")
+type Timestamp struct {
+    UTC string `json:"utc"`
+    Offset int `json:"offset_seconds"`
+}
+func main() {
+    var inputs []Timestamp
+    if err := json.NewDecoder(os.Stdin).Decode(&inputs); err != nil { panic(err) }
+    outputs := make([][]int, 0, len(inputs))
+    for _, input := range inputs {
+        instant, err := time.Parse(time.RFC3339Nano, input.UTC)
+        if err != nil { panic(err) }
+        local := instant.In(time.FixedZone("", input.Offset))
+        outputs = append(outputs, []int{local.Year(), int(local.Month()), local.Day(),
+            local.Hour(), local.Minute(), local.Second(), local.Nanosecond()/1000})
+    }
+    if err := json.NewEncoder(os.Stdout).Encode(outputs); err != nil { panic(err) }
+}
+""")
+    sources = [
+        datetime(2024, 2, 29, 23, 59, 59, 123456, timezone(timedelta(seconds=s)))
+        for s in [0, 19800, -12600, 1, -1, 86399, -86399]
+    ]
+    sources.extend([datetime(1, 1, 1, tzinfo=UTC), datetime(9999, 12, 31, 23, 59, 59, 999999, UTC)])
+    result = subprocess.run(
+        ["go", "run", str(probe)],
+        input=json.dumps([TimestampValue.from_datetime(v).to_dict() for v in sources]),
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    assert json.loads(result.stdout) == [
+        [v.year, v.month, v.day, v.hour, v.minute, v.second, v.microsecond] for v in sources
+    ]
