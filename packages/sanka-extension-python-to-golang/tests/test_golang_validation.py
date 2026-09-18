@@ -92,7 +92,11 @@ def test_strict_schema_reuses_write_contract(tmp_path: Path, framework: str, tar
         ("BaseModel):", "BaseModel, object):"),
         ("class WidgetInput", "@custom\nclass WidgetInput"),
         ("    model_config", "    def custom(self):\n        return 1\n    model_config"),
-        ("name: str = Field()", "name: str = Field(min_length=1)"),
+        ("name: str = Field()", "name: str = Field(min_length=-1)"),
+        ("name: str = Field()", "name: str = Field(min_length=True)"),
+        ("name: str = Field()", "name: str = Field(max_length=9223372036854775808)"),
+        ("name: str = Field()", "name: str = Field(min_length=4, max_length=2)"),
+        ("ge=-2147483648, le=2147483647", "ge=4, le=2"),
         ("name: str = Field()", "name: str = Field(alias='title')"),
         ("name: str = Field()", "name: list[str] = Field()"),
         ("from pydantic import BaseModel", "from counterfeit import BaseModel"),
@@ -222,14 +226,17 @@ def test_python_schema_and_go_decoder_agree(
     assert_go_decoder_parity(tmp_path, captured, cases)
 
 
-def assert_go_decoder_parity(tmp_path: Path, captured: dict, cases: list[dict]) -> None:
+def assert_go_decoder_parity(
+    tmp_path: Path, captured: dict, cases: list[dict], decoder: str = "decodeWidget"
+) -> None:
     output = tmp_path / "candidate"
     for name, contents in render(captured).items():
         destination = output / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(contents)
     (output / "validation.json").write_text(json.dumps(cases))
-    (output / "validation_test.go").write_text("""package backend
+    (output / "validation_test.go").write_text(
+        """package backend
 import ("encoding/json"; "os"; "reflect"; "testing")
 func TestSchemaParity(t *testing.T) {
     data, err := os.ReadFile("validation.json"); if err != nil { t.Fatal(err) }
@@ -248,7 +255,8 @@ func TestSchemaParity(t *testing.T) {
         }
     }
 }
-""")
+""".replace("decodeWidget(", decoder + "(")
+    )
     result = subprocess.run(
         ["go", "test", "-mod=readonly", "-p=2", "-run", "TestSchemaParity", "."],
         cwd=output,
@@ -323,3 +331,97 @@ def test_schema_generated_database_lifecycle(tmp_path: Path, framework: str, tar
     test_write_lifecycle_and_database_effects(
         tmp_path, framework, lambda: schema_source(framework), target, True
     )
+
+
+@pytest.mark.parametrize("framework", ["flask", "fastapi"])
+@pytest.mark.parametrize("target", TARGETS)
+def test_field_constraints_preserve_endpoint_validation(
+    tmp_path: Path, framework: str, target: str
+) -> None:
+    from pydantic import ValidationError
+
+    original = (
+        schema_source(framework)
+        .replace("name: str = Field()", "name: str = Field(min_length=2, max_length=4)")
+        .replace("ge=-2147483648, le=2147483647", "ge=-2, le=3", 1)
+    )
+    captured = captured_source(tmp_path, framework, target, original)
+    assert captured["gaps"] == []
+    creates = [
+        (index, route)
+        for index, route in enumerate(captured["routes"])
+        if route["method"] == "POST"
+    ]
+    index, route = creates[0]
+    assert route["write"]["constraints"] == {
+        "name": {"min_length": 2, "max_length": 4},
+        "count": {"ge": -2, "le": 3},
+    }
+    assert not next(r for r in captured["routes"] if r["method"] == "PATCH")["write"].get(
+        "constraints"
+    )
+    assert capture(tmp_path, captured["configuration"]) == captured
+    if os.getenv("SANKA_GO_TESTS") != "1":
+        return
+    tree = ast.parse(original)
+    namespace: dict = {}
+    schema = ast.Module(
+        body=[
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef)
+            or (isinstance(node, ast.ImportFrom) and node.module == "pydantic")
+        ],
+        type_ignores=[],
+    )
+    exec(compile(schema, "schemas.py", "exec"), namespace)
+    cases = []
+    for name in ["", "a", "ab", "abcd", "abcde", "日本", "👩🏽", "e\u0301"]:
+        for count in [-3, -2, 0, 3, 4]:
+            payload = {"name": name, "count": count, "enabled": False}
+            try:
+                result = (
+                    namespace["WidgetInput"].model_validate(payload).model_dump(exclude_unset=True)
+                )
+            except ValidationError:
+                result = None
+            cases.append(
+                {
+                    "body": json.dumps(payload),
+                    "partial": False,
+                    "valid": result is not None,
+                    "expected": result,
+                }
+            )
+    assert_go_decoder_parity(tmp_path, captured, cases, f"decodeWidget_write{index}")
+
+
+@pytest.mark.parametrize("target", TARGETS)
+def test_nullable_partial_constraints(tmp_path: Path, target: str) -> None:
+    original = schema_source("fastapi").replace(
+        "note: str | None = Field(default=None)",
+        "note: str | None = Field(default=None, min_length=2, max_length=3)",
+    )
+    captured = captured_source(tmp_path, "fastapi", target, original)
+    assert captured["gaps"] == []
+    index = next(i for i, r in enumerate(captured["routes"]) if r["method"] == "PATCH")
+    if os.getenv("SANKA_GO_TESTS") != "1":
+        return
+    cases = []
+    for payload, valid in [
+        ({}, True),
+        ({"note": None}, True),
+        ({"note": ""}, False),
+        ({"note": "a"}, False),
+        ({"note": "日本"}, True),
+        ({"note": "abcd"}, False),
+    ]:
+        cases.append(
+            {
+                "body": json.dumps(payload),
+                "partial": True,
+                "valid": valid,
+                "expected": payload if valid else None,
+            }
+        )
+    assert_go_decoder_parity(tmp_path, captured, cases, f"decodeWidget_write{index}")
