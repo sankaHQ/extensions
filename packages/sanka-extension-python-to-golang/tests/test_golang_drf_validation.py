@@ -16,7 +16,7 @@ from sanka_extension_python_to_golang.capture import TARGETS, capture, configura
 from sanka_extension_python_to_golang.render import render
 from test_golang_schema import model_source
 from test_golang_validation import assert_go_decoder_parity, validation_cases
-from test_golang_writes import drf_write_source, widget_validation
+from test_golang_writes import combine_drf_methods, drf_write_source, widget_validation
 
 
 def serializer_source() -> str:
@@ -34,7 +34,7 @@ def serializer_source() -> str:
 
 
 def drf_serializer_source() -> str:
-    tree = ast.parse(drf_write_source())
+    tree = ast.parse(drf_write_source(combined=False))
 
     class InputData(ast.NodeTransformer):
         def visit_Attribute(self, node: ast.Attribute) -> ast.expr:
@@ -56,7 +56,7 @@ def drf_serializer_source() -> str:
                 ).body
                 + remaining.body
             )
-    return serializer_source() + ast.unparse(tree)
+    return serializer_source() + combine_drf_methods(ast.unparse(tree))
 
 
 def capture_source(root: Path, target: str, source: str | None = None) -> dict:
@@ -141,13 +141,14 @@ import json
 import django
 from django.conf import settings
 settings.configure(
-    SECRET_KEY='fixture', USE_I18N=False, INSTALLED_APPS=[],
+    SECRET_KEY='fixture', USE_I18N=False, INSTALLED_APPS=[], ROOT_URLCONF='app',
     REST_FRAMEWORK={'UNAUTHENTICATED_USER': None},
 )
 django.setup()
-from app import WidgetInput, create_widget, replace_widget, patch_widget
-from rest_framework.test import APIRequestFactory
-factory = APIRequestFactory()
+from app import WidgetInput, create_widget, widget
+replace_widget = patch_widget = widget
+from rest_framework.test import APIClient
+factory = APIClient()
 cases = []
 for partial in (False, True):
     for body in json.load(open('cases.json')):
@@ -163,10 +164,10 @@ for partial in (False, True):
                 [('post', create_widget, {}), ('put', replace_widget, {'id': 1})]
             )
             for method, view, kwargs in operations:
-                request = factory.generic(
-                    method.upper(), '/widgets', json.dumps(body), content_type='application/json'
+                response = factory.generic(
+                    method.upper(), '/widgets/1' if kwargs else '/widgets',
+                    json.dumps(body), content_type='application/json'
                 )
-                response = view(request, **kwargs)
                 response.render()
                 assert response.status_code == 400, response.status_code
                 assert json.loads(response.content) == {'error': 'invalid request body'}

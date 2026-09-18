@@ -63,6 +63,13 @@ prefixes override the Blueprint prefix; FastAPI registration prefixes are added
 to the APIRouter prefix. Static prefixes and one registration per router are
 qualified. Routes must be defined before registration.
 
+DRF multi-method `api_view` functions can dispatch using explicit
+`if request.method == "PATCH"` / `elif` branches (or separate `if` branches),
+with one qualified handler body for every declared method. Generation splits
+those bodies into Go method routes while source tests retain Django URL dispatch.
+Overlapping Django URL registrations are blocked: separate views at the same
+path do not provide method-based dispatch in Django.
+
 Explicit imports such as `from routes import api` or `from views import health`
 are captured without importing source. Every consumed file participates in the
 plan hash and is copied unchanged into the source replay environment. Cyclic or
@@ -359,6 +366,22 @@ representation hooks, extra validation, `many=True` and native field-level error
 responses remain unsupported. This contract does not imply arbitrary serializer
 translation. Both Pydantic and DRF capture reject schema names shadowed by handler
 locals, so normalization cannot hide an unbound or incorrectly resolved name.
+
+## Write qualification
+
+The CI qualification matrix executes original DRF/Flask/FastAPI requests through
+their real routers and the generated Fiber/chi/mux/Gin handlers, for both manual
+and strict schema validation. Each side has a separately created PostgreSQL schema.
+The matrix compares status, JSON or empty body, content type, ordered rows and
+sequence state after every request. It covers create, PATCH, replacement, deletion,
+invalid fields, missing rows and subsequent ID allocation. A deliberate database
+mutation must fail comparison even when the HTTP response matches. Successful
+DELETE preserves the source framework's empty-body content type.
+
+This is a bounded CI acceptance corpus, not the public shared scenario runner.
+The extension's `test`/`verify` still blocks write replay until the coordinated
+versioned adapter is available. Authentication, malformed-body/lookup parity,
+custom database errors and general business operations remain outside this corpus.
 
 ## Remaining backend work
 

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 import uuid
@@ -226,7 +227,7 @@ def delete_widget(id: int):
     )
 
 
-def drf_write_source() -> str:
+def drf_write_source(*, combined: bool = True) -> str:
     text = """from django.urls import path
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, renderer_classes
 from rest_framework.permissions import AllowAny
@@ -315,9 +316,41 @@ urlpatterns = [path("widgets", create_widget), path("widgets/<int:id>", patch_wi
         "    item = Widget.objects.filter", patch + "    item = Widget.objects.filter", 1
     )
     marker = "def replace_widget(request, id):\n    item = Widget.objects.filter"
-    return text.replace(
+    text = text.replace(
         marker, "def replace_widget(request, id):\n" + replace + "    item = Widget.objects.filter"
     )
+    return combine_drf_methods(text) if combined else text
+
+
+def combine_drf_methods(source: str) -> str:
+    tree = ast.parse(source)
+    views = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    combined = ast.parse("def widget(request, id):\n    pass").body[0]
+    combined.decorator_list = views["patch_widget"].decorator_list
+    combined.decorator_list[0] = ast.parse("api_view(['PATCH', 'PUT', 'DELETE'])", mode="eval").body
+    combined.body = []
+    for method, name in [
+        ("PATCH", "patch_widget"),
+        ("PUT", "replace_widget"),
+        ("DELETE", "delete_widget"),
+    ]:
+        branch = ast.parse(f"if request.method == {method!r}:\n    pass").body[0]
+        branch.body = views[name].body
+        combined.body.append(branch)
+    tree.body = [
+        node
+        for node in tree.body
+        if not isinstance(node, ast.FunctionDef)
+        or node.name not in {"patch_widget", "replace_widget", "delete_widget"}
+    ]
+    for index, node in enumerate(tree.body):
+        if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == "urlpatterns":
+            node.value = ast.parse(
+                "[path('widgets', create_widget), path('widgets/<int:id>', widget)]", mode="eval"
+            ).body
+            tree.body.insert(index, combined)
+            break
+    return ast.unparse(ast.fix_missing_locations(tree))
 
 
 def write_contract() -> dict[str, object]:
@@ -559,8 +592,8 @@ def test_fastapi_delete_requires_explicit_204(tmp_path: Path) -> None:
         (
             "drf",
             drf_write_source,
-            'item.note = request.data.get("note")',
-            'item.note = request.data["note"]',
+            "item.note = request.data.get('note')",
+            "item.note = request.data['note']",
         ),
     ],
 )

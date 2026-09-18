@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from sanka_extension_python_to_golang.adapter import handle
-from sanka_extension_python_to_golang.capture import SOURCES, TARGETS
+from sanka_extension_python_to_golang.capture import SOURCES, TARGETS, capture, configuration
 from test_python_to_golang import apply, request, source
 
 
@@ -263,3 +263,37 @@ def test_transitive_unexported_symbol_blocks(tmp_path: Path) -> None:
     result = handle(request(tmp_path))
     assert result.data["capture"]["gaps"]
     assert result.data["files"] == {}
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+def test_drf_shadowed_urls_block(tmp_path: Path, grouped: bool) -> None:
+    from test_golang_schema import model_source
+    from test_golang_writes import drf_write_source
+
+    text = drf_write_source(combined=False)
+    (tmp_path / "app.py").write_text(group_backend(text, "drf") if grouped else text)
+    (tmp_path / "models.py").write_text(model_source("drf"))
+    result = capture(tmp_path, configuration({"source_framework": "drf", "database_layer": "pgx"}))
+    assert any("overlapping DRF URLs" in gap for gap in result["gaps"])
+
+
+@pytest.mark.parametrize(
+    "before,after",
+    [
+        ("request.method == 'PUT'", "request.method == 'PATCH'"),
+        ("request.method == 'PUT'", "request.method != 'PUT'"),
+        ("['PATCH', 'PUT', 'DELETE']", "['PATCH', 'DELETE']"),
+        ("['PATCH', 'PUT', 'DELETE']", "['PATCH', 'PATCH', 'DELETE']"),
+        ("def widget(request, id):", "def widget(request, id):\n    record_event()"),
+    ],
+)
+def test_unsupported_drf_dispatch_blocks(tmp_path: Path, before: str, after: str) -> None:
+    from test_golang_schema import model_source
+    from test_golang_writes import drf_write_source
+
+    original = drf_write_source()
+    assert before in original
+    (tmp_path / "app.py").write_text(original.replace(before, after))
+    (tmp_path / "models.py").write_text(model_source("drf"))
+    result = capture(tmp_path, configuration({"source_framework": "drf", "database_layer": "pgx"}))
+    assert result["gaps"]
