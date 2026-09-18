@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Scalar input presence for cross-language validation; no source coercion policy."""
+"""Input presence for cross-language validation; no source coercion policy."""
 
 from __future__ import annotations
 
@@ -12,12 +12,29 @@ from decimal import Decimal
 from .ir import _canonical_json
 
 
+def _input_value(value: object, depth: int = 0) -> None:
+    if depth > 64:
+        raise ValueError("input nesting exceeds 64 levels")
+    if value is None or type(value) in {bool, int, str}:
+        return
+    if type(value) is list:
+        for item in value:
+            _input_value(item, depth + 1)
+        return
+    if type(value) is dict and all(type(key) is str for key in value):
+        for item in value.values():
+            _input_value(item, depth + 1)
+        return
+    raise ValueError("inputs require null, boolean, integer, string, array or string-keyed object")
+
+
 @dataclass(frozen=True, slots=True)
 class InputValue:
     """None means absent; the JSON string "null" means explicitly supplied null.
 
     Integers remain JSON text so consumers need not pass them through float64.
-    Decimal, float, time and structured values need separate qualified contracts.
+    Objects and arrays preserve nested presence and order without applying defaults.
+    Decimal, float and time coercion need separate qualified contracts.
     """
 
     value_json: str | None = None
@@ -27,9 +44,11 @@ class InputValue:
             return
         if type(self.value_json) is not str:
             raise TypeError("value_json must be JSON text or absent")
-        value = json.loads(self.value_json)
-        if value is not None and type(value) not in {bool, int, str}:
-            raise ValueError("only null, boolean, integer and string inputs are qualified")
+        try:
+            value = json.loads(self.value_json)
+        except RecursionError as error:
+            raise ValueError("input nesting exceeds 64 levels") from error
+        _input_value(value)
         if _canonical_json(value) != self.value_json:
             raise ValueError("value_json must be canonical JSON")
         self.value_json.encode("utf-8")
@@ -43,8 +62,7 @@ class InputValue:
         if name not in payload:
             return cls()
         value = payload[name]
-        if value is not None and type(value) not in {bool, int, str}:
-            raise ValueError("only null, boolean, integer and string inputs are qualified")
+        _input_value(value)
         return cls(_canonical_json(value))
 
     @property

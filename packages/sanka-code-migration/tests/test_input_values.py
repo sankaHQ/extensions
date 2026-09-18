@@ -32,13 +32,17 @@ def test_absent_is_not_null_or_false_or_zero() -> None:
     assert InputValue.from_field({"field": 2**63}, "field").value_json == "9223372036854775808"
 
 
-@pytest.mark.parametrize("value", [1.2, float("nan"), [], {}, (1,)])
+@pytest.mark.parametrize(
+    "value", [1.2, float("nan"), (1,), {1: "bad"}, [{"nested": 1.2}], {"nested": (1,)}]
+)
 def test_unqualified_types_fail(value: object) -> None:
     with pytest.raises(ValueError):
         InputValue.from_field({"field": value}, "field")
 
 
-@pytest.mark.parametrize("text", [" false", "1.0", "[]", "{}", "NaN", '"\\ud800"'])
+@pytest.mark.parametrize(
+    "text", [" false", "1.0", '{"b":0,"a":1}', '{"a":1,"a":2}', "[NaN]", '{"x":"\\ud800"}']
+)
 def test_invalid_wire_values_fail(text: str) -> None:
     with pytest.raises(ValueError):
         InputValue(text)
@@ -66,10 +70,25 @@ func main() {
     if err := json.NewEncoder(os.Stdout).Encode(outputs); err != nil { panic(err) }
 }
 """)
-    inputs = [{}, *({"field": v} for v in [None, False, True, 0, -1, 2**63, "", "日本語"])]
+    inputs = [
+        {},
+        *({"field": v} for v in [None, False, True, 0, -1, 2**63, "", "日本語"]),
+        *(
+            {"field": v}
+            for v in [
+                [],
+                {},
+                [None, False, 0, "", {}, []],
+                {
+                    "items": [{"id": 2**100, "name": "日本語<&>\u2028"}, {}],
+                    "flags": {"enabled": False},
+                },
+            ]
+        ),
+    ]
     result = subprocess.run(
         ["go", "run", str(probe)],
-        input=json.dumps(inputs, ensure_ascii=False, separators=(",", ":")),
+        input=json.dumps(inputs, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
         env=env,
         cwd=tmp_path,
         text=True,
@@ -243,3 +262,44 @@ func main() {
     assert json.loads(result.stdout) == [
         [v.year, v.month, v.day, v.hour, v.minute, v.second, v.microsecond] for v in sources
     ]
+
+
+def test_nested_inputs_preserve_presence_and_snapshot() -> None:
+    payload = {
+        "field": {
+            "items": [{"id": 2**100}, {}, {"id": None}],
+            "settings": {"enabled": False, "count": 0, "label": ""},
+        }
+    }
+    field = InputValue.from_field(payload, "field")
+    decoded = json.loads(field.value_json)
+    fields = [InputValue.from_field(item, "id") for item in decoded["items"]]
+    assert fields == [InputValue(str(2**100)), InputValue(), InputValue("null")]
+    assert (
+        len({InputValue.from_field({"x": value}, "x") for value in (None, {}, [], False, 0, "")})
+        == 6
+    )
+    assert (
+        InputValue.from_field({"field": dict(reversed(list(payload["field"].items())))}, "field")
+        == field
+    )
+    payload["field"]["items"].append({"id": 4})
+    assert json.loads(field.value_json) == decoded
+    assert InputValue("[0,1]") != InputValue("[1,0]")
+
+
+def test_nested_input_limits_and_cycles() -> None:
+    value: object = None
+    for _ in range(64):
+        value = [value]
+    field = InputValue.from_field({"x": value}, "x")
+    assert InputValue(field.value_json) == field
+    with pytest.raises(ValueError, match="nesting"):
+        InputValue.from_field({"x": [value]}, "x")
+    for depth in (65, 2000):
+        with pytest.raises(ValueError, match="nesting"):
+            InputValue("[" * depth + "null" + "]" * depth)
+    cycle: list[object] = []
+    cycle.append(cycle)
+    with pytest.raises(ValueError, match="nesting"):
+        InputValue.from_field({"x": cycle}, "x")
