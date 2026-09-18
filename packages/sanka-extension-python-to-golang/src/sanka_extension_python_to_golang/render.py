@@ -20,6 +20,114 @@ MODULES = {
 }
 
 
+def _fiber_runtime(database: bool, database_configured: bool) -> dict[str, str]:
+    database_import = '"github.com/jackc/pgx/v5/pgxpool"' if database else ""
+    database_field = "\n    databaseURL string" if database else ""
+    database_config = (
+        """
+    result.databaseURL = os.Getenv("DATABASE_URL")
+    if result.databaseURL == "" { return config{}, fmt.Errorf("DATABASE_URL is required") }
+"""
+        if database
+        else ""
+    )
+    database_setup = (
+        """
+    poolConfig, err := pgxpool.ParseConfig(cfg.databaseURL)
+    if err != nil { return fmt.Errorf("invalid DATABASE_URL") }
+    startupCtx, cancel := context.WithTimeout(runCtx, 10*time.Second)
+    defer cancel()
+    pool, err := pgxpool.NewWithConfig(startupCtx, poolConfig)
+    if err != nil { return fmt.Errorf("database unavailable") }
+    defer pool.Close()
+    if err := pool.Ping(startupCtx); err != nil { return fmt.Errorf("database unavailable") }
+    app := backend.NewApp(pool)
+"""
+        if database
+        else "    app := backend.NewApp()\n"
+    )
+    database_test_setup = 't.Setenv("DATABASE_URL", "postgresql://test/db")' if database else ""
+    database_test = (
+        """
+    t.Setenv("DATABASE_URL", "")
+    if _, err := loadConfig(); err == nil { t.Fatal("missing DATABASE_URL accepted") }
+"""
+        if database
+        else ""
+    )
+    main = f"""// SPDX-License-Identifier: Apache-2.0
+package main
+
+import (
+    "context"
+    "fmt"
+    "os"
+    "os/signal"
+    "strconv"
+    "syscall"
+    "time"
+
+    "github.com/gofiber/fiber/v3"
+    {database_import}
+    backend "migrated.backend"
+)
+
+type config struct {{
+    address string{database_field}
+}}
+
+func loadConfig() (config, error) {{
+    port := os.Getenv("PORT")
+    if port == "" {{ port = "8080" }}
+    value, err := strconv.Atoi(port)
+    if err != nil || value < 1 || value > 65535 {{
+        return config{{}}, fmt.Errorf("PORT must be an integer between 1 and 65535")
+    }}
+    result := config{{address: ":" + port}}{database_config}
+    return result, nil
+}}
+
+func run() error {{
+    cfg, err := loadConfig()
+    if err != nil {{ return err }}
+    runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+{database_setup}    return app.Listen(cfg.address, fiber.ListenConfig{{
+        DisableStartupMessage: true,
+        GracefulContext: runCtx,
+        ShutdownTimeout: 10*time.Second,
+    }})
+}}
+
+func main() {{
+    if err := run(); err != nil {{
+        fmt.Fprintln(os.Stderr, err)
+        os.Exit(1)
+    }}
+}}
+"""
+    test = f"""// SPDX-License-Identifier: Apache-2.0
+package main
+
+import "testing"
+
+func TestLoadConfig(t *testing.T) {{
+    t.Setenv("PORT", "")
+    {database_test_setup}
+    cfg, err := loadConfig()
+    if err != nil || cfg.address != ":8080" {{ t.Fatal("default configuration failed") }}
+    for _, port := range []string{{"0", "65536", "invalid"}} {{
+        t.Setenv("PORT", port)
+        if _, err := loadConfig(); err == nil {{ t.Fatal("invalid PORT accepted") }}
+    }}
+    t.Setenv("PORT", "8080")
+    {database_test}
+}}
+"""
+    environment = "PORT=8080\n" + ("DATABASE_URL=\n" if database_configured else "")
+    return {"cmd/api/main.go": main, "cmd/api/main_test.go": test, ".env.example": environment}
+
+
 def render(captured: dict[str, Any]) -> dict[str, str]:
     if captured["gaps"]:
         raise ValueError("resolve source capture gaps before generation")
@@ -139,7 +247,11 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         _, _ = w.Write([]byte({body}))
     }}{suffix}""")
     setup = {
-        "fiber": "app := fiber.New(fiber.Config{DisableHeadAutoRegister: true})",
+        "fiber": (
+            "app := fiber.New(fiber.Config{DisableHeadAutoRegister: true, BodyLimit: 1048576, "
+            "ReadTimeout: 10*time.Second, WriteTimeout: 30*time.Second, "
+            "IdleTimeout: 60*time.Second})"
+        ),
         "chi": "app := chi.NewRouter()",
         "mux": "app := mux.NewRouter()",
         "gin": (
@@ -153,6 +265,8 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     imports = []
     if has_reads:
         imports.extend(['"context"', '"encoding/json"'])
+    if target == "fiber":
+        imports.append('"time"')
     if has_writes:
         imports.extend(
             [
@@ -202,6 +316,10 @@ func NewApp({arguments}) {return_type} {{
 
     if captured["configuration"]["database_layer"] == "pgx":
         result.update(render_database(captured))
+    if target == "fiber":
+        result.update(
+            _fiber_runtime(database, captured["configuration"]["database_layer"] == "pgx")
+        )
     if any("filter" in route.get("read", {}) for route in captured["routes"]):
         first = str(captured["configuration"]["source_framework"] == "flask").lower()
         result["query.go"] = QUERY_SOURCE.replace("QUERY_FIRST", first)

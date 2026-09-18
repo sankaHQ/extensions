@@ -89,6 +89,14 @@ def apply(root: Path, framework: str, target: str) -> Path:
     return Path(str(result.data["output"]))
 
 
+def snapshot(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
 @pytest.mark.parametrize("framework", SOURCES)
 def test_review_and_fail_closed(tmp_path: Path, framework: str) -> None:
     (tmp_path / "app.py").write_text(source(framework))
@@ -194,7 +202,7 @@ print(json.dumps({"status": response.status_code, "body": response.json}))
     expected = json.loads(observed.stdout)
     assert expected == {"status": 200, "body": PAYLOAD}
     output = apply(tmp_path, framework, target)
-    before = {path.name: path.read_bytes() for path in output.iterdir()}
+    before = snapshot(output)
     alias = dataclasses.replace(
         request(tmp_path, framework, target),
         configuration={"source_framework": framework, "target": target},
@@ -212,7 +220,7 @@ print(json.dumps({"status": response.status_code, "body": response.json}))
         }
     ]
     assert verified.data["candidate"] == verified.data["source"]
-    assert {path.name: path.read_bytes() for path in output.iterdir()} == before
+    assert snapshot(output) == before
 
 
 def test_plan_tampering_and_review_attestation(tmp_path: Path) -> None:
@@ -379,7 +387,7 @@ def test_failed_install_removes_evidence(
 
     (tmp_path / "app.py").write_text(source("flask"))
     output = apply(tmp_path, "flask", "fiber")
-    before = {p.name: p.read_bytes() for p in output.iterdir()}
+    before = snapshot(output)
     report = tmp_path / ".sanka/go" / f"{command}.json"
     report.write_text('{"ok":true}')
 
@@ -390,7 +398,7 @@ def test_failed_install_removes_evidence(
     result = handle(dataclasses.replace(request(tmp_path), command=command))
     assert result.outcome == "error"
     assert not report.exists()
-    assert {p.name: p.read_bytes() for p in output.iterdir()} == before
+    assert snapshot(output) == before
 
 
 def test_go_bootstrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
