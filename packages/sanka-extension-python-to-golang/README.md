@@ -324,10 +324,21 @@ nonnullable annotations for nonnullable columns. Pydantic does not validate thes
 omitted defaults; `exclude_unset=True` removes them. Explicit null is still rejected
 for nonnullable fields. False, zero, empty string and explicit nullable null remain
 present. No source code runs during capture; qualified schemas lower to the same
-Go decoder as manual validation.
+Go decoder as manual validation when no additional constraints are present.
+
+String fields also accept literal nonnegative `min_length` and `max_length`.
+Integer `ge` and `le` may narrow the database integer range. Contradictory bounds
+block capture. These constraints belong to each endpoint, including PATCH, and
+nullable fields retain missing-versus-null behavior. String lengths count Unicode
+code points, not bytes. For example:
+
+```python
+name: str = Field(min_length=2, max_length=40)
+count: int = Field(ge=0, le=100)
+```
 
 Coercion, custom validators/serializers, aliases, nested schemas, different defaults,
-extra constraints, unused classes and inheritance beyond `BaseModel` block capture.
+unsupported constraints, unused classes and inheritance beyond `BaseModel` block capture.
 Tests compare Pydantic outcomes and values with native Go decoders for all four
 routers, check invalid-object responses through original Python test clients, and
 exercise generated CRUD on PostgreSQL in CI. This is not full HTTP write replay:

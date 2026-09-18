@@ -618,3 +618,22 @@ The CLI selected-target dependency is already implemented in `sankaHQ/sanka` PR1
 target into reviewed plan configuration and rejects conflicting explicit targets;
 the Go extension already normalizes that key. No duplicate runtime implementation
 was started. Cross-repository lifecycle acceptance remains open until it lands.
+
+
+## Endpoint field constraints (2026-09-18)
+
+PR87 merged as `dc9e391` after exact-head approval and all required CI passed,
+including the source/Go PostgreSQL write matrix and installed Flask wheel checks.
+
+Strict Pydantic schemas now capture string length limits and narrower integer
+bounds. Constraints are recorded per endpoint, not on the shared database model;
+POST/PUT and PATCH can therefore retain different validation rules. Generated
+Go decoders preserve nullable fields and count Unicode code points. Static capture
+still rejects unsupported coercion, aliases, custom validators and nested schemas.
+
+Native tests compare the original Pydantic validators against all four Go targets.
+The PostgreSQL qualification matrix adds constrained Flask/FastAPI writes,
+including rejected writes, sequence preservation and distinct PATCH rules.
+Local database tests remain skipped without the explicit PostgreSQL fixture.
+Standard DRF field serializers and native FastAPI request injection remain open;
+this batch does not close the general serializer or backend-readiness gates.
