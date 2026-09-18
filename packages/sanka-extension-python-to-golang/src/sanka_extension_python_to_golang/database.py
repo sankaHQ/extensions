@@ -181,13 +181,13 @@ BEGIN
         RAISE EXCEPTION 'schema adoption failed: unsupported constraints';
     END IF;
     SELECT COALESCE(jsonb_agg(jsonb_build_array(
-        table_name, constraint_type, columns, deferrable, deferred
+        table_name, constraint_type, columns, is_deferrable, is_deferred
     ) ORDER BY table_name, constraint_type, columns), '[]')
       INTO actual
       FROM (
         SELECT c.relname AS table_name, con.contype::text AS constraint_type,
                jsonb_agg(a.attname ORDER BY key.ordinality) AS columns,
-               con.condeferrable AS deferrable, con.condeferred AS deferred
+               con.condeferrable AS is_deferrable, con.condeferred AS is_deferred
         FROM pg_constraint con
         JOIN pg_class c ON c.oid = con.conrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
