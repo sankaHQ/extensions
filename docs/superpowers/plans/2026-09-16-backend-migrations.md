@@ -493,7 +493,8 @@ when reuse requires it. Bounded support already exists for all three sources.
 
 - [ ] Flask scanner: application factories, Blueprints, installed ORM/schema libraries,
   request hooks, auth decorators, error handlers and registered routes.
-- [ ] FastAPI scanner: APIRouters, Pydantic models, dependencies/security dependencies,
+- [ ] FastAPI scanner: APIRouters and explicit flat strict Pydantic write schemas are
+  bounded implementations; general Pydantic models, dependencies/security dependencies,
   async/session lifecycle, middleware and exception handlers.
 - [ ] Preserve source framework semantics rather than normalizing everything to DRF
   defaults, especially status/error bodies and dependency execution order.

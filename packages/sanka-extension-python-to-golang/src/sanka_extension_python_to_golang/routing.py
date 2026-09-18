@@ -399,7 +399,7 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
                 exports = {
                     n.name
                     for n in statements
-                    if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+                    if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
                 } | {
                     t.id
                     for n in statements

@@ -556,3 +556,21 @@ exercise grouped paths in the service-backed CI lane. Serializers, Pydantic requ
 models, auth/permissions, middleware, relationships and shared write replay remain
 open. Keep delivering coherent batches with one review checkpoint per batch;
 these routing capabilities do not close the full backend milestone.
+
+
+## Strict Pydantic validation batch (2026-09-18)
+
+PR85 merged as `d7c9126` with all required checks passing. Explicit strict Pydantic
+schemas now lower to the existing Flask/FastAPI SQLAlchemy write validator for
+Fiber, chi, mux and Gin. Capture requires flat fields matching captured database
+types, integer bounds, forbidden extras, explicit generic validation errors and
+presence-preserving dumps. Source schemas remain unchanged for execution; capture
+only inspects ASTs. Imported schema files remain included in the source hash.
+
+Native Go decoder tests compare acceptance, field values and presence with the
+original Pydantic classes. Original Flask/FastAPI clients check invalid JSON object
+responses. The existing PostgreSQL CRUD lifecycle also covers schema-based grouped
+routes in the opt-in CI lane. These checks do not claim general source/target write
+replay or native FastAPI 422 parity. DRF serializers, general Pydantic coercion and
+constraints, auth, middleware, relationships and shared replay remain unfinished;
+Task 14 remains open.

@@ -209,6 +209,132 @@ def _write_validation(fields: list[dict[str, Any]], data: str, partial: bool, er
 """
 
 
+def _normalize_pydantic(
+    tree: ast.Module, models: list[dict[str, Any]], framework: str
+) -> ast.Module:
+    """Lower explicit strict schemas to the existing, qualified write validator."""
+    schema_imports = {"BaseModel", "ConfigDict", "Field", "ValidationError"}
+    imported: set[str] = set()
+    classes: dict[str, ast.ClassDef] = {}
+    names: set[str] = set()
+    for node in tree.body:
+        declared = []
+        if isinstance(node, ast.ImportFrom):
+            declared = [a.asname or a.name for a in node.names]
+            if node.module == "pydantic":
+                if node.level or any(a.asname or a.name not in schema_imports for a in node.names):
+                    raise ValueError("only explicit Pydantic schema imports are qualified")
+                imported.update(a.name for a in node.names)
+        elif isinstance(node, ast.Assign):
+            declared = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            declared = [node.name]
+        if names.intersection(declared):
+            raise ValueError("schema symbols must not be reassigned")
+        names.update(declared)
+        if isinstance(node, ast.ClassDef):
+            if node.name in {"int", "str", "bool", "dict", "list", "set", "type"}:
+                raise ValueError("schema names must not shadow builtins")
+            classes[node.name] = node
+    if not imported:
+        return tree
+    if framework not in {"fastapi", "flask"} or not models:
+        raise ValueError("strict Pydantic schemas require a qualified SQLAlchemy write")
+    used: set[str] = set()
+    available: set[str] = set()
+    imported_so_far: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == "pydantic":
+            imported_so_far.update(a.name for a in node.names)
+        if isinstance(node, ast.ClassDef):
+            if not {"BaseModel", "ConfigDict", "Field"} <= imported_so_far:
+                raise ValueError("schema imports must precede their declarations")
+            available.add(node.name)
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        # The existing recipe checker still validates every remaining statement,
+        # argument, decorator and database operation after this replacement.
+        for index, statement in enumerate(node.body):
+            if not isinstance(statement, ast.Try):
+                continue
+            matched = False
+            for name in sorted(available):
+                for model in models:
+                    for partial in (False, True):
+                        lines = [
+                            f"class {name}(BaseModel):",
+                            "    model_config = ConfigDict(strict=True, extra='forbid')",
+                        ]
+                        for field in model["fields"]:
+                            if field["auto"]:
+                                continue
+                            key = field["name"]
+                            if key.startswith(("_", "model_")) or key in schema_imports | {
+                                "str",
+                                "int",
+                                "bool",
+                            }:
+                                raise ValueError("schema field conflicts with Pydantic names")
+                            kind = {
+                                "string": "str",
+                                "bool": "bool",
+                                "int32": "int",
+                                "int64": "int",
+                            }[field["go_type"]]
+                            if field["nullable"]:
+                                kind += " | None"
+                            options = ["default=None"] if partial or field["nullable"] else []
+                            if field["go_type"] in {"int32", "int64"}:
+                                bits = 32 if field["go_type"] == "int32" else 64
+                                options += [f"ge={-(2 ** (bits - 1))}", f"le={2 ** (bits - 1) - 1}"]
+                            lines.append(f"    {key}: {kind} = Field({', '.join(options)})")
+                        if ast.dump(classes[name]) != ast.dump(ast.parse("\n".join(lines)).body[0]):
+                            continue
+                        error = (
+                            'return jsonify({"error": "invalid request body"}), 400'
+                            if framework == "flask"
+                            else (
+                                "raise HTTPException(status_code=400, "
+                                'detail="invalid request body")'
+                            )
+                        )
+                        recipe = ast.parse(
+                            f"try:\n    data = {name}.model_validate(data)"
+                            ".model_dump(exclude_unset=True)\n"
+                            f"except ValidationError:\n    {error}\n"
+                        ).body[0]
+                        if (
+                            ast.dump(statement) != ast.dump(recipe)
+                            or "ValidationError" not in imported
+                        ):
+                            continue
+                        node.body[index] = ast.copy_location(
+                            ast.parse(
+                                _write_validation(model["fields"], "data", partial, error)
+                            ).body[0],
+                            statement,
+                        )
+                        used.add(name)
+                        matched = True
+                        break
+                    if matched:
+                        break
+                if matched:
+                    break
+    if used != classes.keys():
+        raise ValueError(
+            "unused or unsupported Pydantic schema; coercion, aliases, hooks "
+            "and nested fields require additional capture"
+        )
+    tree.body = [
+        node
+        for node in tree.body
+        if not isinstance(node, ast.ClassDef)
+        and not (isinstance(node, ast.ImportFrom) and node.module == "pydantic")
+    ]
+    return ast.fix_missing_locations(tree)
+
+
 def _sqlalchemy_write(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     framework: str,
@@ -600,6 +726,10 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         tree = normalize_routes(tree, framework)
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("routing: " + str(error))
+    try:
+        tree = _normalize_pydantic(tree, models, framework)
+    except (ValueError, TypeError, SyntaxError) as error:
+        gaps.append("validation: " + str(error))
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     imports: set[str] = set()
     assignments: dict[str, ast.expr] = {}
