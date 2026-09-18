@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Static, fail-closed capture of qualified public JSON GET endpoints. Never imports source."""
+"""Static, fail-closed capture of qualified JSON endpoints. Never imports source."""
 
 from __future__ import annotations
 
@@ -19,9 +19,11 @@ SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
 VERSION = "0.1.0a1"
 PATH = re.compile(r"/[A-Za-z0-9_/-]*\Z")
+FLASK_INT_PATH = re.compile(r"(?P<prefix>/[A-Za-z0-9_/-]*)<int:(?P<name>[a-z][a-z0-9_]*)>\Z")
+FASTAPI_INT_PATH = re.compile(r"(?P<prefix>/[A-Za-z0-9_/-]*)\{(?P<name>[a-z][a-z0-9_]*)\}\Z")
 IMPORTS = {
     "flask": {"flask": {"Flask", "jsonify"}},
-    "fastapi": {"fastapi": {"FastAPI"}},
+    "fastapi": {"fastapi": {"FastAPI", "HTTPException"}},
     "drf": {
         "django.urls": {"path"},
         "rest_framework.decorators": {
@@ -173,6 +175,230 @@ def _payload(
     return {"body": body}
 
 
+def _write_validation(fields: list[dict[str, Any]], data: str, partial: bool, error: str) -> str:
+    writable = [field for field in fields if not field["auto"]]
+    allowed = "{" + ", ".join(repr(field["name"]) for field in writable) + "}"
+    conditions = [f"type({data}) is not dict", f"set({data}) - {allowed}"]
+    for field in writable:
+        name = repr(field["name"])
+        value = f"{data}[{name}]"
+        if not partial and not field["nullable"]:
+            conditions.append(f"{name} not in {data}")
+        if field["go_type"] in {"int32", "int64"}:
+            bits = 32 if field["go_type"] == "int32" else 64
+            lower, upper = -(2 ** (bits - 1)), 2 ** (bits - 1) - 1
+            invalid = f"type({value}) is not int or not {lower} <= {value} <= {upper}"
+        else:
+            python_type = {"string": "str", "bool": "bool"}[field["go_type"]]
+            invalid = f"type({value}) is not {python_type}"
+        if field["nullable"]:
+            invalid = f"{value} is not None and ({invalid})"
+        if partial or field["nullable"]:
+            invalid = f"{name} in {data} and ({invalid})"
+        conditions.append(invalid)
+    joined = "\n        or ".join(f"({condition})" for condition in conditions)
+    return f"""if (
+        {joined}
+    ):
+        {error}
+"""
+
+
+def _sqlalchemy_write(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    framework: str,
+    method: str,
+    models: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if isinstance(node, ast.AsyncFunctionDef):
+        raise ValueError("async database writes require additional capture")
+    for model in models:
+        fields = model["fields"]
+        writable = [field for field in fields if not field["auto"]]
+        response = (
+            "{"
+            + ", ".join(repr(field["name"]) + ": item." + field["name"] for field in fields)
+            + "}"
+        )
+        if method == "POST":
+            values = ", ".join(
+                field["name"]
+                + "="
+                + (
+                    f"data.get({field['name']!r})"
+                    if field["nullable"]
+                    else f"data[{field['name']!r}]"
+                )
+                for field in writable
+            )
+            prefix = "data = request.get_json()\n" if framework == "flask" else ""
+            invalid = (
+                'return jsonify({"error": "invalid request body"}), 400'
+                if framework == "flask"
+                else 'raise HTTPException(status_code=400, detail="invalid request body")'
+            )
+            validation = _write_validation(fields, "data", False, invalid)
+            result = f"jsonify({response}), 201" if framework == "flask" else response
+            source = (
+                prefix
+                + validation
+                + f"""with Session(engine) as session:
+    item = {model["name"]}({values})
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return {result}
+"""
+            )
+            expected_args: list[str] = [] if framework == "flask" else ["data"]
+            expected_annotations = [""] * len(expected_args) if framework == "flask" else ["dict"]
+            write = {"operation": "create", "model": model["name"]}
+            status = 201
+        else:
+            primary = next((field for field in fields if field["primary_key"]), None)
+            if primary is None:
+                continue
+            assignments = "\n".join(
+                f"""    if {field["name"]!r} in data:
+        item.{field["name"]} = data[{field["name"]!r}]"""
+                for field in writable
+            )
+            prefix = "data = request.get_json()\n" if framework == "flask" else ""
+            invalid = (
+                'return jsonify({"error": "invalid request body"}), 400'
+                if framework == "flask"
+                else 'raise HTTPException(status_code=400, detail="invalid request body")'
+            )
+            validation = _write_validation(fields, "data", True, invalid)
+            missing = (
+                'return jsonify({"error": "not found"}), 404'
+                if framework == "flask"
+                else 'raise HTTPException(status_code=404, detail="not found")'
+            )
+            result = f"jsonify({response})" if framework == "flask" else response
+            source = (
+                prefix
+                + validation
+                + f"""with Session(engine) as session:
+    item = session.get({model["name"]}, {primary["name"]})
+    if item is None:
+        {missing}
+{assignments}
+    session.commit()
+    session.refresh(item)
+    return {result}
+"""
+            )
+            expected_args = [primary["name"]] if framework == "flask" else [primary["name"], "data"]
+            expected_annotations = (
+                [""] * len(expected_args) if framework == "flask" else ["int", "dict"]
+            )
+            write = {"operation": "patch", "model": model["name"], "lookup": primary["name"]}
+            status = 200
+        if (
+            [arg.arg for arg in node.args.args] == expected_args
+            and [ast.unparse(arg.annotation) if arg.annotation else "" for arg in node.args.args]
+            == expected_annotations
+            and not node.args.defaults
+            and not node.args.kw_defaults
+            and not node.args.kwonlyargs
+            and not node.args.posonlyargs
+            and node.args.vararg is None
+            and node.args.kwarg is None
+            and ast.dump(ast.Module(body=node.body, type_ignores=[])) == ast.dump(ast.parse(source))
+        ):
+            return {"status": status, "write": write}
+    raise ValueError(f"write handler is outside the qualified {framework} recipe")
+
+
+def _drf_write(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    method: str,
+    models: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if isinstance(node, ast.AsyncFunctionDef):
+        raise ValueError("async DRF writes require additional capture")
+    for model in models:
+        fields = model["fields"]
+        writable = [field for field in fields if not field["auto"]]
+        response = (
+            "{"
+            + ", ".join(repr(field["name"]) + ": item." + field["name"] for field in fields)
+            + "}"
+        )
+        if method == "POST":
+            values = ", ".join(
+                field["name"]
+                + "="
+                + (
+                    f"request.data.get({field['name']!r})"
+                    if field["nullable"]
+                    else f"request.data[{field['name']!r}]"
+                )
+                for field in writable
+            )
+            validation = _write_validation(
+                fields,
+                "request.data",
+                False,
+                'return Response({"error": "invalid request body"}, status=400)',
+            )
+            source = (
+                validation
+                + f"""item = {model["name"]}.objects.create({values})
+return Response({response}, status=201)
+"""
+            )
+            expected_args = ["request"]
+            status = 201
+            write = {"operation": "create", "model": model["name"]}
+        else:
+            primary = next((field for field in fields if field["primary_key"]), None)
+            if primary is None:
+                continue
+            assignments = "\n".join(
+                f"""if {field["name"]!r} in request.data:
+    item.{field["name"]} = request.data[{field["name"]!r}]"""
+                for field in writable
+            )
+            validation = _write_validation(
+                fields,
+                "request.data",
+                True,
+                'return Response({"error": "invalid request body"}, status=400)',
+            )
+            lookup = (
+                f"item = {model['name']}.objects.filter("
+                f"{primary['name']}={primary['name']}).first()\n"
+            )
+            source = (
+                validation
+                + lookup
+                + f"""if item is None:
+    return Response({{"error": "not found"}}, status=404)
+{assignments}
+item.save(update_fields=list(request.data))
+return Response({response})
+"""
+            )
+            expected_args = ["request", primary["name"]]
+            status = 200
+            write = {"operation": "patch", "model": model["name"], "lookup": primary["name"]}
+        if (
+            [arg.arg for arg in node.args.args] == expected_args
+            and not any(arg.annotation for arg in node.args.args)
+            and not node.args.defaults
+            and not node.args.kw_defaults
+            and not node.args.kwonlyargs
+            and not node.args.posonlyargs
+            and node.args.vararg is None
+            and node.args.kwarg is None
+            and ast.dump(ast.Module(body=node.body, type_ignores=[])) == ast.dump(ast.parse(source))
+        ):
+            return {"status": status, "write": write}
+    raise ValueError("write handler is outside the qualified DRF recipe")
+
+
 def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     framework = config["source_framework"]
     filename = config["source_file"]
@@ -243,7 +469,19 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     for node in tree.body:
         available = imports | assignments.keys() | functions.keys() | {"__name__"}
         if models and isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            available |= {"list", "dict", "row", "session", "str"}
+            available |= {
+                "list",
+                "bool",
+                "dict",
+                "int",
+                "row",
+                "session",
+                "set",
+                "str",
+                "type",
+                "data",
+                "item",
+            }
             available |= {arg.arg for arg in node.args.args}
         unresolved = {
             item.id
@@ -306,7 +544,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                     and isinstance(url.args[1], ast.Name)
                 ):
                     raise ValueError("only literal path(pattern, view) registrations are qualified")
-                bindings.append(("/" + ast.literal_eval(url.args[0]), url.args[1].id))
+                bindings.append(("/" + ast.literal_eval(url.args[0]), url.args[1].id, ""))
         else:
             constructor = "Flask" if framework == "flask" else "FastAPI"
             app = assignments.get("app")
@@ -333,22 +571,49 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                     and isinstance(route.func, ast.Attribute)
                     and isinstance(route.func.value, ast.Name)
                     and route.func.value.id == "app"
-                    and route.func.attr == "get"
+                    and route.func.attr in {"get", "post", "patch"}
                     and len(route.args) == 1
-                    and not route.keywords
+                    and (
+                        not route.keywords
+                        or (
+                            framework == "fastapi"
+                            and route.func.attr == "post"
+                            and len(route.keywords) == 1
+                            and route.keywords[0].arg == "status_code"
+                            and ast.literal_eval(route.keywords[0].value) == 201
+                        )
+                    )
                 ):
-                    raise ValueError("only app.get(literal_path) is qualified")
-                bindings.append((ast.literal_eval(route.args[0]), name))
+                    raise ValueError("only app.get/post/patch(literal_path) is qualified")
+                bindings.append((ast.literal_eval(route.args[0]), name, route.func.attr.upper()))
         used: set[str] = set()
-        for route_path, name in bindings:
-            if type(route_path) is not str or not PATH.fullmatch(route_path) or "//" in route_path:
-                raise ValueError("dynamic route parameters or nonliteral paths are not qualified")
+        for route_path, name, method in bindings:
             function = functions[name]
+            if framework == "drf":
+                first = ast.unparse(function.decorator_list[0]) if function.decorator_list else ""
+                if first == "api_view(['GET'])":
+                    method = "GET"
+                elif first == "api_view(['POST'])":
+                    method = "POST"
+                elif first == "api_view(['PATCH'])":
+                    method = "PATCH"
+            match = FLASK_INT_PATH.fullmatch(route_path) if framework == "flask" else None
+            if framework == "drf":
+                match = FLASK_INT_PATH.fullmatch(route_path)
+            elif framework == "fastapi":
+                match = FASTAPI_INT_PATH.fullmatch(route_path)
+            if match:
+                route_path = match.group("prefix") + ":" + match.group("name")
+            invalid_path = (
+                type(route_path) is not str or not PATH.fullmatch(route_path) or "//" in route_path
+            )
+            if invalid_path and not (method == "PATCH" and ":" in route_path):
+                raise ValueError("dynamic route parameters or nonliteral paths are not qualified")
             used.add(name)
             if framework == "drf":
                 decorators = [ast.unparse(item) for item in function.decorator_list]
                 required = [
-                    "api_view(['GET'])",
+                    f"api_view(['{method}'])",
                     "authentication_classes([])",
                     "permission_classes([AllowAny])",
                     "renderer_classes([JSONRenderer])",
@@ -373,7 +638,12 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 raise ValueError("jsonify must be imported from flask")
             if isinstance(function, ast.AsyncFunctionDef) and framework != "fastapi":
                 raise ValueError("async handlers are qualified only for FastAPI")
-            payload = _payload(function, framework, models)
+            if method in {"POST", "PATCH"} and framework in {"flask", "fastapi"}:
+                payload = _sqlalchemy_write(function, framework, method, models)
+            elif method in {"POST", "PATCH"} and framework == "drf":
+                payload = _drf_write(function, method, models)
+            else:
+                payload = _payload(function, framework, models)
             if (
                 "read" in payload
                 and framework != "drf"
@@ -383,8 +653,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             routes.append(
                 {
                     "path": route_path,
-                    "method": "GET",
-                    "status": 200,
+                    "method": method,
+                    "status": payload.pop("status", 200),
                     **payload,
                 }
             )
@@ -393,11 +663,11 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             and {"list", "dict", "row", "session", "str"} & functions.keys()
         ):
             raise ValueError("query symbols must not be shadowed")
-        if engine is not None and not any("read" in route for route in routes):
+        if engine is not None and not any("read" in route or "write" in route for route in routes):
             raise ValueError("unused database engine setup requires additional capture")
         if used != set(functions):
             raise ValueError("unregistered functions require additional capture")
-        if len({route["path"] for route in routes}) != len(routes):
+        if len({(route["method"], route["path"]) for route in routes}) != len(routes):
             raise ValueError("duplicate routes require ordering analysis")
     except (ValueError, TypeError, KeyError) as error:
         gaps.append(str(error))
@@ -415,5 +685,5 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
 
     if config["database_layer"] == "pgx":
         result["models"] = models
-        result["scope"] = "empty PostgreSQL schema baseline and captured public JSON GET endpoints"
+        result["scope"] = "empty PostgreSQL schema baseline and captured JSON endpoints"
     return result

@@ -432,4 +432,23 @@ Local validation passed `make check`: 1,153 tests, 93 documented service/toolcha
 skips and 24 packaging checks. Native transaction fault injection passed with
 Go enabled; the three PostgreSQL cases await the dedicated CI service. Existing
 Python-to-Go, Django 6 and TypeScript-to-Rust lanes passed on merged PR76;
-its general post-merge job was still running at this checkpoint.
+PR78 then passed the full general and specialized CI matrix and merged as
+`ed43a00a` from exact approved head `61bcfc34`.
+
+
+## Task 12: first Fiber create/PATCH slice (2026-09-18)
+
+Fiber + pgx now lowers one exact flat-model create/PATCH recipe from DRF, Flask,
+or FastAPI. Static capture requires explicit source validation for unknown,
+missing, null, scalar-type and PostgreSQL integer-width cases. Any changed recipe
+fails closed. Generated JSON decoding retains missing/null/false/zero/empty-string
+distinctions, SQL is parameterized, and each write uses `pgx.BeginFunc`. PATCH
+updates only present fields and supports an empty read-back.
+
+The slice intentionally emits no service/repository layer: one model and one
+transaction do not justify either. chi, mux and Gin writes remain rejected.
+Authentication, permissions, middleware, relationships, decimal/time fields,
+PUT/delete, error parity beyond this recipe, shared HTTP replay adoption and hosted
+execution remain open. The PostgreSQL lifecycle test applies the generated Goose
+baseline, exercises Fiber HTTP requests, and reads back database effects for all
+three captured source frameworks when the explicit CI fixture is available.
