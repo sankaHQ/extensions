@@ -739,7 +739,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             invalid_path = (
                 type(route_path) is not str or not PATH.fullmatch(route_path) or "//" in route_path
             )
-            if invalid_path and not (method in {"PUT", "PATCH", "DELETE"} and ":" in route_path):
+            if invalid_path and not (
+                method in {"GET", "PUT", "PATCH", "DELETE"} and ":" in route_path
+            ):
                 raise ValueError("dynamic route parameters or nonliteral paths are not qualified")
             used.add(name)
             if framework == "drf":
@@ -776,12 +778,24 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 payload = _drf_write(function, method, models)
             else:
                 payload = _payload(function, framework, models)
+            lookup = payload.get("read", {}).get("lookup")
+            path_lookup = route_path.rsplit(":", 1)[1] if ":" in route_path else None
+            if (
+                method == "GET"
+                and lookup != path_lookup
+                and (lookup is not None or path_lookup is not None)
+            ):
+                raise ValueError("detail read lookup must match the dynamic route parameter")
             if (
                 "read" in payload
                 and framework != "drf"
-                and (engine is None or not {"Session", "select"} <= imports)
+                and (
+                    engine is None
+                    or "Session" not in imports
+                    or ("lookup" not in payload["read"] and "select" not in imports)
+                )
             ):
-                raise ValueError("database reads require an explicit engine, Session and select")
+                raise ValueError("database reads require an explicit engine and ORM imports")
             routes.append(
                 {
                     "path": route_path,

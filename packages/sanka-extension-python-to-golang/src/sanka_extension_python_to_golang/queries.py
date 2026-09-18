@@ -10,20 +10,66 @@ from typing import Any
 def capture_read(
     node: ast.FunctionDef | ast.AsyncFunctionDef, framework: str, models: list[dict[str, Any]]
 ) -> dict[str, Any] | None:
-    if len(node.body) != 1:
-        return None
-    referenced = {item.id for item in ast.walk(node.body[0]) if isinstance(item, ast.Name)}
+    referenced = {item.id for item in ast.walk(node) if isinstance(item, ast.Name)}
     models = [model for model in models if model["name"] in referenced]
     if not models:
         return None
     # Match the whole body, so filters, joins, side effects and altered projections
     # cannot be silently omitted. Limits must be present in the source itself.
+    actual = ast.dump(ast.Module(body=node.body, type_ignores=[]))
+    for model in models:
+        fields = model["fields"]
+        primary = next(field for field in fields if field["primary_key"])
+        response = (
+            "{"
+            + ", ".join(repr(field["name"]) + ": item." + field["name"] for field in fields)
+            + "}"
+        )
+        if framework == "drf":
+            signature = f"request, {primary['name']}"
+            lookup = (
+                f"item = {model['name']}.objects.filter("
+                f"{primary['name']}={primary['name']}).first()\n"
+            )
+            source = (
+                lookup
+                + f"""if item is None:
+    return Response({{"error": "not found"}}, status=404)
+return Response({response})
+"""
+            )
+        else:
+            signature = primary["name"] if framework == "flask" else f"{primary['name']}: int"
+            missing = (
+                'return jsonify({"error": "not found"}), 404'
+                if framework == "flask"
+                else 'raise HTTPException(status_code=404, detail="not found")'
+            )
+            response_value = f"jsonify({response})" if framework == "flask" else response
+            source = f"""with Session(engine) as session:
+    item = session.get({model["name"]}, {primary["name"]})
+    if item is None:
+        {missing}
+    return {response_value}
+"""
+        expected = ast.parse(
+            f"def endpoint({signature}):\n"
+            + "\n".join("    " + line for line in source.splitlines())
+        ).body[0]
+        assert isinstance(expected, ast.FunctionDef)
+        if (
+            not isinstance(node, ast.AsyncFunctionDef)
+            and ast.dump(node.args) == ast.dump(expected.args)
+            and actual == ast.dump(ast.Module(body=expected.body, type_ignores=[]))
+        ):
+            return {"model": model["name"], "lookup": primary["name"]}
+    if len(node.body) != 1:
+        return None
     limits = {
         item.value
         for item in ast.walk(node)
         if isinstance(item, ast.Constant) and type(item.value) is int and 1 <= item.value <= 1000
     }
-    actual = ast.dump(ast.Module(body=node.body, type_ignores=[]))
     parameters: list[tuple[str, str, str]] = []
     if framework == "fastapi" and len(node.args.args) == 1 and len(node.args.defaults) == 1:
         arg, default_node = node.args.args[0], node.args.defaults[0]

@@ -13,9 +13,70 @@ from pathlib import Path
 
 import pytest
 from sanka_extension_python_to_golang.adapter import handle
-from sanka_extension_python_to_golang.capture import SOURCES, TARGETS
+from sanka_extension_python_to_golang.capture import SOURCES, TARGETS, capture, configuration
+from sanka_extension_python_to_golang.replay import request_paths
 from test_golang_schema import SOURCE_DDL, generate, model_source, schema_dsn
 from test_python_to_golang import PAYLOAD, request, source
+
+
+def detail_source(framework: str) -> str:
+    fields = (
+        '"id": item.id, "name": item.name, "count": item.count, '
+        '"enabled": item.enabled, "note": item.note'
+    )
+    if framework == "drf":
+        return f"""from django.urls import path
+from rest_framework.decorators import (
+    api_view, authentication_classes, permission_classes, renderer_classes,
+)
+from rest_framework.permissions import AllowAny
+from rest_framework.renderers import JSONRenderer
+from rest_framework.response import Response
+from models import Widget
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@renderer_classes([JSONRenderer])
+def get_widget(request, id):
+    item = Widget.objects.filter(id=id).first()
+    if item is None:
+        return Response({{"error": "not found"}}, status=404)
+    return Response({{{fields}}})
+urlpatterns = [path("widgets/<int:id>", get_widget)]
+"""
+    prefix = """from models import Widget
+from os import environ
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+engine = create_engine(environ["DATABASE_URL"])
+"""
+    if framework == "flask":
+        return (
+            prefix
+            + f"""from flask import Flask, jsonify
+app = Flask(__name__)
+@app.get("/widgets/<int:id>")
+def get_widget(id):
+    with Session(engine) as session:
+        item = session.get(Widget, id)
+        if item is None:
+            return jsonify({{"error": "not found"}}), 404
+        return jsonify({{{fields}}})
+"""
+        )
+    return (
+        prefix
+        + f"""from fastapi import FastAPI, HTTPException
+app = FastAPI()
+@app.get("/widgets/{{id}}")
+def get_widget(id: int):
+    with Session(engine) as session:
+        item = session.get(Widget, id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return {{{fields}}}
+"""
+    )
 
 
 def read_source(framework: str) -> str:
@@ -60,6 +121,150 @@ def test_read_generation(tmp_path: Path, framework: str, target: str) -> None:
             capture_output=True,
             timeout=180,
         )
+
+
+@pytest.mark.parametrize("framework", SOURCES)
+@pytest.mark.parametrize("target", TARGETS)
+def test_detail_read_generation(tmp_path: Path, framework: str, target: str) -> None:
+    output = generate(tmp_path, framework, target, app_source=detail_source(framework))
+    plan = json.loads((tmp_path / ".sanka/go/plan.json").read_text())
+    assert plan["capture"]["routes"][0]["read"] == {"model": "Widget", "lookup": "id"}
+    source_text = (output / "app.go").read_text()
+    assert 'WHERE \\"id\\" = $1' in source_text
+    if os.getenv("SANKA_GO_TESTS") == "1":
+        subprocess.run(
+            ["go", "test", "-mod=readonly", "-p=2", "./..."],
+            cwd=output,
+            env=os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"},
+            check=True,
+            capture_output=True,
+            timeout=180,
+        )
+
+
+@pytest.mark.parametrize("framework", SOURCES)
+def test_changed_detail_read_semantics_block(tmp_path: Path, framework: str) -> None:
+    text = detail_source(framework).replace('"not found"', '"missing"')
+    (tmp_path / "app.py").write_text(text)
+    (tmp_path / "models.py").write_text(model_source(framework))
+    result = handle(
+        dataclasses.replace(
+            request(tmp_path, framework),
+            configuration={"source_framework": framework, "database_layer": "pgx"},
+        )
+    )
+    assert result.data["capture"]["gaps"]
+    assert result.data["files"] == {}
+
+
+def test_detail_read_replay_uses_a_concrete_lookup(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(detail_source("flask"))
+    (tmp_path / "models.py").write_text(model_source("flask"))
+    captured = capture(
+        tmp_path, configuration({"source_framework": "flask", "database_layer": "pgx"})
+    )
+    assert request_paths(captured["routes"][0]) == ["/widgets/1"]
+
+
+def test_detail_read_requires_matching_route_parameter(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        detail_source("flask").replace('"/widgets/<int:id>"', '"/widgets"')
+    )
+    (tmp_path / "models.py").write_text(model_source("flask"))
+    captured = capture(
+        tmp_path, configuration({"source_framework": "flask", "database_layer": "pgx"})
+    )
+    assert "detail read lookup must match" in " ".join(captured["gaps"])
+
+
+@pytest.mark.skipif(
+    not os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN") or os.getenv("SANKA_GO_TESTS") != "1",
+    reason="requires explicit test PostgreSQL DSN and SANKA_GO_TESTS=1",
+)
+@pytest.mark.parametrize("framework", SOURCES)
+@pytest.mark.parametrize("target", TARGETS)
+def test_detail_read_database_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, framework: str, target: str
+) -> None:
+    import psycopg
+    from psycopg import sql
+
+    output = generate(tmp_path, framework, target, app_source=detail_source(framework))
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    schemas = ["go_detail_" + uuid.uuid4().hex for _ in range(2)]
+    environment = os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"}
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        try:
+            for schema in schemas:
+                admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+            source_url, target_url = [schema_dsn(dsn, schema) for schema in schemas]
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-c",
+                    SOURCE_DDL,
+                    framework,
+                    str(tmp_path / "models.py"),
+                    source_url,
+                ],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+            subprocess.run(
+                ["go", "run", "-mod=readonly", "-p=2", "./cmd/migrate", "up"],
+                cwd=output,
+                env=environment | {"DATABASE_URL": target_url},
+                check=True,
+                capture_output=True,
+                timeout=180,
+            )
+            row = (1, "detail", 7, True, None)
+            for url in (source_url, target_url):
+                with psycopg.connect(url, autocommit=True) as connection:
+                    connection.execute(
+                        "INSERT INTO widgets (id,name,count,enabled,note) VALUES (%s,%s,%s,%s,%s)",
+                        row,
+                    )
+            monkeypatch.setenv(
+                "SANKA_GO_SOURCE_TEST_DATABASE_URL",
+                source_url
+                if framework == "drf"
+                else source_url.replace("postgresql://", "postgresql+psycopg://", 1),
+            )
+            monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", target_url)
+            req = dataclasses.replace(
+                request(tmp_path, framework, target),
+                command="verify",
+                configuration={
+                    "source_framework": framework,
+                    "target_framework": target,
+                    "database_layer": "pgx",
+                },
+            )
+            verified = handle(req)
+            assert verified.outcome == "success", verified.error
+            expected = dict(zip(("id", "name", "count", "enabled", "note"), row, strict=True))
+            assert verified.data["source"][0]["body"] == expected
+            assert verified.data["candidate"][0]["body"] == expected
+            with psycopg.connect(target_url, autocommit=True) as connection:
+                connection.execute("DELETE FROM widgets WHERE id=1")
+            mismatch = handle(req)
+            assert mismatch.outcome == "error"
+            assert mismatch.error.code == "SANKA_EXTENSION_PARITY_FAILED"
+            report = json.loads((tmp_path / ".sanka/go/verify.json").read_text())
+            assert report["candidate"][0] == {
+                "path": "/widgets/1",
+                "status": 404,
+                "media_type": "application/json",
+                "body": {"detail" if framework == "fastapi" else "error": "not found"},
+            }
+        finally:
+            for schema in schemas:
+                admin.execute(
+                    sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema))
+                )
 
 
 @pytest.mark.parametrize("framework", SOURCES)

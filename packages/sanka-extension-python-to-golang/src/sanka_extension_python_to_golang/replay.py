@@ -172,6 +172,9 @@ def _snapshot(output: Path) -> dict[str, bytes]:
 
 def request_paths(route: dict[str, Any]) -> list[str]:
     path = route["path"]
+    lookup = route.get("read", {}).get("lookup")
+    if lookup:
+        return [path.replace(f":{lookup}", "1")]
     filtered = route.get("read", {}).get("filter")
     if not filtered:
         return [path]
