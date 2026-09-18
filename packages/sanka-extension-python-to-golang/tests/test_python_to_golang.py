@@ -369,3 +369,92 @@ def test_invalid_target_alias(key: str, value: object) -> None:
 def test_conflicting_target_alias() -> None:
     with pytest.raises(ValueError, match="must match"):
         configuration({"source_framework": "flask", "target": "chi", "target_framework": "fiber"})
+
+
+@pytest.mark.parametrize("command", ["test", "verify"])
+def test_failed_install_removes_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    from sanka_extension_python_to_golang import replay
+
+    (tmp_path / "app.py").write_text(source("flask"))
+    output = apply(tmp_path, "flask", "fiber")
+    before = {p.name: p.read_bytes() for p in output.iterdir()}
+    report = tmp_path / ".sanka/go" / f"{command}.json"
+    report.write_text('{"ok":true}')
+
+    def fail(root: Path) -> None:
+        raise ValueError("Automatic Go installation failed")
+
+    monkeypatch.setattr(replay, "ensure_go", fail)
+    result = handle(dataclasses.replace(request(tmp_path), command=command))
+    assert result.outcome == "error"
+    assert not report.exists()
+    assert {p.name: p.read_bytes() for p in output.iterdir()} == before
+
+
+def test_go_bootstrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+    import io
+    import tarfile
+
+    from sanka_extension_python_to_golang import toolchain
+
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w:gz") as tar:
+        info = tarfile.TarInfo("go/bin/go")
+        info.size = 2
+        info.mode = 0o755
+        tar.addfile(info, io.BytesIO(b"go"))
+    content = archive.getvalue()
+    monkeypatch.setattr(toolchain.shutil, "which", lambda name: None)
+    monkeypatch.setattr(toolchain.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(toolchain.platform, "machine", lambda: "x86_64")
+    monkeypatch.setitem(
+        toolchain.ARCHIVES, ("linux", "amd64"), (hashlib.sha256(content).hexdigest(), len(content))
+    )
+    monkeypatch.setattr(toolchain, "_qualified", lambda executable: Path(executable).is_file())
+    downloads = []
+
+    def download(url: str, **kwargs: object) -> io.BytesIO:
+        downloads.append(url)
+        return io.BytesIO(content)
+
+    monkeypatch.setattr(toolchain.urllib.request, "urlopen", download)
+    executable, environment = toolchain.ensure_go(tmp_path)
+    assert Path(executable).read_bytes() == b"go"
+    assert toolchain.ensure_go(tmp_path) == (executable, environment)
+    assert len(downloads) == 1
+    assert not list((tmp_path / ".sanka/go-toolchain").glob("install-*"))
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setitem(toolchain.ARCHIVES, ("linux", "amd64"), ("0" * 64, len(content)))
+    with pytest.raises(ValueError, match="checksum"):
+        toolchain.ensure_go(other)
+    assert not list((other / ".sanka/go-toolchain").glob("go1*"))
+    malicious = tmp_path / "bad.tar.gz"
+    with tarfile.open(malicious, "w:gz") as tar:
+        tar.addfile(tarfile.TarInfo("go/../../outside"))
+    with pytest.raises(ValueError, match="unsafe"):
+        toolchain._extract(malicious, tmp_path, False)
+
+
+@pytest.mark.skipif(
+    os.environ.get("SANKA_GO_BOOTSTRAP_TESTS") != "1", reason="requires official Go download"
+)
+def test_native_go_bootstrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sanka_extension_python_to_golang import toolchain
+
+    monkeypatch.setattr(toolchain.shutil, "which", lambda name: None)
+    monkeypatch.delenv("HOME", raising=False)
+    (tmp_path / "app.py").write_text(source("flask"))
+    apply(tmp_path, "flask", "fiber")
+    for command in ("test", "verify"):
+        result = handle(dataclasses.replace(request(tmp_path), command=command))
+        assert result.outcome == "success", result.error
+
+        # The second replay must use the cached compiler, without downloading again.
+        def offline(*args: object, **kwargs: object) -> None:
+            raise AssertionError("cached compiler attempted a download")
+
+        monkeypatch.setattr(toolchain.urllib.request, "urlopen", offline)

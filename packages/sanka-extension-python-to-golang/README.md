@@ -211,3 +211,23 @@ Both must agree when supplied together; invalid or conflicting values are reject
 If neither is supplied, Fiber remains the default. Both spellings produce the same
 normalized configuration and extension plan hash. CLI forwarding is a separate runtime
 change; this alias alone does not enable `--to` forwarding in existing CLI versions.
+
+`test` and `verify` reuse Go 1.26.5 on `PATH`. When it is missing or a different
+version is installed, they automatically download the qualified compiler from
+Go's official distribution, verify its pinned SHA-256 and size, and install it
+atomically under `.sanka/go-toolchain`. Subsequent runs reuse that installation.
+When the CLI runs without `HOME`, build and module caches also live there;
+direct runs retain their existing Go caches. System installations and shell settings
+are untouched. Automatic installation supports macOS, Linux and Windows on amd64
+and arm64. A failed download stops verification with retry/manual installation
+guidance. Offline runs need an existing qualified compiler and cached modules.
+Scan, planning and code generation do not download or execute Go.
+
+Run the fresh-install regression (downloads into a temporary fixture and verifies
+reuse without a second download):
+
+```bash
+SANKA_GO_BOOTSTRAP_TESTS=1 uv run python -m pytest \
+  packages/sanka-extension-python-to-golang/tests/test_python_to_golang.py \
+  -k native_go_bootstrap
+```
