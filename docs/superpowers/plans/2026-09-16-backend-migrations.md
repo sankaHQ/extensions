@@ -440,7 +440,7 @@ compatibility gates above. Fiber is the first complete-backend qualification gat
 - [ ] Port qualified access/query/middleware contracts with source-compatible errors.
 - [ ] Handle cancellation, transaction rollback, commit errors, pool closure, HTTP
   timeouts, panic recovery and shutdown. Avoid storing request context after completion.
-- [ ] Support empty-schema setup and verified adoption, never automatic migration on boot.
+- [x] Support empty-schema setup and verified adoption, never automatic migration on boot.
 - [ ] Run language-neutral requests against Python source and Go target with independently
   seeded PostgreSQL databases. Native Go must not shell out to Python at request time.
 - [ ] Compare generated files across independent locked runs.

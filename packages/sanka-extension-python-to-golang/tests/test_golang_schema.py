@@ -46,11 +46,21 @@ class Widget(Base):
 """
 
 
-def generate(root: Path, framework: str, target: str, *, app_source: str | None = None) -> Path:
+def generate(
+    root: Path,
+    framework: str,
+    target: str,
+    *,
+    app_source: str | None = None,
+    schema_mode: str = "empty",
+) -> Path:
     (root / "app.py").write_text(source(framework) if app_source is None else app_source)
     (root / "models.py").write_text(model_source(framework))
     req = request(root, framework, target)
-    req = dataclasses.replace(req, configuration=req.configuration | {"database_layer": "pgx"})
+    req = dataclasses.replace(
+        req,
+        configuration=req.configuration | {"database_layer": "pgx", "schema_mode": schema_mode},
+    )
     planned = handle(req)
     assert planned.outcome == "success", planned.error
     assert not planned.data["capture"]["gaps"], planned.data
@@ -93,6 +103,20 @@ def test_schema_generation(tmp_path: Path, framework: str, target: str) -> None:
             )
         )
         assert verified.outcome == "success", verified.error
+
+
+@pytest.mark.parametrize("framework", SOURCES)
+@pytest.mark.parametrize("target", TARGETS)
+def test_adoption_generation(tmp_path: Path, framework: str, target: str) -> None:
+    output = generate(tmp_path, framework, target, schema_mode="adopt-existing")
+    migration = (output / "migrations/00001_initial.sql").read_text()
+    assert "schema adoption failed: columns differ" in migration
+    assert "schema adoption failed: constraints differ" in migration
+    assert "CREATE TABLE" not in migration
+    assert "DROP TABLE" not in migration
+    assert 'LOCK TABLE "widgets" IN ACCESS SHARE MODE' in migration
+    command = (output / "cmd/migrate/main.go").read_text()
+    assert "down preserves adopted application tables" in command
 
 
 @pytest.mark.parametrize("framework", SOURCES)
@@ -295,11 +319,94 @@ def test_postgres_schema_parity(tmp_path: Path, framework: str, target: str) -> 
                 )
 
 
+@pytest.mark.skipif(
+    not os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN") or os.getenv("SANKA_GO_TESTS") != "1",
+    reason="requires explicit test PostgreSQL DSN and SANKA_GO_TESTS=1",
+)
+@pytest.mark.parametrize("framework", SOURCES)
+def test_postgres_schema_adoption_preserves_data(tmp_path: Path, framework: str) -> None:
+    import psycopg
+    from psycopg import sql
+
+    output = generate(tmp_path, framework, "fiber", schema_mode="adopt-existing")
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    schemas = ["go_adopt_" + uuid.uuid4().hex for _ in range(2)]
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        try:
+            environment = os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"}
+            binary = tmp_path / ".sanka" / "migrate-adopt"
+            subprocess.run(
+                ["go", "build", "-mod=readonly", "-p=2", "-o", str(binary), "./cmd/migrate"],
+                cwd=output,
+                env=environment,
+                check=True,
+                capture_output=True,
+                timeout=180,
+            )
+            for schema in schemas:
+                admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+                source_result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-I",
+                        "-c",
+                        SOURCE_DDL,
+                        framework,
+                        str(tmp_path / "models.py"),
+                        schema_dsn(dsn, schema),
+                    ],
+                    text=True,
+                    capture_output=True,
+                    timeout=30,
+                )
+                assert source_result.returncode == 0, source_result.stderr
+                with psycopg.connect(schema_dsn(dsn, schema), autocommit=True) as connection:
+                    connection.execute(
+                        "INSERT INTO widgets (name,count,enabled,note) VALUES ('kept',7,true,'row')"
+                    )
+
+            def migrate(schema: str, direction: str, *, success: bool = True) -> None:
+                result = subprocess.run(
+                    [str(binary), direction],
+                    env=environment | {"DATABASE_URL": schema_dsn(dsn, schema)},
+                    text=True,
+                    capture_output=True,
+                    timeout=60,
+                )
+                assert (result.returncode == 0) is success, result.stderr
+
+            migrate(schemas[0], "up")
+            migrate(schemas[0], "up")
+            migrate(schemas[0], "down")
+            with psycopg.connect(schema_dsn(dsn, schemas[0])) as connection:
+                assert connection.execute(
+                    "SELECT name,count,enabled,note FROM widgets"
+                ).fetchall() == [("kept", 7, True, "row")]
+            migrate(schemas[0], "up")
+
+            with psycopg.connect(schema_dsn(dsn, schemas[1]), autocommit=True) as connection:
+                connection.execute("ALTER TABLE widgets ADD COLUMN unexpected text")
+            migrate(schemas[1], "up", success=False)
+            with psycopg.connect(schema_dsn(dsn, schemas[1])) as connection:
+                assert connection.execute("SELECT name,count FROM widgets").fetchall() == [
+                    ("kept", 7)
+                ]
+                assert not connection.execute(
+                    "SELECT EXISTS (SELECT 1 FROM goose_db_version "
+                    "WHERE version_id=1 AND is_applied)"
+                ).fetchone()[0]
+        finally:
+            for schema in schemas:
+                admin.execute(
+                    sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema))
+                )
+
+
 @pytest.mark.parametrize(
     "option,value",
     [
         ("database_dialect", "sqlite"),
-        ("schema_mode", "adopt-existing"),
+        ("schema_mode", "unsafe"),
         ("migration_tool", "unknown"),
         ("models_file", "../models.py"),
     ],
