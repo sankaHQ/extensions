@@ -452,3 +452,18 @@ PUT/delete, error parity beyond this recipe, shared HTTP replay adoption and hos
 execution remain open. The PostgreSQL lifecycle test applies the generated Goose
 baseline, exercises Fiber HTTP requests, and reads back database effects for all
 three captured source frameworks when the explicit CI fixture is available.
+
+
+## Task 12: Fiber process boundary (2026-09-18)
+
+Fiber output now has a runnable `cmd/api` with validated `PORT`, conditional
+`DATABASE_URL`, bounded pgx startup, pool ownership, HTTP body/read/write/idle
+limits, and Fiber's native signal-driven graceful shutdown with a ten-second
+shutdown bound. Database migrations remain an explicit `cmd/migrate` operation;
+the API never migrates on boot. Generated configuration tests and Go builds cover
+both database-free and database-backed applications without starting a listener.
+
+The shared HTTP replay package is still absent from `main`, so this slice does
+not create a competing replay implementation. chi, mux and Gin process entrypoints,
+health/readiness policy, deployment packaging, hosted recipes, and write replay
+remain separate qualification work.
