@@ -15,6 +15,7 @@ from urllib.parse import urlencode, urlsplit
 
 from .capture import canonical, capture, digest
 from .render import render
+from .toolchain import ensure_go
 
 SOURCE_PROBE = """
 import importlib.util, json, os, sys
@@ -285,11 +286,11 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
         (candidate / "sanka_contract_probe_test.go").write_text(
             _probe(config["target_framework"], paths, database)
         )
-        version = _run(["go", "version"], candidate).split()
-        if len(version) < 3 or version[2] != "go1.26.5":
-            raise ValueError("replay requires the qualified Go 1.26.5 toolchain")
+        executable, go_environment = ensure_go(root)
+        target_environment.update(go_environment)
+        version = _run([executable, "version"], candidate, environment=go_environment).split()
         _run(
-            ["go", "test", "-count=1", "-p=2", "-timeout=60s", "./..."],
+            [executable, "test", "-count=1", "-p=2", "-timeout=60s", "./..."],
             candidate,
             environment=target_environment,
         )
