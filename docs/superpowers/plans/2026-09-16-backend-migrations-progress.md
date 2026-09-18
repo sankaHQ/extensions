@@ -346,3 +346,18 @@ or generated write support. Decimal/time/nested input contracts, source-specific
 coercion/errors, shared profile generalization, renderer adoption and transactional
 CRUD/PATCH remain open. No helper release or extension dependency update is made
 in this slice; published adoption requires a separately versioned helper release.
+
+
+## Task 11: exact decimal representation (2026-09-18)
+
+`DecimalValue` carries a canonical signed coefficient string and integer exponent.
+It preserves trailing scale, signed zero and coefficients beyond int64 without
+float conversion or dependence on the ambient Python Decimal precision. Large
+exponents stay compact instead of expanding into enormous strings. Non-finite
+values, floats, non-ASCII digits and invalid wire types are rejected.
+
+The shared-helper suite passes 91 tests including native Go decoding/encoding of
+exact decimal components. This is a representation contract only: source coercion,
+rounding, database precision bounds, renderer adoption and write endpoints remain
+open. InputValue v1 and existing IR serialization are unchanged. Candidate helper
+hashes are refreshed and checked by a second canonical build; no publication occurs.

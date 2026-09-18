@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from decimal import Decimal
 
 from .ir import _canonical_json
 
@@ -55,3 +57,48 @@ class InputValue:
     def to_dict(self) -> dict[str, object]:
         # JSON text is intentional: language runtimes must not round large integers.
         return {"schema": "sanka.input-value/v1", "value_json": self.value_json}
+
+
+@dataclass(frozen=True, slots=True)
+class DecimalValue:
+    """Exact coefficient/exponent representation; no rounding or float conversion.
+
+    Scale and signed zero are retained. Source precision/scale validation and target
+    database bounds remain separate policies; this type performs no arithmetic.
+    """
+
+    coefficient: str
+    exponent: int
+
+    def __post_init__(self) -> None:
+        if type(self.coefficient) is not str or not re.fullmatch(
+            r"-?(0|[1-9][0-9]*)", self.coefficient
+        ):
+            raise ValueError("coefficient must be canonical signed decimal digits")
+        if type(self.exponent) is not int:
+            raise TypeError("exponent must be an integer")
+        # Check representability without expanding large powers of ten.
+        self.to_decimal()
+
+    @classmethod
+    def from_decimal(cls, value: Decimal) -> DecimalValue:
+        if type(value) is not Decimal or not value.is_finite():
+            raise ValueError("a finite Decimal is required")
+        parts = value.as_tuple()
+        return cls(
+            ("-" if parts.sign else "") + "".join(str(digit) for digit in parts.digits),
+            int(parts.exponent),
+        )
+
+    def to_decimal(self) -> Decimal:
+        digits = self.coefficient.removeprefix("-")
+        return Decimal(
+            (int(self.coefficient.startswith("-")), tuple(map(int, digits)), self.exponent)
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema": "sanka.decimal-value/v1",
+            "coefficient": self.coefficient,
+            "exponent": self.exponent,
+        }
