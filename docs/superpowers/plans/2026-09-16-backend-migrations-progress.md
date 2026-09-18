@@ -538,3 +538,21 @@ Opt-in PostgreSQL qualification creates source schemas through Django or
 SQLAlchemy, preserves seeded rows across apply/reapply/down/up, and verifies that
 a mismatched schema is rejected without marking the baseline applied. Generic
 shared write replay and broader model semantics remain separate work.
+
+
+## Consolidated project routing batch (2026-09-18)
+
+PR84 merged as `9830fa0` after the PostgreSQL and broad CI gates passed. The next
+batch combines Flask Blueprints and simple factories, FastAPI APIRouters, DRF
+nested literal URL lists, and explicit imports from flat local modules. Static
+capture retains source-specific prefix rules and rejects unsupported registration
+options, hooks, name collisions, unregistered routers and cyclic import graphs.
+Replay runs original source snapshots, including imported modules, rather than
+executing a normalized substitute. Imported-file changes invalidate reviewed plans.
+
+The acceptance matrix covers all three sources and four Go routers, plus factory
+and multi-file replay. PostgreSQL detail-read and CRUD lifecycle fixtures also
+exercise grouped paths in the service-backed CI lane. Serializers, Pydantic request
+models, auth/permissions, middleware, relationships and shared write replay remain
+open. Keep delivering coherent batches with one review checkpoint per batch;
+these routing capabilities do not close the full backend milestone.

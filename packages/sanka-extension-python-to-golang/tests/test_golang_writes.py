@@ -656,13 +656,18 @@ def go_write_test(target: str) -> str:
     [("flask", flask_write_source), ("fastapi", fastapi_write_source), ("drf", drf_write_source)],
 )
 @pytest.mark.parametrize("target", TARGETS)
+@pytest.mark.parametrize("grouped", [False, True])
 def test_write_lifecycle_and_database_effects(
-    tmp_path: Path, framework: str, source: object, target: str
+    tmp_path: Path, framework: str, source: object, target: str, grouped: bool
 ) -> None:
     import psycopg
     from psycopg import sql
+    from test_golang_routing import group_backend
 
-    output = generate(tmp_path, framework, target, app_source=source())  # type: ignore[operator]
+    text = source()  # type: ignore[operator]
+    output = generate(
+        tmp_path, framework, target, app_source=group_backend(text, framework) if grouped else text
+    )
     dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
     schema = "go_write_" + uuid.uuid4().hex
     with psycopg.connect(dsn, autocommit=True) as admin:
@@ -683,7 +688,10 @@ def test_write_lifecycle_and_database_effects(
                 capture_output=True,
                 timeout=180,
             )
-            (output / "write_contract_test.go").write_text(go_write_test(target))
+            test = go_write_test(target)
+            if grouped:
+                test = test.replace("/widgets", "/api/widgets")
+            (output / "write_contract_test.go").write_text(test)
             result = subprocess.run(
                 [
                     "go",

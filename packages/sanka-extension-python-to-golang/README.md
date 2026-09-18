@@ -24,10 +24,10 @@ plans or existing output. Artifacts must be inside the project's `.sanka`
 directory; output is `golang/` within that artifact directory.
 
 `scan`, `plan`, and `apply` parse source without importing or executing it. The current capture accepts
-one top-level endpoint module (plus the explicitly selected models module for pgx)
-and rejects unknown imports, decorators, configuration,
-request parameters, unsupported dynamic handlers, additional Python modules, and source
-symlinks. DRF endpoints require explicit public permission, no authentication,
+an entrypoint plus explicitly imported top-level Python modules (up to 32 files),
+and the selected models module for pgx. Unknown imports, decorators, configuration,
+request parameters, unsupported dynamic handlers, unreferenced Python modules, and
+source symlinks block generation. DRF endpoints require explicit public permission, no authentication,
 and JSON renderer declarations. Unsupported behavior blocks generation.
 
 Generated Go dependencies and checksums are pinned in this package; Go 1.26.5 is
@@ -54,6 +54,26 @@ Reports include source and candidate digests. Manual handler repairs are tested,
 but changes to Go locks or the captured contract are rejected. A mismatch returns
 an error with a report path. Each rerun invalidates its old report first, so a
 failed rerun cannot leave stale passing evidence.
+
+## Project routing
+
+The same handler and database contracts work with Flask Blueprints, FastAPI
+APIRouters, and DRF `path(prefix, include([...]))` URL lists. Flask registration
+prefixes override the Blueprint prefix; FastAPI registration prefixes are added
+to the APIRouter prefix. Static prefixes and one registration per router are
+qualified. Routes must be defined before registration.
+
+Explicit imports such as `from routes import api` or `from views import health`
+are captured without importing source. Every consumed file participates in the
+plan hash and is copied unchanged into the source replay environment. Cyclic or
+repeated local imports, aliases, package-relative imports, conflicting names,
+and missing module globals block generation.
+
+A Flask factory may take no arguments, construct `app = Flask(__name__)`, register
+blueprints, and return the app, followed by `app = create_app()` at module scope.
+Factory configuration, hooks, nested router registration, custom dependencies,
+Pydantic models, DRF serializers/ViewSets and custom authentication still require
+additional capture. This routing support does not imply whole-project parity.
 
 ## Process entrypoint
 
