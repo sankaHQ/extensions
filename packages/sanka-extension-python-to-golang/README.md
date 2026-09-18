@@ -231,3 +231,7 @@ SANKA_GO_BOOTSTRAP_TESTS=1 uv run python -m pytest \
   packages/sanka-extension-python-to-golang/tests/test_python_to_golang.py \
   -k native_go_bootstrap
 ```
+
+The [transaction qualification contract](../../docs/python-to-golang-transactions.md)
+covers the pgx primitive intended for write generation. POST/PUT/PATCH capture and
+source-specific write validation are not enabled by these qualification tests.

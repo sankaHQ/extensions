@@ -405,3 +405,31 @@ decimal and timestamp smoke checks. An initial broad run hit a PyPI DNS failure
 in the unrelated FastAPI dependency-install fixture; that fixture and the full
 suite passed on retry without source changes. These are local candidate checks,
 not publication or completion of arbitrary Python-to-Go migrations.
+
+
+## Task 11: transaction qualification (2026-09-18)
+
+PR76 merged at `002d6a88` after all checks and exact-head approval. This follow-up
+qualifies the already-pinned pgx transaction primitive; it adds no custom
+transaction manager or unused service/repository layer to generated read projects.
+The normative behavior and remaining boundaries are in
+`docs/python-to-golang-transactions.md`.
+
+Native fault injection exercises begin, operation, rollback and commit failure,
+panic cleanup, error preservation and no automatic retries. PostgreSQL fixtures
+compare Django atomic scopes and SQLAlchemy scopes with pgx against independently
+created source/target schemas. They cover successful writes, rollback after an
+application/constraint error, a deferred constraint failing only at commit, and
+pool reuse after failure. Go additionally exercises cancellation and an expired
+operation context. A transport-level commit failure is not proof of rollback;
+HTTP status/error mapping, idempotency and cancellation wiring remain unqualified.
+
+POST/PUT/PATCH capture is still blocked. This is the executable transaction
+prerequisite for those handlers, not completed write migration. No existing
+project output, package lock, wheel hash or published dependency changes.
+
+Local validation passed `make check`: 1,153 tests, 93 documented service/toolchain
+skips and 24 packaging checks. Native transaction fault injection passed with
+Go enabled; the three PostgreSQL cases await the dedicated CI service. Existing
+Python-to-Go, Django 6 and TypeScript-to-Rust lanes passed on merged PR76;
+its general post-merge job was still running at this checkpoint.
