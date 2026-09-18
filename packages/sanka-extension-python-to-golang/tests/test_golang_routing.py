@@ -245,3 +245,21 @@ def test_factory_hooks_block(tmp_path: Path) -> None:
     result = handle(request(tmp_path))
     assert result.data["capture"]["gaps"]
     assert result.data["files"] == {}
+
+
+def test_constructor_import_after_use_blocks(tmp_path: Path) -> None:
+    text = routed_source("flask")
+    imports, rest = text.split("\n", 1)
+    (tmp_path / "app.py").write_text(rest + imports + "\n")
+    result = handle(request(tmp_path))
+    assert result.data["capture"]["gaps"]
+    assert result.data["files"] == {}
+
+
+def test_transitive_unexported_symbol_blocks(tmp_path: Path) -> None:
+    (tmp_path / "inner.py").write_text(source("flask"))
+    (tmp_path / "middle.py").write_text("from inner import health\n")
+    (tmp_path / "app.py").write_text("from middle import app\n")
+    result = handle(request(tmp_path))
+    assert result.data["capture"]["gaps"]
+    assert result.data["files"] == {}

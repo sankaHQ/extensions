@@ -310,6 +310,7 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
     visited: set[str] = set()
     active: set[str] = set()
     total_bytes = 0
+    module_exports: dict[str, set[str]] = {}
     shared_imports: set[tuple[str | None, str, str | None, int]] = set()
 
     def read(name: str) -> list[ast.stmt]:
@@ -331,6 +332,23 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
         tree = ast.parse(path.read_text(), filename=name)
         declared: set[str] = set()
         for node in tree.body:
+            immediate = (
+                [node.value]
+                if isinstance(node, ast.Assign)
+                else (
+                    node.decorator_list
+                    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+                    else []
+                )
+            )
+            immediate_names = {
+                n.id
+                for expression in immediate
+                for n in ast.walk(expression)
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+            }
+            if immediate_names - declared - {"__name__"}:
+                raise ValueError(f"{name}: declaration uses a symbol before it is defined")
             symbols = []
             if isinstance(node, ast.ImportFrom):
                 symbols = [a.asname or a.name for a in node.names]
@@ -342,6 +360,7 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
                 if symbol in declared:
                     raise ValueError("source module symbols must not be reassigned")
                 declared.add(symbol)
+        module_exports[name] = declared
         # Inlining must not resolve a missing module global through another file.
         for node in tree.body:
             locals_ = {
@@ -388,7 +407,10 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
                     for t in n.targets
                     if isinstance(t, ast.Name)
                 }
-                if not {a.name for a in node.names} <= exports:
+                if (
+                    not {a.name for a in node.names}
+                    <= exports & module_exports[node.module + ".py"]
+                ):
                     raise ValueError("local import does not refer to a declared symbol")
                 result.extend(statements)
             elif isinstance(node, ast.ImportFrom):
