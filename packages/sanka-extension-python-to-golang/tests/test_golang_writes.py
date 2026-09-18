@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 import uuid
@@ -226,7 +227,7 @@ def delete_widget(id: int):
     )
 
 
-def drf_write_source() -> str:
+def drf_write_source(*, combined: bool = True) -> str:
     text = """from django.urls import path
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, renderer_classes
 from rest_framework.permissions import AllowAny
@@ -315,9 +316,41 @@ urlpatterns = [path("widgets", create_widget), path("widgets/<int:id>", patch_wi
         "    item = Widget.objects.filter", patch + "    item = Widget.objects.filter", 1
     )
     marker = "def replace_widget(request, id):\n    item = Widget.objects.filter"
-    return text.replace(
+    text = text.replace(
         marker, "def replace_widget(request, id):\n" + replace + "    item = Widget.objects.filter"
     )
+    return combine_drf_methods(text) if combined else text
+
+
+def combine_drf_methods(source: str) -> str:
+    tree = ast.parse(source)
+    views = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    combined = ast.parse("def widget(request, id):\n    pass").body[0]
+    combined.decorator_list = views["patch_widget"].decorator_list
+    combined.decorator_list[0] = ast.parse("api_view(['PATCH', 'PUT', 'DELETE'])", mode="eval").body
+    combined.body = []
+    for method, name in [
+        ("PATCH", "patch_widget"),
+        ("PUT", "replace_widget"),
+        ("DELETE", "delete_widget"),
+    ]:
+        branch = ast.parse(f"if request.method == {method!r}:\n    pass").body[0]
+        branch.body = views[name].body
+        combined.body.append(branch)
+    tree.body = [
+        node
+        for node in tree.body
+        if not isinstance(node, ast.FunctionDef)
+        or node.name not in {"patch_widget", "replace_widget", "delete_widget"}
+    ]
+    for index, node in enumerate(tree.body):
+        if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == "urlpatterns":
+            node.value = ast.parse(
+                "[path('widgets', create_widget), path('widgets/<int:id>', widget)]", mode="eval"
+            ).body
+            tree.body.insert(index, combined)
+            break
+    return ast.unparse(ast.fix_missing_locations(tree))
 
 
 def write_contract() -> dict[str, object]:
@@ -559,8 +592,8 @@ def test_fastapi_delete_requires_explicit_204(tmp_path: Path) -> None:
         (
             "drf",
             drf_write_source,
-            'item.note = request.data.get("note")',
-            'item.note = request.data["note"]',
+            "item.note = request.data.get('note')",
+            "item.note = request.data['note']",
         ),
     ],
 )
@@ -721,3 +754,19 @@ def test_write_lifecycle_and_database_effects(
             admin.execute(
                 sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema))
             )
+
+
+@pytest.mark.parametrize(
+    "framework,source",
+    [("drf", drf_write_source), ("flask", flask_write_source), ("fastapi", fastapi_write_source)],
+)
+def test_write_response_annotation_blocks(tmp_path: Path, framework: str, source: object) -> None:
+    tree = ast.parse(source())
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef))
+    function.returns = ast.Name(id="dict", ctx=ast.Load())
+    (tmp_path / "app.py").write_text(ast.unparse(tree))
+    (tmp_path / "models.py").write_text(model_source(framework))
+    result = capture(
+        tmp_path, configuration({"source_framework": framework, "database_layer": "pgx"})
+    )
+    assert any("response validation" in gap for gap in result["gaps"])

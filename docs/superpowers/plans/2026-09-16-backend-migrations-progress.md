@@ -590,3 +590,31 @@ coercion and custom hooks. Native tests compare acceptance and values with Go an
 exercise original DRF POST/PUT/PATCH error responses. The PostgreSQL CI lane adds
 schema-based grouped CRUD for Fiber, chi, mux and Gin. General field-based DRF
 serializers and native field errors remain open, as do the broader Task 14 gates.
+
+
+## Routed write parity continuation (2026-09-18)
+
+PR86 merged as `f58427a` after its exact-head approval and all required CI checks.
+Real source-router coverage identified that separate DRF views registered at the
+same path cannot dispatch by HTTP method. Capture now supports explicit multi-method
+`api_view` branches and rejects overlapping URL patterns. CRUD fixtures use one
+real detail view; DRF invalid-input checks now traverse Django's URL resolver.
+
+The new opt-in PostgreSQL matrix compares original Python and generated Go writes
+for all twelve source/target pairs, with manual and strict schema validation.
+Each request compares status, body, media type, rows and sequence state in independently
+created schemas. A negative control mutates only database effects. Generated DELETE
+handlers preserve source-specific empty-body content types. Local native
+compilation and request tests are separate from the database CI acceptance result.
+
+No competing generic replay package is introduced. Shared `sanka-http-replay` is
+not present in this checkout, and public write `verify` remains blocked pending its
+versioned adapter. Standard serializers, native request errors, auth/permissions,
+middleware, relationships, richer queries and hosted/publication gates remain open.
+
+
+The CLI selected-target dependency is already implemented in `sankaHQ/sanka` PR119
+(`690d857`), with green CI but still open when checked. Its diff forwards the selected
+target into reviewed plan configuration and rejects conflicting explicit targets;
+the Go extension already normalizes that key. No duplicate runtime implementation
+was started. Cross-repository lifecycle acceptance remains open until it lands.

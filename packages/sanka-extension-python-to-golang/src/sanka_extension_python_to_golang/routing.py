@@ -30,7 +30,7 @@ def _prefix(node: ast.expr) -> str:
 def normalize_routes(tree: ast.Module, framework: str) -> ast.Module:
     tree = copy.deepcopy(tree)
     if framework == "drf":
-        return _django(tree)
+        return _drf_methods(_django(tree))
     constructor = "Blueprint" if framework == "flask" else "APIRouter"
     registration = "register_blueprint" if framework == "flask" else "include_router"
     prefix_key = "url_prefix" if framework == "flask" else "prefix"
@@ -237,6 +237,118 @@ def _registration(node: ast.stmt, method: str) -> bool:
         and isinstance(node.value.func.value, ast.Name)
         and node.value.func.attr == method
     )
+
+
+def _drf_methods(tree: ast.Module) -> ast.Module:
+    """Django resolves URLs before DRF methods; split explicit dispatch, never URL shadows."""
+    names = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    }
+    names |= {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    replacements: dict[str, list[str]] = {}
+    body: list[ast.stmt] = []
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef) or not node.decorator_list:
+            body.append(node)
+            continue
+        decorator = node.decorator_list[0]
+        if not (
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Name)
+            and decorator.func.id == "api_view"
+            and len(decorator.args) == 1
+            and not decorator.keywords
+        ):
+            body.append(node)
+            continue
+        methods = ast.literal_eval(decorator.args[0])
+        if not isinstance(methods, list) or len(methods) < 2:
+            body.append(node)
+            continue
+        if any(
+            type(method) is not str or method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}
+            for method in methods
+        ) or len(set(methods)) != len(methods):
+            raise ValueError("DRF method lists require unique qualified methods")
+        branches: dict[str, list[ast.stmt]] = {}
+        pending = list(node.body)
+        while pending:
+            branch = pending.pop(0)
+            if not isinstance(branch, ast.If):
+                raise ValueError("multi-method views require explicit request.method branches")
+            test = branch.test
+            if not (
+                isinstance(test, ast.Compare)
+                and ast.unparse(test.left) == "request.method"
+                and len(test.ops) == 1
+                and isinstance(test.ops[0], ast.Eq)
+                and len(test.comparators) == 1
+                and isinstance(test.comparators[0], ast.Constant)
+                and type(test.comparators[0].value) is str
+            ):
+                raise ValueError("multi-method views require literal method equality checks")
+            method = test.comparators[0].value
+            if method not in methods or method in branches:
+                raise ValueError("DRF method branches must match the declared methods once")
+            branches[method] = branch.body
+            pending = branch.orelse + pending
+        if set(branches) != set(methods):
+            raise ValueError("every declared DRF method requires a branch")
+        replacements[node.name] = []
+        for method in methods:
+            name = node.name + "__sanka_" + method.lower()
+            if name in names:
+                raise ValueError("multi-method view normalization name collision")
+            names.add(name)
+            function = copy.deepcopy(node)
+            function.name = name
+            function.body = branches[method]
+            function.decorator_list[0] = ast.parse(f"api_view([{method!r}])", mode="eval").body
+            body.append(function)
+            replacements[node.name].append(name)
+    for node in body:
+        if not (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "urlpatterns"
+            and isinstance(node.value, ast.List)
+        ):
+            continue
+        paths: list[str] = []
+        expanded = []
+        for route in node.value.elts:
+            if not (
+                isinstance(route, ast.Call)
+                and len(route.args) == 2
+                and isinstance(route.args[1], ast.Name)
+            ):
+                expanded.append(route)
+                continue
+            path = ast.literal_eval(route.args[0])
+            if not isinstance(path, str):
+                raise ValueError("URL paths must be literal strings")
+
+            def pattern(value: str) -> str:
+                return re.sub(r"<int:[a-z][a-z0-9_]*>", "[0-9]+", re.escape(value))
+
+            if any(
+                pattern(path) == pattern(previous)
+                or re.fullmatch(pattern(path), previous)
+                or re.fullmatch(pattern(previous), path)
+                for previous in paths
+            ):
+                raise ValueError("overlapping DRF URLs require one method-dispatch view")
+            paths.append(path)
+            for name in replacements.get(route.args[1].id, [route.args[1].id]):
+                cloned = copy.deepcopy(route)
+                cloned.args[1] = ast.Name(id=name, ctx=ast.Load())
+                expanded.append(cloned)
+        node.value.elts = expanded
+    tree.body = body
+    return ast.fix_missing_locations(tree)
 
 
 def _django(tree: ast.Module) -> ast.Module:

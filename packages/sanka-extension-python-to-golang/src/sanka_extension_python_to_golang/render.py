@@ -189,7 +189,16 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             )
             if route["write"]["operation"] == "delete":
                 helpers.append(_delete_helper(index, route["write"], model))
-                registrations.append(_delete_registration(index, route, model, target, error_key))
+                registrations.append(
+                    _delete_registration(
+                        index,
+                        route,
+                        model,
+                        target,
+                        error_key,
+                        captured["configuration"]["source_framework"],
+                    )
+                )
                 continue
             helpers.append(
                 _write_helper(index, route["write"], model, model["name"] not in write_models)
@@ -554,20 +563,30 @@ def _delete_registration(
     model: dict[str, Any],
     target: str,
     error_key: str,
+    source: str,
 ) -> str:
+    content_type = {"flask": "text/html; charset=utf-8", "fastapi": "application/json", "drf": ""}[
+        source
+    ]
     field = next(item for item in model["fields"] if item["name"] == route["write"]["lookup"])
     bits = "32" if field["go_type"] == "int32" else "64"
     name = canonical(field["name"])
     status = route["status"]
     path = route["path"]
     if target == "fiber":
+        header = (
+            f'c.Set("Content-Type", {canonical(content_type)})'
+            if content_type
+            else 'c.Response().Header.Del("Content-Type"); c.Response().Header.SetNoDefaultContentType(true)'
+        )
         return f"""app.Delete({canonical(path)}, func(c fiber.Ctx) error {{
         rawID, parseErr := strconv.ParseInt(c.Params({name}), 10, {bits})
         if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
         err := deleteRow{index}(c.Context(), pool, {field["go_type"]}(rawID))
         if errors.Is(err, pgx.ErrNoRows) {{ return c.Status(404).JSON(fiber.Map{{{canonical(error_key)}: "not found"}}) }}
         if err != nil {{ return c.Status(500).JSON(fiber.Map{{"error": "database write failed"}}) }}
-        return c.SendStatus({status})
+        {header}
+        return c.Status({status}).Send(nil)
     }})"""
     if target == "gin":
         return f"""app.DELETE({canonical(path)}, func(c *gin.Context) {{
@@ -576,6 +595,7 @@ def _delete_registration(
         err := deleteRow{index}(c.Request.Context(), pool, {field["go_type"]}(rawID))
         if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{canonical(error_key)}: "not found"}}); return }}
         if err != nil {{ c.JSON(500, gin.H{{"error": "database write failed"}}); return }}
+        c.Header("Content-Type", {canonical(content_type)})
         c.Status({status})
     }})"""
     registered_path = path.replace(f":{field['name']}", f"{{{field['name']}}}")
@@ -592,6 +612,7 @@ def _delete_registration(
         err := deleteRow{index}(r.Context(), pool, {field["go_type"]}(rawID))
         if errors.Is(err, pgx.ErrNoRows) {{ writeResponse(w, 404, map[string]string{{{canonical(error_key)}: "not found"}}); return }}
         if err != nil {{ writeResponse(w, 500, map[string]string{{"error": "database write failed"}}); return }}
+        {f'w.Header().Set("Content-Type", {canonical(content_type)})' if content_type else ""}
         w.WriteHeader({status})
     }}{suffix}"""
 
