@@ -961,6 +961,10 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         used: set[str] = set()
         for route_path, name, method in bindings:
             function = functions[name]
+            if function.returns or function.type_params:
+                raise ValueError(
+                    "response validation and generic handlers require additional capture"
+                )
             if framework == "drf":
                 first = ast.unparse(function.decorator_list[0]) if function.decorator_list else ""
                 if first == "api_view(['GET'])":

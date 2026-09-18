@@ -367,7 +367,9 @@ releases. Hosted delivery remains a separately reviewed downstream change.
 
 ### Shared integration gates
 
-- [ ] CLI: forward `--to` into `configuration.target`; map it to `target_framework`
+- [ ] CLI: forwarding is implemented in [sanka PR119](https://github.com/sankaHQ/sanka/pull/119)
+  (open, CI green when checked on 2026-09-18); adopt and verify after merge.
+  Forward `--to` into `configuration.target`; map it to `target_framework`
   and reject conflicting explicit values. Adding `target` to the allowlist alone
   still defaults generation to Fiber. Default to Fiber only when neither selects
   a framework. Persist the resolved target in the hashed plan and apply/test/verify.

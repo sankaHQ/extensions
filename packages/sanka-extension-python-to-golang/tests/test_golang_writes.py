@@ -754,3 +754,19 @@ def test_write_lifecycle_and_database_effects(
             admin.execute(
                 sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema))
             )
+
+
+@pytest.mark.parametrize(
+    "framework,source",
+    [("drf", drf_write_source), ("flask", flask_write_source), ("fastapi", fastapi_write_source)],
+)
+def test_write_response_annotation_blocks(tmp_path: Path, framework: str, source: object) -> None:
+    tree = ast.parse(source())
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef))
+    function.returns = ast.Name(id="dict", ctx=ast.Load())
+    (tmp_path / "app.py").write_text(ast.unparse(tree))
+    (tmp_path / "models.py").write_text(model_source(framework))
+    result = capture(
+        tmp_path, configuration({"source_framework": framework, "database_layer": "pgx"})
+    )
+    assert any("response validation" in gap for gap in result["gaps"])

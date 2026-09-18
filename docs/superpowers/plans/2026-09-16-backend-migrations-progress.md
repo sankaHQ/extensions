@@ -611,3 +611,10 @@ No competing generic replay package is introduced. Shared `sanka-http-replay` is
 not present in this checkout, and public write `verify` remains blocked pending its
 versioned adapter. Standard serializers, native request errors, auth/permissions,
 middleware, relationships, richer queries and hosted/publication gates remain open.
+
+
+The CLI selected-target dependency is already implemented in `sankaHQ/sanka` PR119
+(`690d857`), with green CI but still open when checked. Its diff forwards the selected
+target into reviewed plan configuration and rejects conflicting explicit targets;
+the Go extension already normalizes that key. No duplicate runtime implementation
+was started. Cross-repository lifecycle acceptance remains open until it lands.
