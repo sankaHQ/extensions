@@ -346,3 +346,62 @@ or generated write support. Decimal/time/nested input contracts, source-specific
 coercion/errors, shared profile generalization, renderer adoption and transactional
 CRUD/PATCH remain open. No helper release or extension dependency update is made
 in this slice; published adoption requires a separately versioned helper release.
+
+
+## Task 11: exact decimal representation (2026-09-18)
+
+`DecimalValue` carries a canonical signed coefficient string and integer exponent.
+It preserves trailing scale, signed zero and coefficients beyond int64 without
+float conversion or dependence on the ambient Python Decimal precision. Large
+exponents stay compact instead of expanding into enormous strings. Non-finite
+values, floats, non-ASCII digits and invalid wire types are rejected.
+
+The shared-helper suite passes 91 tests including native Go decoding/encoding of
+exact decimal components. This is a representation contract only: source coercion,
+rounding, database precision bounds, renderer adoption and write endpoints remain
+open. InputValue v1 and existing IR serialization are unchanged. Candidate helper
+hashes are refreshed and checked by a second canonical build; no publication occurs.
+
+
+## Task 11: timestamp representation (2026-09-18)
+
+`TimestampValue` preserves a canonical UTC instant with six fractional digits and
+the original integer offset in seconds. It rejects naive datetimes, fractional-
+second offsets, invalid dates and noncanonical wire timestamps. UTC/local year
+boundaries are validated without clipping. Python and native Go fixtures cover
+microseconds, unusual offsets, leap-day rollover and years 1/9999; DST fold fixtures
+keep the two instants distinct. The focused value-contract suite passes 60 tests.
+
+This freezes an instant plus fixed offset only. Named-zone identity, future DST
+arithmetic, source timezone defaults and coercion remain separate qualification
+work. Existing value schemas and generated endpoints remain unchanged. No hosted
+integration, write support or package publication is implied.
+
+
+## Task 11: nested input representation (2026-09-18)
+
+After merging Go bootstrap PR77 at `e3d1b1d`, the pending contract PR76 also
+qualifies objects and arrays in `InputValue`. Existing scalar serialization is
+unchanged. Objects use sorted keys; arrays retain order. Nested absent fields,
+explicit null, false, zero, empty strings, empty objects and empty arrays remain
+distinct. Values are immutable JSON snapshots, including integers beyond 64 bits; mutable caller objects cannot change a captured value afterward.
+
+Validation rejects floats and unsupported Python types at every depth, non-string
+object keys, duplicate/noncanonical wire keys and invalid Unicode. Paths beyond
+64 child levels and cyclic Python containers fail with a bounded validation error.
+The native Go RawMessage probe now includes nested objects/arrays and integers
+larger than 64 bits, alongside the existing decimal and timestamp checks.
+
+This contract still applies no source coercion, defaults, field merging or write
+policy. Generated PATCH/CRUD, transaction/error contracts, shared target profile
+generalization and helper publication remain unfinished. Decimal and timestamp
+values use their explicit typed contracts, not implicit conversion inside JSON.
+
+Validation of the combined contract change: `make check` passed 1,153 tests,
+89 documented skips and 24 packaging checks. All 112 shared-helper checks passed
+with native Go enabled. Both release builds passed; all 194 marketplace wheel
+hashes matched, and an isolated import from the built helper wheel passed nested,
+decimal and timestamp smoke checks. An initial broad run hit a PyPI DNS failure
+in the unrelated FastAPI dependency-install fixture; that fixture and the full
+suite passed on retry without source changes. These are local candidate checks,
+not publication or completion of arbitrary Python-to-Go migrations.
