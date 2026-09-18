@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Pinned framework adapters for captured JSON GET contracts."""
+# ruff: noqa: E501
+"""Pinned framework adapters for captured JSON contracts."""
 
 from __future__ import annotations
 
@@ -23,12 +24,55 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     if captured["gaps"]:
         raise ValueError("resolve source capture gaps before generation")
     target = captured["configuration"]["target_framework"]
+    has_writes = any("write" in route for route in captured["routes"])
+    has_patch = any(
+        route.get("write", {}).get("operation") == "patch" for route in captured["routes"]
+    )
+    if has_writes and target != "fiber":
+        raise ValueError("writes are qualified only for Fiber")
     module = MODULES[target]
+    error_key = "detail" if captured["configuration"]["source_framework"] == "fastapi" else "error"
     registrations = []
     helpers = []
+    write_models: set[str] = set()
     has_reads = any("read" in route for route in captured["routes"])
     for index, route in enumerate(captured["routes"]):
         path = canonical(route["path"])
+        if "write" in route:
+            model = next(
+                item for item in captured["models"] if item["name"] == route["write"]["model"]
+            )
+            helpers.append(
+                _write_helper(index, route["write"], model, model["name"] not in write_models)
+            )
+            write_models.add(model["name"])
+            method = route["method"].title()
+            status = route["status"]
+            lookup = ""
+            if route["write"]["operation"] == "patch":
+                field = next(
+                    item for item in model["fields"] if item["name"] == route["write"]["lookup"]
+                )
+                bits = "32" if field["go_type"] == "int32" else "64"
+                lookup = f"""rawID, parseErr := strconv.ParseInt(c.Params({canonical(field["name"])}), 10, {bits})
+        if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
+        lookup := {field["go_type"]}(rawID)"""
+            argument = ", lookup" if lookup else ""
+            registrations.append(f"""app.{method}({path}, func(c fiber.Ctx) error {{
+        {lookup}
+        item, err := writeRow{index}(c.Context(), pool, c.Body(){argument})
+        if err != nil {{
+            if errors.Is(err, errInvalidWrite) {{
+                return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid request body"}})
+            }}
+            if errors.Is(err, pgx.ErrNoRows) {{
+                return c.Status(404).JSON(fiber.Map{{{canonical(error_key)}: "not found"}})
+            }}
+            return c.Status(500).JSON(fiber.Map{{"error": "database write failed"}})
+        }}
+        return c.Status({status}).JSON(item)
+    }})""")
+            continue
         if "read" in route:
             model = next(
                 item for item in captured["models"] if item["name"] == route["read"]["model"]
@@ -105,11 +149,28 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     }[target]
     return_type = "*fiber.App" if target == "fiber" else "http.Handler"
     http_import = "" if target == "fiber" else '"net/http"\n'
-    database_import = (
-        '"context"; "encoding/json"; "github.com/jackc/pgx/v5/pgxpool"' if has_reads else ""
-    )
-    arguments = "pool *pgxpool.Pool" if has_reads else ""
-    guard = 'if pool == nil { panic("NewApp requires a database pool") }' if has_reads else ""
+    database = has_reads or has_writes
+    imports = []
+    if has_reads:
+        imports.extend(['"context"', '"encoding/json"'])
+    if has_writes:
+        imports.extend(
+            [
+                '"bytes"',
+                '"context"',
+                '"encoding/json"',
+                '"errors"',
+                '"io"',
+                '"github.com/jackc/pgx/v5"',
+            ]
+        )
+    if has_patch:
+        imports.extend(['"fmt"', '"strconv"', '"strings"'])
+    if database:
+        imports.append('"github.com/jackc/pgx/v5/pgxpool"')
+    database_import = "; ".join(dict.fromkeys(imports))
+    arguments = "pool *pgxpool.Pool" if database else ""
+    guard = 'if pool == nil { panic("NewApp requires a database pool") }' if database else ""
     source = f'''// SPDX-License-Identifier: Apache-2.0
 // Generated experimental endpoint contract; not a complete backend migration.
 package backend
@@ -125,6 +186,8 @@ func NewApp({arguments}) {return_type} {{
 }}
 {chr(10).join(helpers)}
 '''
+    if has_writes:
+        source += '\nvar errInvalidWrite = errors.New("invalid write")\n'
     # A library-shaped app avoids inventing deployment settings during endpoint qualification.
     lock_name = target + (
         "-postgresql" if captured["configuration"]["database_layer"] == "pgx" else ""
@@ -175,6 +238,103 @@ def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str
     return json.Marshal(items)
 }}
 """
+
+
+def _write_helper(
+    index: int, write: dict[str, Any], model: dict[str, Any], include_decoder: bool
+) -> str:
+    fields = model["fields"]
+    writable = [field for field in fields if not field["auto"]]
+    columns = ", ".join('"' + field["name"] + '"' for field in writable)
+    returning = ", ".join('"' + field["name"] + '"' for field in fields)
+    destinations = ", ".join("&saved." + go_name(field["name"]) for field in fields)
+    accepted = ", ".join(canonical(field["name"]) + ": {}" for field in writable)
+    decoding = []
+    required = []
+    for field in writable:
+        name = canonical(field["name"])
+        target = "item." + go_name(field["name"])
+        null_guard = ""
+        if not field["nullable"]:
+            null_guard = ' || bytes.Equal(bytes.TrimSpace(raw), []byte("null"))'
+            required.append(f"if !partial && !seen[{name}] {{ return item, nil, errInvalidWrite }}")
+        decoding.append(
+            f"""if raw, ok := values[{name}]; ok {{
+        if err := json.Unmarshal(raw, &{target}); err != nil{null_guard} {{
+            return item, nil, errInvalidWrite
+        }}
+        seen[{name}] = true
+    }}"""
+        )
+    decoder = f"""func decode{model["name"]}(body []byte, partial bool) ({model["name"]}, map[string]bool, error) {{
+    var item {model["name"]}
+    var values map[string]json.RawMessage
+    decoder := json.NewDecoder(bytes.NewReader(body))
+    if err := decoder.Decode(&values); err != nil || values == nil {{
+        return item, nil, errInvalidWrite
+    }}
+    if err := decoder.Decode(&struct{{}}{{}}); err != io.EOF {{
+        return item, nil, errInvalidWrite
+    }}
+    allowed := map[string]struct{{}}{{{accepted}}}
+    for name := range values {{
+        if _, ok := allowed[name]; !ok {{ return item, nil, errInvalidWrite }}
+    }}
+    seen := map[string]bool{{}}
+    {chr(10).join(decoding)}
+    {chr(10).join(required)}
+    return item, seen, nil
+}}
+"""
+    operation = write["operation"]
+    if operation == "create":
+        placeholders = ", ".join(f"${number}" for number in range(1, len(writable) + 1))
+        arguments = ", ".join("item." + go_name(field["name"]) for field in writable)
+        query = f'INSERT INTO "{model["table"]}" ({columns}) VALUES ({placeholders}) RETURNING {returning}'
+        helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte) ({model["name"]}, error) {{
+    item, _, err := decode{model["name"]}(body, false)
+    if err != nil {{ return {model["name"]}{{}}, err }}
+    var saved {model["name"]}
+    err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
+        return tx.QueryRow(ctx, {canonical(query)}, {arguments}).Scan({destinations})
+    }})
+    return saved, err
+}}
+"""
+    else:
+        lookup = next(field for field in fields if field["name"] == write["lookup"])
+        cases = []
+        for field in writable:
+            name = canonical(field["name"])
+            cases.append(
+                f"""if seen[{name}] {{
+            values = append(values, item.{go_name(field["name"])})
+            sets = append(sets, fmt.Sprintf({canonical('"' + field["name"] + '" = $%d')}, len(values)))
+        }}"""
+            )
+        select = f'SELECT {returning} FROM "{model["table"]}" WHERE "{lookup["name"]}" = $1'
+        update = (
+            f'UPDATE "{model["table"]}" SET %s WHERE "{lookup["name"]}" = $%d RETURNING {returning}'
+        )
+        helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte, lookup {lookup["go_type"]}) ({model["name"]}, error) {{
+    item, seen, err := decode{model["name"]}(body, true)
+    if err != nil {{ return {model["name"]}{{}}, err }}
+    var saved {model["name"]}
+    err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
+        sets := []string{{}}
+        values := []any{{}}
+        {chr(10).join(cases)}
+        if len(sets) == 0 {{
+            return tx.QueryRow(ctx, {canonical(select)}, lookup).Scan({destinations})
+        }}
+        values = append(values, lookup)
+        query := fmt.Sprintf({canonical(update)}, strings.Join(sets, ", "), len(values))
+        return tx.QueryRow(ctx, query, values...).Scan({destinations})
+    }})
+    return saved, err
+}}
+"""
+    return (decoder if include_decoder else "") + helper
 
 
 QUERY_SOURCE = """// SPDX-License-Identifier: Apache-2.0
