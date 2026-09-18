@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: E501
-"""First bounded Fiber + pgx write-generation contract."""
+"""Bounded cross-framework pgx write-generation contract."""
 
 from __future__ import annotations
 
@@ -79,6 +79,29 @@ def patch_widget(id):
         session.commit()
         session.refresh(item)
         return jsonify({"id": item.id, "name": item.name, "count": item.count, "enabled": item.enabled, "note": item.note})
+@app.put("/widgets/<int:id>")
+def replace_widget(id):
+    data = request.get_json()
+    with Session(engine) as session:
+        item = session.get(Widget, id)
+        if item is None:
+            return jsonify({"error": "not found"}), 404
+        item.name = data["name"]
+        item.count = data["count"]
+        item.enabled = data["enabled"]
+        item.note = data.get("note")
+        session.commit()
+        session.refresh(item)
+        return jsonify({"id": item.id, "name": item.name, "count": item.count, "enabled": item.enabled, "note": item.note})
+@app.delete("/widgets/<int:id>")
+def delete_widget(id):
+    with Session(engine) as session:
+        item = session.get(Widget, id)
+        if item is None:
+            return jsonify({"error": "not found"}), 404
+        session.delete(item)
+        session.commit()
+        return "", 204
 """
     create = indent(
         widget_validation("data", False, 'return jsonify({"error": "invalid request body"}), 400'),
@@ -88,16 +111,26 @@ def patch_widget(id):
         widget_validation("data", True, 'return jsonify({"error": "invalid request body"}), 400'),
         "    ",
     )
+    replace = indent(
+        widget_validation("data", False, 'return jsonify({"error": "invalid request body"}), 400'),
+        "    ",
+    )
     text = text.replace(
         "def create_widget():\n    data = request.get_json()\n    with Session(engine) as session:\n",
         "def create_widget():\n    data = request.get_json()\n"
         + create
         + "    with Session(engine) as session:\n",
     )
-    return text.replace(
+    text = text.replace(
         "def patch_widget(id):\n    data = request.get_json()\n    with Session(engine) as session:\n",
         "def patch_widget(id):\n    data = request.get_json()\n"
         + patch
+        + "    with Session(engine) as session:\n",
+    )
+    return text.replace(
+        "def replace_widget(id):\n    data = request.get_json()\n    with Session(engine) as session:\n",
+        "def replace_widget(id):\n    data = request.get_json()\n"
+        + replace
         + "    with Session(engine) as session:\n",
     )
 
@@ -135,6 +168,27 @@ def patch_widget(id: int, data: dict):
         session.commit()
         session.refresh(item)
         return {"id": item.id, "name": item.name, "count": item.count, "enabled": item.enabled, "note": item.note}
+@app.put("/widgets/{id}")
+def replace_widget(id: int, data: dict):
+    with Session(engine) as session:
+        item = session.get(Widget, id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="not found")
+        item.name = data["name"]
+        item.count = data["count"]
+        item.enabled = data["enabled"]
+        item.note = data.get("note")
+        session.commit()
+        session.refresh(item)
+        return {"id": item.id, "name": item.name, "count": item.count, "enabled": item.enabled, "note": item.note}
+@app.delete("/widgets/{id}", status_code=204)
+def delete_widget(id: int):
+    with Session(engine) as session:
+        item = session.get(Widget, id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="not found")
+        session.delete(item)
+        session.commit()
 """
     create = indent(
         widget_validation(
@@ -148,14 +202,26 @@ def patch_widget(id: int, data: dict):
         ),
         "    ",
     )
+    replace = indent(
+        widget_validation(
+            "data", False, 'raise HTTPException(status_code=400, detail="invalid request body")'
+        ),
+        "    ",
+    )
     text = text.replace(
         "def create_widget(data: dict):\n    with Session(engine) as session:\n",
         "def create_widget(data: dict):\n" + create + "    with Session(engine) as session:\n",
     )
-    return text.replace(
+    text = text.replace(
         "def patch_widget(id: int, data: dict):\n    with Session(engine) as session:\n",
         "def patch_widget(id: int, data: dict):\n"
         + patch
+        + "    with Session(engine) as session:\n",
+    )
+    return text.replace(
+        "def replace_widget(id: int, data: dict):\n    with Session(engine) as session:\n",
+        "def replace_widget(id: int, data: dict):\n"
+        + replace
         + "    with Session(engine) as session:\n",
     )
 
@@ -192,7 +258,31 @@ def patch_widget(request, id):
         item.note = request.data["note"]
     item.save(update_fields=list(request.data))
     return Response({"id": item.id, "name": item.name, "count": item.count, "enabled": item.enabled, "note": item.note})
-urlpatterns = [path("widgets", create_widget), path("widgets/<int:id>", patch_widget)]
+@api_view(["PUT"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@renderer_classes([JSONRenderer])
+def replace_widget(request, id):
+    item = Widget.objects.filter(id=id).first()
+    if item is None:
+        return Response({"error": "not found"}, status=404)
+    item.name = request.data["name"]
+    item.count = request.data["count"]
+    item.enabled = request.data["enabled"]
+    item.note = request.data.get("note")
+    item.save(update_fields=["name", "count", "enabled", "note"])
+    return Response({"id": item.id, "name": item.name, "count": item.count, "enabled": item.enabled, "note": item.note})
+@api_view(["DELETE"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@renderer_classes([JSONRenderer])
+def delete_widget(request, id):
+    item = Widget.objects.filter(id=id).first()
+    if item is None:
+        return Response({"error": "not found"}, status=404)
+    item.delete()
+    return Response(status=204)
+urlpatterns = [path("widgets", create_widget), path("widgets/<int:id>", patch_widget), path("widgets/<int:id>", replace_widget), path("widgets/<int:id>", delete_widget)]
 """
     create = indent(
         widget_validation(
@@ -210,11 +300,23 @@ urlpatterns = [path("widgets", create_widget), path("widgets/<int:id>", patch_wi
         ),
         "    ",
     )
+    replace = indent(
+        widget_validation(
+            "request.data",
+            False,
+            'return Response({"error": "invalid request body"}, status=400)',
+        ),
+        "    ",
+    )
     text = text.replace(
         "    item = Widget.objects.create", create + "    item = Widget.objects.create", 1
     )
-    return text.replace(
+    text = text.replace(
         "    item = Widget.objects.filter", patch + "    item = Widget.objects.filter", 1
+    )
+    marker = "def replace_widget(request, id):\n    item = Widget.objects.filter"
+    return text.replace(
+        marker, "def replace_widget(request, id):\n" + replace + "    item = Widget.objects.filter"
     )
 
 
@@ -293,6 +395,18 @@ def write_contract() -> dict[str, object]:
                 "status": 200,
                 "write": {"operation": "patch", "model": "Widget", "lookup": "id"},
             },
+            {
+                "path": "/widgets/:id",
+                "method": "PUT",
+                "status": 200,
+                "write": {"operation": "replace", "model": "Widget", "lookup": "id"},
+            },
+            {
+                "path": "/widgets/:id",
+                "method": "DELETE",
+                "status": 204,
+                "write": {"operation": "delete", "model": "Widget", "lookup": "id"},
+            },
         ],
         "gaps": [],
         "scope": "bounded PostgreSQL writes",
@@ -313,6 +427,7 @@ def test_write_generation_preserves_presence_and_transactions(tmp_path: Path, ta
     assert "pgx.BeginFunc" in source
     assert 'INSERT INTO \\"widgets\\"' in source
     assert 'UPDATE \\"widgets\\"' in source
+    assert 'DELETE FROM \\"widgets\\"' in source
     assert "$" in source
     for name, content in files.items():
         destination = tmp_path / name
@@ -362,6 +477,18 @@ def test_write_recipe_is_captured_without_execution(
             "status": 200,
             "write": {"operation": "patch", "model": "Widget", "lookup": "id"},
         },
+        {
+            "path": "/widgets/:id",
+            "method": "PUT",
+            "status": 200,
+            "write": {"operation": "replace", "model": "Widget", "lookup": "id"},
+        },
+        {
+            "path": "/widgets/:id",
+            "method": "DELETE",
+            "status": 204,
+            "write": {"operation": "delete", "model": "Widget", "lookup": "id"},
+        },
     ]
     files = render(captured)
     assert files == render(
@@ -405,6 +532,53 @@ def test_changed_write_semantics_fail_closed(
     assert captured["routes"] == []
 
 
+def test_fastapi_delete_requires_explicit_204(tmp_path: Path) -> None:
+    changed = fastapi_write_source().replace(
+        '@app.delete("/widgets/{id}", status_code=204)', '@app.delete("/widgets/{id}")'
+    )
+    (tmp_path / "app.py").write_text(changed)
+    (tmp_path / "models.py").write_text(model_source("fastapi"))
+    captured = capture(
+        tmp_path,
+        configuration({"source_framework": "fastapi", "database_layer": "pgx"}),
+    )
+    assert captured["gaps"]
+    assert captured["routes"] == []
+
+
+@pytest.mark.parametrize(
+    ("framework", "source", "before", "after"),
+    [
+        ("flask", flask_write_source, 'item.note = data.get("note")', 'item.note = data["note"]'),
+        (
+            "fastapi",
+            fastapi_write_source,
+            'item.note = data.get("note")',
+            'item.note = data["note"]',
+        ),
+        (
+            "drf",
+            drf_write_source,
+            'item.note = request.data.get("note")',
+            'item.note = request.data["note"]',
+        ),
+    ],
+)
+def test_changed_put_replacement_fails_closed(
+    tmp_path: Path, framework: str, source: object, before: str, after: str
+) -> None:
+    (tmp_path / "app.py").write_text(source().replace(before, after))  # type: ignore[operator]
+    (tmp_path / "models.py").write_text(model_source(framework))
+    captured = capture(
+        tmp_path,
+        configuration({"source_framework": framework, "database_layer": "pgx"}),
+    )
+    assert captured["gaps"]
+    assert not any(
+        route.get("write", {}).get("operation") == "replace" for route in captured["routes"]
+    )
+
+
 GO_WRITE_TEST = r"""package backend
 import (
     "context"
@@ -435,12 +609,19 @@ func TestWriteLifecycle(t *testing.T) {
         {"PATCH", "/widgets/nope", `{"count":1}`, 400},
         {"PATCH", "/widgets/999", `{"count":1}`, 404},
         {"PATCH", "/widgets/1", `{"count":1} trailing`, 400},
+        {"PUT", "/widgets/1", `{"name":"missing"}`, 400},
+        {"PUT", "/widgets/nope", `{"name":"beta","count":9,"enabled":false}`, 400},
+        {"PUT", "/widgets/999", `{"name":"beta","count":9,"enabled":false}`, 404},
+        {"PUT", "/widgets/1", `{"name":"beta","count":9,"enabled":false}`, 200},
+        {"DELETE", "/widgets/999", ``, 404},
+        {"DELETE", "/widgets/1", ``, 204},
+        {"DELETE", "/widgets/1", ``, 404},
     }
     for _, item := range cases {
         request := httptest.NewRequest(item.method, item.path, strings.NewReader(item.body))
         request.Header.Set("Content-Type", "application/json")
         EXCHANGE
-        if status != item.status || !json.Valid(body) {
+        if status != item.status || (status != 204 && !json.Valid(body)) || (status == 204 && len(body) != 0) {
             t.Fatalf("%s %s: status=%d body=%s", item.method, item.path, status, body)
         }
     }
@@ -522,9 +703,12 @@ def test_write_lifecycle_and_database_effects(
             )
             assert result.returncode == 0, result.stdout + result.stderr
             with psycopg.connect(url) as connection:
-                assert connection.execute(
-                    'SELECT id, name, count, enabled, note FROM "widgets"'
-                ).fetchall() == [(1, "alpha", 0, False, None)]
+                assert (
+                    connection.execute(
+                        'SELECT id, name, count, enabled, note FROM "widgets"'
+                    ).fetchall()
+                    == []
+                )
         finally:
             admin.execute(
                 sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema))

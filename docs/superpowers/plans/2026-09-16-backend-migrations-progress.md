@@ -484,5 +484,31 @@ layer is added.
 Generated projects compile for every target. The PostgreSQL lifecycle matrix now
 applies migrations and exercises all three Python source recipes against all four
 Go routers when the explicit CI fixture is available. Shared public write replay,
-PUT/delete, relationships, decimal/time writes, auth, permissions and richer
+PUT, relationships, decimal/time writes, auth, permissions and richer
 validation remain separate qualification work.
+
+
+## Task 12: bounded DELETE adapters (2026-09-18)
+
+All three source scanners now recognize one exact flat-model DELETE recipe:
+integer primary-key lookup, captured 404, explicit delete/commit and empty 204.
+Fiber, chi, mux and Gin lower it to a parameterized PostgreSQL DELETE inside
+`pgx.BeginFunc`; zero affected rows map to the source-specific 404 key and other
+database errors remain generic.
+
+Generated projects compile for every router. The isolated PostgreSQL lifecycle
+matrix now verifies missing-row DELETE, successful deletion, repeated deletion,
+empty 204 bodies and final database state across all twelve source/target pairs.
+Cascading/on-delete relationships, authorization and shared public write replay remain open.
+
+## Task 12: bounded PUT adapters (2026-09-18)
+
+The same twelve source/target pairs now recognize one exact flat-model PUT recipe.
+The source must fully validate required fields, replace every writable field and
+return the updated row. Generated handlers decode the full body, execute a fixed
+parameterized PostgreSQL UPDATE inside `pgx.BeginFunc`, and map an absent row to
+the source-specific 404 response.
+
+The isolated lifecycle covers incomplete bodies, invalid and missing lookups,
+successful replacement and final deletion. Rich serializer coercion, relationships,
+authorization and shared public write replay remain open.

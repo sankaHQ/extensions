@@ -1,8 +1,8 @@
 # Python-to-Golang transaction contract
 
-This is the qualification contract for the first single-database write profile. Fiber now uses
-it for the bounded flat-model POST/PATCH recipe documented by the extension. It does not qualify
-PUT, arbitrary handlers, broader validation, or write adapters for chi, mux, or Gin. Existing
+This is the qualification contract for the first single-database write profile. Fiber, chi, mux,
+and Gin use it for the bounded flat-model POST/PUT/PATCH/DELETE recipe documented by the extension.
+It does not qualify arbitrary handlers, broader validation, or relationship writes. Existing
 read-only generated projects remain unchanged.
 
 Use the pinned pgx `BeginFunc` primitive for a single unit of work. All statements

@@ -164,6 +164,16 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     has_patch = any(
         route.get("write", {}).get("operation") == "patch" for route in captured["routes"]
     )
+    has_replace = any(
+        route.get("write", {}).get("operation") == "replace" for route in captured["routes"]
+    )
+    has_delete = any(
+        route.get("write", {}).get("operation") == "delete" for route in captured["routes"]
+    )
+    has_body_writes = any(
+        route.get("write", {}).get("operation") in {"create", "replace", "patch"}
+        for route in captured["routes"]
+    )
     module = MODULES[target]
     error_key = "detail" if captured["configuration"]["source_framework"] == "fastapi" else "error"
     registrations = []
@@ -176,6 +186,10 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             model = next(
                 item for item in captured["models"] if item["name"] == route["write"]["model"]
             )
+            if route["write"]["operation"] == "delete":
+                helpers.append(_delete_helper(index, route["write"], model))
+                registrations.append(_delete_registration(index, route, model, target, error_key))
+                continue
             helpers.append(
                 _write_helper(index, route["write"], model, model["name"] not in write_models)
             )
@@ -183,7 +197,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             method = route["method"].title()
             status = route["status"]
             lookup_field = None
-            if route["write"]["operation"] == "patch":
+            if route["write"]["operation"] in {"replace", "patch"}:
                 lookup_field = next(
                     item for item in model["fields"] if item["name"] == route["write"]["lookup"]
                 )
@@ -366,16 +380,19 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     if has_writes:
         imports.extend(
             [
-                '"bytes"',
                 '"context"',
-                '"encoding/json"',
                 '"errors"',
-                '"io"',
                 '"github.com/jackc/pgx/v5"',
             ]
         )
+    if has_body_writes:
+        imports.extend(['"bytes"', '"encoding/json"', '"io"'])
+    if has_writes and target in {"chi", "mux"}:
+        imports.append('"encoding/json"')
     if has_patch:
         imports.extend(['"fmt"', '"strconv"', '"strings"'])
+    elif has_replace or has_delete:
+        imports.append('"strconv"')
     if database:
         imports.append('"github.com/jackc/pgx/v5/pgxpool"')
     database_import = "; ".join(dict.fromkeys(imports))
@@ -459,6 +476,68 @@ def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str
 """
 
 
+def _delete_registration(
+    index: int,
+    route: dict[str, Any],
+    model: dict[str, Any],
+    target: str,
+    error_key: str,
+) -> str:
+    field = next(item for item in model["fields"] if item["name"] == route["write"]["lookup"])
+    bits = "32" if field["go_type"] == "int32" else "64"
+    name = canonical(field["name"])
+    status = route["status"]
+    path = route["path"]
+    if target == "fiber":
+        return f"""app.Delete({canonical(path)}, func(c fiber.Ctx) error {{
+        rawID, parseErr := strconv.ParseInt(c.Params({name}), 10, {bits})
+        if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
+        err := deleteRow{index}(c.Context(), pool, {field["go_type"]}(rawID))
+        if errors.Is(err, pgx.ErrNoRows) {{ return c.Status(404).JSON(fiber.Map{{{canonical(error_key)}: "not found"}}) }}
+        if err != nil {{ return c.Status(500).JSON(fiber.Map{{"error": "database write failed"}}) }}
+        return c.SendStatus({status})
+    }})"""
+    if target == "gin":
+        return f"""app.DELETE({canonical(path)}, func(c *gin.Context) {{
+        rawID, parseErr := strconv.ParseInt(c.Param({name}), 10, {bits})
+        if parseErr != nil {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid lookup"}}); return }}
+        err := deleteRow{index}(c.Request.Context(), pool, {field["go_type"]}(rawID))
+        if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{canonical(error_key)}: "not found"}}); return }}
+        if err != nil {{ c.JSON(500, gin.H{{"error": "database write failed"}}); return }}
+        c.Status({status})
+    }})"""
+    registered_path = path.replace(f":{field['name']}", f"{{{field['name']}}}")
+    parameter = f"chi.URLParam(r, {name})" if target == "chi" else f"mux.Vars(r)[{name}]"
+    registration = (
+        f'app.MethodFunc("DELETE", {canonical(registered_path)},'
+        if target == "chi"
+        else f"app.HandleFunc({canonical(registered_path)},"
+    )
+    suffix = ")" if target == "chi" else ').Methods("DELETE")'
+    return f"""{registration} func(w http.ResponseWriter, r *http.Request) {{
+        rawID, parseErr := strconv.ParseInt({parameter}, 10, {bits})
+        if parseErr != nil {{ writeResponse(w, 400, map[string]string{{{canonical(error_key)}: "invalid lookup"}}); return }}
+        err := deleteRow{index}(r.Context(), pool, {field["go_type"]}(rawID))
+        if errors.Is(err, pgx.ErrNoRows) {{ writeResponse(w, 404, map[string]string{{{canonical(error_key)}: "not found"}}); return }}
+        if err != nil {{ writeResponse(w, 500, map[string]string{{"error": "database write failed"}}); return }}
+        w.WriteHeader({status})
+    }}{suffix}"""
+
+
+def _delete_helper(index: int, write: dict[str, Any], model: dict[str, Any]) -> str:
+    lookup = next(field for field in model["fields"] if field["name"] == write["lookup"])
+    query = f'DELETE FROM "{model["table"]}" WHERE "{lookup["name"]}" = $1'
+    return f"""func deleteRow{index}(ctx context.Context, pool *pgxpool.Pool, lookup {lookup["go_type"]}) error {{
+    return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
+        result, err := tx.Exec(ctx, {canonical(query)}, lookup)
+        if err != nil {{ return err }}
+        if result.RowsAffected() == 0 {{ return pgx.ErrNoRows }}
+        return nil
+    }})
+}}
+"""
+
+
 def _write_helper(
     index: int, write: dict[str, Any], model: dict[str, Any], include_decoder: bool
 ) -> str:
@@ -516,6 +595,26 @@ def _write_helper(
     var saved {model["name"]}
     err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
         return tx.QueryRow(ctx, {canonical(query)}, {arguments}).Scan({destinations})
+    }})
+    return saved, err
+}}
+"""
+    elif operation == "replace":
+        lookup = next(field for field in fields if field["name"] == write["lookup"])
+        sets = ", ".join(
+            f'"{field["name"]}" = ${number}' for number, field in enumerate(writable, 1)
+        )
+        arguments = ", ".join("item." + go_name(field["name"]) for field in writable)
+        query = (
+            f'UPDATE "{model["table"]}" SET {sets} WHERE "{lookup["name"]}" = ${len(writable) + 1} '
+            f"RETURNING {returning}"
+        )
+        helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte, lookup {lookup["go_type"]}) ({model["name"]}, error) {{
+    item, _, err := decode{model["name"]}(body, false)
+    if err != nil {{ return {model["name"]}{{}}, err }}
+    var saved {model["name"]}
+    err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
+        return tx.QueryRow(ctx, {canonical(query)}, {arguments}, lookup).Scan({destinations})
     }})
     return saved, err
 }}
