@@ -42,6 +42,11 @@ def _supported(
         raise ValueError("requires one annotated str argument and a str return")
     argument = args.args[0].arg
     imports = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
+    if any(
+        isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names)
+        for node in ast.walk(tree)
+    ):
+        raise ValueError("wildcard imports cannot preserve static SDK identity")
     if not any(
         isinstance(node, ast.ImportFrom)
         and node.module == "openai"
@@ -73,6 +78,16 @@ def _supported(
     if len(constructors) != 1:
         raise ValueError("one direct module-level client = OpenAI(...) required")
     constructor = constructors[0]
+    for binding in [constructor, *imports]:
+        if any(
+            other is not binding
+            and other.lineno <= (binding.end_lineno or binding.lineno)
+            and (other.end_lineno or other.lineno) >= binding.lineno
+            for other in tree.body
+        ):
+            raise ValueError(
+                "semicolon/shared-line client or import binding requires manual review"
+            )
     assert isinstance(constructor.value, ast.Call)
     if constructor.value.args or any(
         keyword.arg not in {"max_retries", "timeout"}
@@ -294,13 +309,42 @@ def scan_project(root: Path) -> dict[str, Any]:
             )
             for node in ast.walk(tree)
         )
-        unresolved = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Assign)
-            and isinstance(node.value, ast.Attribute)
-            and ("responses" in ast.unparse(node.value) or "completions" in ast.unparse(node.value))
-        ]
+        # A provider reference used anywhere except an inventoried request or the
+        # canonical constructor may escape through an alias, getattr or container.
+        # Inspect expressions, not assignment syntax: annotated/walrus bindings
+        # must not disappear merely because a supported request is also present.
+        unresolved = []
+        for node in ast.walk(tree):
+            is_provider_name = (
+                has_openai
+                and isinstance(node, ast.Name)
+                and isinstance(node.ctx, ast.Load)
+                and node.id in {"client", "OpenAI"}
+            )
+            is_method_reference = isinstance(node, ast.Attribute) and node.attr in {
+                "responses",
+                "completions",
+            }
+            if not (is_provider_name or is_method_reference):
+                continue
+            expression = node
+            while isinstance(parents.get(expression), ast.Attribute):
+                expression = parents[expression]
+            parent = parents.get(expression)
+            if isinstance(parent, ast.Call) and parent.func is expression:
+                if isinstance(expression, ast.Attribute) and expression.attr in {"create", "parse"}:
+                    continue  # This exact call was already inventoried above.
+                if isinstance(expression, ast.Name) and expression.id == "OpenAI":
+                    assignment = parents.get(parent)
+                    if (
+                        isinstance(assignment, ast.Assign)
+                        and assignment in tree.body
+                        and len(assignment.targets) == 1
+                        and isinstance(assignment.targets[0], ast.Name)
+                        and assignment.targets[0].id == "client"
+                    ):
+                        continue
+            unresolved.append(node)
         if (has_openai and not file_sites) or unresolved or provider_alias:
             sites.append(
                 {

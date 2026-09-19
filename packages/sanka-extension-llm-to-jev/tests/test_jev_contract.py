@@ -67,6 +67,7 @@ def test_positive_inventory_and_review_binding(source: Path) -> None:
     "old,new",
     [
         ("from openai import OpenAI", "from openai import OpenAI as Factory"),
+        ("import json", "import json\nfrom helper import *"),
         ("client = OpenAI()", "client = factory()"),
         ("client = OpenAI()", "client = OpenAI(api_key=get_secret())"),
         ("def classify", "async def classify"),
@@ -112,6 +113,7 @@ def test_alias_accounted_even_alongside_supported(source: Path) -> None:
     "field,value",
     [
         ("unknown_field", "bad"),
+        ("decision_id", "support-router"),
         ("review", {"status": "draft", "reviewer": "author"}),
         (
             "confidence",
@@ -220,3 +222,27 @@ def test_transport_rejects_root_symlink_before_sdk_normalization(source: Path) -
         env=os.environ.copy(),
     )
     assert run.returncode == 2 and not run.stdout
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "request: object = client.responses.create\ndef other(text): return request(text)\n",
+        "(request := client.responses.create)\n",
+        "request = getattr(client.responses, 'create')\n",
+        "alias = client\ndef other(text): return alias.responses.create(input=text)\n",
+        "def factory(): return client\n",
+    ],
+)
+def test_escaping_provider_references_remain_manual(source: Path, extra: str) -> None:
+    file = source / "classifier.py"
+    file.write_text(file.read_text() + "\n" + extra)
+    inventory = scan_project(source)
+    assert inventory["manual_count"] >= 1
+    assert any("unresolved" in site["id"] for site in inventory["call_sites"])
+
+
+def test_shared_line_constructor_is_manual(source: Path) -> None:
+    file = source / "classifier.py"
+    file.write_text(file.read_text().replace("client = OpenAI()", "client = OpenAI(); value = 42"))
+    assert scan_project(source)["call_sites"][0]["status"] == "manual"
