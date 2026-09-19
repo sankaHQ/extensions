@@ -97,6 +97,20 @@ def _supported(
     ):
         raise ValueError("client constructor supports only literal timeout/max_retries keywords")
     reserved = {"client", "OpenAI", "json", "Exception", "str"}
+    reflective = {"setattr", "delattr", "globals", "locals", "vars", "exec", "eval", "__import__"}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Name) and node.id in reflective) or (
+            isinstance(node, ast.Attribute) and node.attr in reflective
+        ):
+            raise ValueError("reflective code or monkeypatching requires manual review")
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            and any(
+                isinstance(child, ast.Name) and child.id in reserved for child in ast.walk(node)
+            )
+        ):
+            raise ValueError("SDK dictionary mutation requires manual review")
     for node in ast.walk(tree):
         if (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
@@ -289,6 +303,8 @@ def scan_project(root: Path) -> dict[str, Any]:
                 "reasons": [],
             }
             try:
+                if len(Path(relative).parts) != 1:
+                    raise ValueError("v1 classifier modules must be at the source project root")
                 item.update(_supported(tree, function, node, source))
                 item["status"] = "supported"
             except ValueError as error:

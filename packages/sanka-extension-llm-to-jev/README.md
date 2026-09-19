@@ -10,7 +10,8 @@ module interfaces. The synthetic positive fixture returns `billing`, `technical`
 `sales` or `unknown`, and already returns `unknown` on exceptions. Version one
 preserves that reviewed fallback; it does not translate confidence thresholds.
 
-Aliases, dynamic schemas, wrappers, asynchronous code, explanations, tools,
+Nested source packages, reflection/monkeypatching, aliases, dynamic schemas,
+wrappers, asynchronous code, explanations, tools,
 multimodal input, conversation state and multiple output fields need manual work.
 Unknown or unsupported call sites remain in the inventory and candidate. A green
 compatibility check establishes only the old input/output contract, never equivalent

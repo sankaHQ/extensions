@@ -30,7 +30,8 @@ Modules (ordinary JSON dictionaries, Paths):
   is extension plan hash; `reviewed_plan_hash` belongs to CLI and is different.
   Prior artifacts contain `migration-plan.json`; candidate lives under artifact root.
 
-Supported source grammar is the exact positive fixture: module `import json`,
+Supported source grammar is the exact positive fixture in a project-root Python file
+(nested package import layouts require manual review): module `import json`,
 `from openai import OpenAI`, `client = OpenAI()`; one undecorated sync function,
 one annotated `text: str` argument and `-> str`; try body exactly response assignment
 plus JSON enum field return, except Exception exactly literal unknown return.

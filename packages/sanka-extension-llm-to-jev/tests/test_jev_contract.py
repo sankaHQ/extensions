@@ -246,3 +246,28 @@ def test_shared_line_constructor_is_manual(source: Path) -> None:
     file = source / "classifier.py"
     file.write_text(file.read_text().replace("client = OpenAI()", "client = OpenAI(); value = 42"))
     assert scan_project(source)["call_sites"][0]["status"] == "manual"
+
+
+def test_nested_module_requires_manual_import_layout_review(source: Path) -> None:
+    nested = source / "package"
+    nested.mkdir()
+    (source / "classifier.py").rename(nested / "classifier.py")
+    inventory = scan_project(source)
+    assert inventory["manual_count"] == 1
+    assert "project root" in inventory["call_sites"][0]["reasons"][0]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "setattr(json, 'loads', lambda _: {'department': 'billing'})",
+        "patch = setattr",
+        "globals()['client'] = object()",
+        "json.__dict__['loads'] = lambda _: {'department': 'billing'}",
+    ],
+)
+def test_reflective_symbol_mutation_requires_manual(source: Path, extra: str) -> None:
+    file = source / "classifier.py"
+    file.write_text(file.read_text() + "\n" + extra + "\n")
+    inventory = scan_project(source)
+    assert all(site["status"] == "manual" for site in inventory["call_sites"])
