@@ -5,11 +5,12 @@ Targets: axum.
 
 The current implementation produces a Rust crate exposing `migrated_backend::app()`
 for literal public JSON GET endpoints and, with the optional `sqlx` database layer,
-a flat PostgreSQL schema baseline with bounded table reads. It is **not a complete
+a flat PostgreSQL schema baseline with bounded table reads, primary-key lookups and
+single-table create, update, replace and delete handlers. It is **not a complete
 backend migration**, not published in the extension catalog, and not qualified for
 production cutover. It copies the shape of `sanka/python-to-golang`; the remaining
-backend slices (typed parameters and writes, Fastify and Hono sources) follow the
-workspace plan.
+backend slices (Fastify and Hono sources, the shared HTTP scenario adapter) follow
+the workspace plan.
 
 Use the existing extension JSON subprocess protocol via
 `sanka-extension-typescript-to-rust`, with configuration:
@@ -93,6 +94,61 @@ handlers answer `500 {"error":"database read failed"}` when the query fails.
 `bigint` columns are serialized as decimal strings because node-postgres returns
 them that way; the captured contract is the source's observable output.
 
+## Lookups and writes
+
+With the database layer, routes with one trailing `:param` segment and body routes
+are captured when the handler equals the canonical idiom for one captured model.
+The comparison is by syntax shape (positions, parentheses, quotes, whitespace and
+type assertions are ignored; SQL statements are compared after spacing and quoting
+normalization), so a formatter cannot break qualification, but any extra statement,
+different message, missing guard or other local names is a gap. `scan` names the
+operation and model it tried to match. The idioms, for a model whose writable
+fields are integer (`i32`), boolean and text-like (`bigint` request fields are not
+qualified):
+
+- `GET /things/:id` (lookup): `const id = Number(req.params.id)`, a 404
+  `{ error: "not found" }` when `Number.isInteger(id)` fails, `SELECT <columns>
+  FROM <table> WHERE <pk> = $1`, 404 when no row, `res.json(rows[0])`.
+- `POST /things` (create, requires `app.use(express.json())` before the route):
+  `const body = req.body`, one validation expression that rejects non-objects,
+  unknown keys, wrong types, non-integers and integers outside the i32 range with
+  400 `{ error: "invalid request body" }` (nullable columns accept `null` or an
+  absent key), `INSERT … RETURNING <columns>`, `res.status(201).json(rows[0])`.
+  When the table has a UNIQUE column the query sits in `try { … } catch (error)`
+  answering 409 `{ error: "conflict" }` for PostgreSQL error code 23505 and
+  rethrowing everything else.
+- `PATCH /things/:id` (update): the lookup guard, then a partial validation where
+  every key is optional but, when present, typed as above (a non-nullable column
+  rejects `null`), then `UPDATE … SET <column> = CASE WHEN $n THEN $n+1 ELSE
+  <column> END … WHERE <pk> = $1 RETURNING <columns>` bound as
+  `[id, body.x !== undefined, body.x ?? null, …]` (absent keeps the value, `null`
+  clears a nullable column), 404 when no row, `res.json(rows[0])`.
+- `PUT /things/:id` (replace): the lookup guard, the full validation, `UPDATE …
+  SET <column> = $2, … WHERE <pk> = $1 RETURNING <columns>`, 404, `res.json`.
+- `DELETE /things/:id` (delete): the lookup guard, `DELETE … WHERE <pk> = $1
+  RETURNING <pk>`, 404, `res.status(204).end()`.
+
+The exact text of every idiom is produced by `writes.handler_source` and mirrored
+by the fixture under `tests/fixtures/pg-writes`. Generated axum handlers reproduce
+the same statuses and bodies: ids are parsed like JavaScript `Number()` for decimal
+spellings, bodies are read as raw bytes and validated with the same rules (a JSON
+`7.0` is the integer 7 on both sides), unique violations answer 409, and other
+database failures answer a generic 500 JSON envelope without driver details.
+
+Public `test` and `verify` refuse contracts that contain lookups or writes with
+the same message as the Go extension: write replay needs the versioned shared HTTP
+scenario adapter. Until it lands, parity is proven by the qualified PostgreSQL
+lifecycle test in `tests/test_rust_writes.py`, which drives both applications
+through the same scenario list and compares every response together with the
+table rows and identity sequence after each step, and detects a candidate whose
+responses match while its database differs.
+
+Disclosed non-parity for writes: malformed JSON and non-object JSON documents get
+Express's HTML 400 but a JSON 400 from the crate; bodies above Express's 100 kB
+`express.json()` limit get 413 there and 400 here; ids outside the primary key's
+integer range fail with a database error in Express and 404 here; values longer
+than a `varchar(n)` column raise 500 on both sides but with different media types.
+
 ## Generated crate
 
 `Cargo.toml`, `Cargo.lock` (pinned in this package under `locks/axum`),
@@ -135,3 +191,4 @@ Replay executes source and candidate code; the temporary directory is not a
 security sandbox. It does not start TCP listeners or alter candidate files.
 Manual edits to `src/lib.rs` are tested; changes to `Cargo.toml`, `Cargo.lock`,
 `rust-toolchain.toml`, `contract.json` or the generated migrations are rejected.
+Contracts with lookups or writes are refused by both commands (see above).
