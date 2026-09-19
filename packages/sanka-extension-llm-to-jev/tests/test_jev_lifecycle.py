@@ -209,6 +209,17 @@ def test_changed_report_rejected(prepared: tuple[ExtensionRequest, dict]) -> Non
     assert handle(replace(request, command="verify")).outcome == "error"
 
 
+def test_injected_bytecode_cache_rejected(prepared: tuple[ExtensionRequest, dict]) -> None:
+    request, _plan = prepared
+    assert handle(request).outcome == "success"
+    cache = Path(request.artifact_root) / "candidate" / "__pycache__"
+    cache.mkdir()
+    (cache / "classifier.cpython-312.pyc").write_bytes(b"unreviewed bytecode")
+    result = handle(request)
+    assert result.outcome == "error"
+    assert "unreviewed cache" in result.error.message
+
+
 def test_generated_path_collision_rejected(prepared: tuple[ExtensionRequest, dict]) -> None:
     request, _plan = prepared
     root = Path(request.project_root)

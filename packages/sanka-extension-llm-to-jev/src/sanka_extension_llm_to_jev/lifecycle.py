@@ -83,6 +83,13 @@ def _expected(plan: dict[str, Any], inventory: dict[str, Any]) -> dict[str, str]
 
 def _candidate(artifacts: Path, plan: dict[str, Any], inventory: dict[str, Any]) -> Path:
     candidate = safe_path(artifacts, "candidate")
+    # Apply copies no ignored source entries and destination tests use -B. Refuse
+    # caches and environment directories added later: Python may read existing
+    # bytecode even when bytecode writes are disabled.
+    if candidate.is_dir():
+        for path in candidate.rglob("*"):
+            if any(part in IGNORED for part in path.relative_to(candidate).parts):
+                raise ValueError("candidate contains an unreviewed cache or environment entry")
     if not candidate.is_dir() or source_files(candidate) != _expected(plan, inventory):
         raise ValueError("candidate integrity mismatch; apply the unchanged reviewed plan")
     return candidate
