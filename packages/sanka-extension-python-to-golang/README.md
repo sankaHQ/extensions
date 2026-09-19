@@ -6,7 +6,7 @@ Targets: Fiber (default), chi, Gorilla mux, Gin.
 The current implementation produces a Go `backend` package exposing `NewApp` for
 literal public JSON GET endpoints, bounded PostgreSQL reads, and the first qualified
 create/PUT/PATCH/DELETE profile. Every target includes a runnable `cmd/api`. It is **not a complete backend migration**,
-not published in the extension catalog, and not qualified for production cutover.
+available as an experimental prerelease, and not qualified for production cutover.
 The full backend implementation remains in progress.
 
 Use the existing extension JSON subprocess protocol via
@@ -437,3 +437,22 @@ The [transaction qualification contract](../../docs/python-to-golang-transaction
 covers rollback, commit failure, cancellation, and connection reuse for the pgx primitive used
 by the first create/PUT/PATCH/DELETE profile. Broader serializer/schema validation remains
 outside the qualified profile.
+
+## Experimental public release
+
+The scoped `api-converters-v0.1.0a1` GitHub prerelease contains the reviewed
+wheel closure and SHA-256 manifests. Install with the published CLI 0.2.12:
+
+```bash
+RELEASE_COMMIT=$(git ls-remote https://github.com/sankaHQ/extensions.git refs/tags/api-converters-v0.1.0a1 | cut -f1)
+test "${#RELEASE_COMMIT}" -eq 40
+sanka extension marketplace add https://github.com/sankaHQ/extensions.git --revision "$RELEASE_COMMIT" --name api-converters --trust
+sanka extension add sanka/python-to-golang --marketplace api-converters
+```
+
+This explicit marketplace pin does not change the CLI default catalog. The release
+gate reproduces the small public literal-GET example through all five CLI stages
+and compares actual source/target HTTP responses. See the
+[examples](https://github.com/sankaHQ/sanka-examples) for source setup, reviewed-plan
+checks, target toolchains and supported behavior. Database/write scenarios remain
+outside that example qualification; broader package fixtures are tested separately.

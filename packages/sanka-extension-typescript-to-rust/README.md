@@ -7,7 +7,7 @@ The current implementation produces a Rust crate exposing `migrated_backend::app
 for literal public JSON GET endpoints and, with the optional `sqlx` database layer,
 a flat PostgreSQL schema baseline with bounded table reads, primary-key lookups and
 single-table create, update, replace and delete handlers. It is **not a complete
-backend migration**, not published in the extension catalog, and not qualified for
+backend migration**, available as an experimental prerelease, and not qualified for
 production cutover. It copies the shape of `sanka/python-to-golang`; the remaining
 backend slices (Fastify and Hono sources, the shared HTTP scenario adapter) follow
 the workspace plan.
@@ -203,3 +203,22 @@ security sandbox. It does not start TCP listeners or alter candidate files.
 Manual edits to `src/lib.rs` are tested; changes to `Cargo.toml`, `Cargo.lock`,
 `rust-toolchain.toml`, `contract.json` or the generated migrations are rejected.
 Contracts with lookups or writes reset the captured tables (see above).
+
+## Experimental public release
+
+The scoped `api-converters-v0.1.0a1` GitHub prerelease contains the reviewed
+wheel closure and SHA-256 manifests. Install with the published CLI 0.2.12:
+
+```bash
+RELEASE_COMMIT=$(git ls-remote https://github.com/sankaHQ/extensions.git refs/tags/api-converters-v0.1.0a1 | cut -f1)
+test "${#RELEASE_COMMIT}" -eq 40
+sanka extension marketplace add https://github.com/sankaHQ/extensions.git --revision "$RELEASE_COMMIT" --name api-converters --trust
+sanka extension add sanka/typescript-to-rust --marketplace api-converters
+```
+
+This explicit marketplace pin does not change the CLI default catalog. The release
+gate reproduces the small public literal-GET example through all five CLI stages
+and compares actual source/target HTTP responses. See the
+[examples](https://github.com/sankaHQ/sanka-examples) for source setup, reviewed-plan
+checks, target toolchains and supported behavior. Database/write scenarios remain
+outside that example qualification; broader package fixtures are tested separately.
