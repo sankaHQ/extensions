@@ -192,10 +192,31 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             gaps.append(f"{module}: additional modules require whole-project capture")
     native = sum(screen["disposition"] == "native-screen" for screen in result["screens"])
     result["readiness"] = native / len(result["screens"]) if result["screens"] else 0.0
+    result["assets"] = _assets(result["screens"], records)
     if not result["screens"]:
         gaps.append("no qualified screens")
     result["gaps"] = sorted(set(gaps))
     return result
+
+
+def _assets(screens: list[dict[str, Any]], records: dict[str, str]) -> dict[str, str]:
+    """Digest every image asset a captured screen tree references, so plans can pin bytes."""
+    assets: dict[str, str] = {}
+
+    def visit(node: Any) -> None:
+        if isinstance(node, dict):
+            asset = node.get("asset")
+            if isinstance(asset, str) and set(node) == {"asset"}:
+                assets[asset] = records[asset]
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for item in node:
+                visit(item)
+
+    for screen in screens:
+        visit(screen.get("tree"))
+    return dict(sorted(assets.items()))
 
 
 def _walk(root: Path) -> tuple[dict[str, str], list[str]]:
