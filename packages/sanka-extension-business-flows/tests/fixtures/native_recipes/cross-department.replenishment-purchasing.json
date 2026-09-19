@@ -1,0 +1,40 @@
+{
+  "recipe_id": "cross-department.replenishment-purchasing",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ],
+    "inventory_id": "11111111111141118111111111111111",
+    "supplier_id": "22222222-2222-4222-8222-222222222222",
+    "reorder_quantity": 12,
+    "unit_price": "+050.20",
+    "currency": "JPY"
+  },
+  "expected_configuration": {
+    "process": "replenishment_purchasing",
+    "settings": {
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "inventory_id": "11111111-1111-4111-8111-111111111111",
+      "supplier_id": "22222222-2222-4222-8222-222222222222",
+      "reorder_quantity": 12,
+      "unit_price": "50.20",
+      "currency": "JPY",
+      "stock_threshold": 10,
+      "tax_rate": 0
+    }
+  },
+  "expected_node_ids": [
+    "cross-department-replenishment-purchasing/schedule",
+    "cross-department-replenishment-purchasing/prepare-purchasing"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "outstanding_purchase": "skip_until_in_stock_or_archived",
+    "result": "draft_purchase_order_and_receiving_task"
+  }
+}

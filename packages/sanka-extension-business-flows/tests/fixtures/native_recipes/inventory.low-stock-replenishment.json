@@ -1,0 +1,30 @@
+{
+  "recipe_id": "inventory.low-stock-replenishment",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "task": "low_stock_replenishment",
+    "settings": {
+      "local_hour": 9,
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "stock_threshold": 10
+    }
+  },
+  "expected_node_ids": [
+    "inventory-low-stock-replenishment/schedule",
+    "inventory-low-stock-replenishment/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "selection": "active_available_inventory_below_threshold",
+    "existing_open_source_task": "skip"
+  }
+}

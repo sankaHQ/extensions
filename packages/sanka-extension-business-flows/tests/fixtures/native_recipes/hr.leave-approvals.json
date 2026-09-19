@@ -1,0 +1,25 @@
+{
+  "recipe_id": "hr.leave-approvals",
+  "input": {
+    "approver_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "subject": "absence",
+    "approver_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_node_ids": [
+    "hr-leave-approvals/trigger",
+    "hr-leave-approvals/review"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "source": "durable_trigger_record",
+    "source_status": "unchanged"
+  }
+}
