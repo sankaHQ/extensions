@@ -159,7 +159,10 @@ def readiness_error(task: str, plan: dict[str, Any], envelope: dict[str, Any]) -
     minimum, eligible = envelope[task]
     native = plan.get("native_routes")
     if plan.get("native_eligible_routes") != eligible:
-        return f"eligible route count changed from {eligible}"
+        return (
+            f"eligible route count changed from {eligible} "
+            f"to {plan.get('native_eligible_routes')!r} (native routes: {native!r})"
+        )
     if not isinstance(native, int) or isinstance(native, bool) or not minimum <= native <= eligible:
         return f"native route count is outside reviewed floor {minimum}/{eligible}"
     if plan.get("readiness") != native / eligible:
