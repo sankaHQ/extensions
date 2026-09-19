@@ -9,6 +9,7 @@ from typing import Any
 from sanka_ts_capture import ParsedFile
 from sanka_ts_capture import tree as t
 
+from .effects import capture_effect_function, capture_use_effect, is_async_function, type_ir
 from .expressions import Expr, Scope, Unsupported, href, is_literal, lower, lower_handler
 from .styles import capture_styles
 
@@ -32,11 +33,21 @@ COMPONENTS: dict[str, frozenset[str]] = {
         }
     ),
     "Switch": frozenset({"style", "value", "onValueChange"}),
-    "FlatList": frozenset({"style", "contentContainerStyle", "data", "renderItem", "keyExtractor"}),
+    "FlatList": frozenset(
+        {
+            "style",
+            "contentContainerStyle",
+            "data",
+            "renderItem",
+            "keyExtractor",
+            "refreshing",
+            "onRefresh",
+        }
+    ),
     "ActivityIndicator": frozenset({"style", "size", "color"}),
 }
 COMMON_PROPS = frozenset({"testID", "accessibilityLabel", "key"})
-EVENT_PROPS = frozenset({"onPress", "onChangeText", "onValueChange"})
+EVENT_PROPS = frozenset({"onPress", "onChangeText", "onValueChange", "onRefresh"})
 STYLE_PROPS = frozenset({"style", "contentContainerStyle"})
 LITERAL_PROPS = frozenset(
     {
@@ -53,7 +64,8 @@ LITERAL_PROPS = frozenset(
     }
 )
 REACT_NATIVE_IMPORTS = frozenset(COMPONENTS) | {"StyleSheet"}
-REACT_IMPORTS = frozenset({"useState"})
+REACT_IMPORTS = frozenset({"useState", "useEffect"})
+STORAGE_MODULE = "@react-native-async-storage/async-storage"
 NAVIGATION_IMPORTS = frozenset({"NavigationContainer", "useNavigation"})
 EXPO_IMPORTS = frozenset({"Link", "useRouter", "useLocalSearchParams", "Stack", "Tabs"})
 ALLOWED_MODULES: dict[str, frozenset[str]] = {
@@ -64,6 +76,7 @@ ALLOWED_MODULES: dict[str, frozenset[str]] = {
     "@react-navigation/bottom-tabs": frozenset({"createBottomTabNavigator"}),
     "expo-router": EXPO_IMPORTS,
     "expo-status-bar": frozenset({"StatusBar"}),
+    STORAGE_MODULE: frozenset(),
 }
 ASSET_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
 
@@ -113,7 +126,7 @@ def imports(parsed: ParsedFile, rel: str) -> tuple[dict[str, str], list[dict[str
                 code = "SANKA_RN_NATIVE_MODULE"
             gaps.append(_gap(code, f"{rel}: import of {module!r} is outside the envelope"))
             continue
-        if default_name is not None and module != "react":
+        if default_name is not None and module not in {"react", STORAGE_MODULE}:
             gaps.append(
                 _gap("SANKA_RN_UNSUPPORTED_IMPORT", f"{rel}: default import from {module!r}")
             )
@@ -122,9 +135,29 @@ def imports(parsed: ParsedFile, rel: str) -> tuple[dict[str, str], list[dict[str
                 gaps.append(_gap("SANKA_RN_UNSUPPORTED_HOOK", f"{rel}: '{name}' from {module!r}"))
                 continue
             names[name] = module
-        if default_name is not None and module == "react":
+        if default_name is not None and module in {"react", STORAGE_MODULE}:
             names[default_name] = module
     return names, gaps
+
+
+def type_imports(parsed: ParsedFile) -> dict[str, str]:
+    """Map type-only imported names (``import type { A }``, ``{ type A }``) to modules."""
+    names: dict[str, str] = {}
+    for statement in t.field_list(parsed.tree, "statements"):
+        if t.kind(statement) != "ImportDeclaration":
+            continue
+        module = t.string_value(t.field(statement, "moduleSpecifier")) or ""
+        clause = t.field(statement, "importClause")
+        bindings = t.field(clause, "namedBindings") if clause is not None else None
+        if clause is None or bindings is None or t.kind(bindings) != "NamedImports":
+            continue
+        for element in t.field_list(bindings, "elements"):
+            if not (clause.get("typeOnly") or element.get("typeOnly")):
+                continue
+            local = t.identifier_name(t.field(element, "name"))
+            if local is not None and t.field(element, "propertyName") is None:
+                names[local] = module
+    return names
 
 
 def _gap(code: str, message: str) -> dict[str, str]:
@@ -185,6 +218,7 @@ def capture_screen(
     name, function = default_export(parsed)
     if name is None or function is None:
         raise Unsupported("SANKA_RN_SCREEN", f"{rel}: no default-exported function component")
+    constants: dict[str, str] = {}
     for statement in t.field_list(parsed.tree, "statements"):
         kind = t.kind(statement)
         if kind in {
@@ -209,6 +243,16 @@ def capture_screen(
                     and t.identifier_name(t.field(items[0], "name")) == "styles"
                 ):
                     continue
+                constant = t.identifier_name(t.field(items[0], "name"))
+                literal = t.string_value(t.unparenthesize(initializer)) if initializer else None
+                if (
+                    constant is not None
+                    and literal is not None
+                    and declarations is not None
+                    and declarations.get("decl") == "const"
+                ):
+                    constants[constant] = literal
+                    continue
         raise Unsupported(
             "SANKA_RN_LOGIC", f"{rel}:{t.line_of(source, statement)}: unsupported {kind}"
         )
@@ -220,9 +264,48 @@ def capture_screen(
     state: dict[str, str] = {}
     setters: dict[str, str] = {}
     initial: dict[str, Any] = {}
+    types: dict[str, Any] = {}
     params: dict[str, str] = dict(declared_params or {})
     returned: t.Node | None = None
     scope_navigation = navigation_name
+    effects: dict[str, dict[str, Any]] = {}
+    on_appear: list[str] = []
+    storage_name = next(
+        (local for local, module in imported.items() if module == STORAGE_MODULE), None
+    )
+    typed_imports = type_imports(parsed)
+    type_refs: dict[str, str] = {}
+
+    def current_scope(data: str | None = None) -> Scope:
+        return Scope(
+            state=state,
+            setters=setters,
+            params=frozenset(params),
+            route_object=route_object,
+            navigation=scope_navigation,
+            navigation_kind=navigation_kind,
+            styles="styles" if styles else None,
+            effects=frozenset(effects),
+            storage=storage_name,
+            data=data,
+            constants=constants,
+        )
+
+    def declared_type(node: t.Node) -> dict[str, Any] | str | None:
+        """Lower a type annotation; annotations naming local types are ignored (inferred)."""
+        lowered = type_ir(node)
+        models = _model_names(lowered)
+        if any(model not in typed_imports for model in models):
+            return None
+        for model in models:
+            module = typed_imports[model]
+            if not module.startswith("."):
+                raise Unsupported(
+                    "SANKA_RN_MODEL", f"{rel}: type {model} must be imported from a project module"
+                )
+            type_refs[model] = module
+        return lowered
+
     for statement in t.field_list(body, "statements"):
         kind = t.kind(statement)
         if kind == "ReturnStatement":
@@ -230,6 +313,25 @@ def capture_screen(
             if returned is None:
                 raise Unsupported("SANKA_RN_SCREEN", f"{rel}: the component must return JSX")
             break
+        if kind == "ExpressionStatement":
+            expression = t.field(statement, "expression")
+            parts_call = t.call_parts(expression) if expression is not None else None
+            hook_name = t.identifier_name(t.unparenthesize(parts_call[0])) if parts_call else None
+            if hook_name != "useEffect" or imported.get("useEffect") != "react":
+                raise Unsupported(
+                    "SANKA_RN_LOGIC", f"{rel}: only hooks, effects and a JSX return are qualified"
+                )
+            assert expression is not None
+            on_appear.extend(capture_use_effect(expression, current_scope(), rel, effects))
+            continue
+        if kind == "FunctionDeclaration":
+            effect_name = t.identifier_name(t.field(statement, "name"))
+            if effect_name is None or not is_async_function(statement):
+                raise Unsupported(
+                    "SANKA_RN_LOGIC", f"{rel}: only async effect functions are qualified"
+                )
+            _declare_effect(effects, effect_name, statement, current_scope(), rel, declared_type)
+            continue
         if kind != "VariableStatement":
             raise Unsupported("SANKA_RN_LOGIC", f"{rel}: only hooks and a JSX return are qualified")
         declarations = t.field(statement, "declarationList")
@@ -241,6 +343,12 @@ def capture_screen(
         declaration = items[0]
         target = t.field(declaration, "name")
         initializer = t.field(declaration, "initializer")
+        if initializer is not None and is_async_function(initializer):
+            effect_name = t.identifier_name(target)
+            if effect_name is None:
+                raise Unsupported("SANKA_RN_LOGIC", f"{rel}: effect functions need a plain name")
+            _declare_effect(effects, effect_name, initializer, current_scope(), rel, declared_type)
+            continue
         parts = t.call_parts(initializer, allow_type_arguments=True) if initializer else None
         if target is None or parts is None:
             raise Unsupported("SANKA_RN_LOGIC", f"{rel}: only hook declarations are qualified")
@@ -256,6 +364,15 @@ def capture_screen(
             if not is_literal(init):
                 raise Unsupported(
                     "SANKA_RN_UNSUPPORTED_HOOK", f"{rel}: useState initial values must be literals"
+                )
+            type_arguments = t.field_list(initializer, "typeArguments") if initializer else []
+            if len(type_arguments) == 1:
+                declared = declared_type(type_arguments[0])
+                if declared is not None:
+                    types[value_name] = declared
+            elif type_arguments:
+                raise Unsupported(
+                    "SANKA_RN_UNSUPPORTED_HOOK", f"{rel}: useState takes one type argument"
                 )
             state[value_name] = setter
             setters[setter] = value_name
@@ -275,25 +392,125 @@ def capture_screen(
     if returned is None:
         raise Unsupported("SANKA_RN_SCREEN", f"{rel}: the component must return JSX")
     params.update(hook_params)
-    scope = Scope(
-        state=state,
-        setters=setters,
-        params=frozenset(params),
-        route_object=route_object,
-        navigation=scope_navigation,
-        navigation_kind=navigation_kind,
-        styles="styles" if styles else None,
-    )
+    scope = current_scope()
     context = _Context(rel, imported, styles, project_root_files)
     tree = context.element(returned, scope)
+    for effect in effects.values():
+        _resolve_response(effect, types, rel)
+    entries = []
+    for key in state:
+        entry: dict[str, Any] = {"name": key, "setter": state[key], "initial": initial[key]}
+        if key in types:
+            entry["type"] = types[key]
+        entries.append(entry)
     return {
         "name": name,
         "module": rel,
         "params": params,
-        "state": [{"name": key, "setter": state[key], "initial": initial[key]} for key in state],
+        "state": entries,
         "styles": styles,
         "tree": tree,
+        "effects": list(effects.values()),
+        "on_appear": on_appear,
+        "type_refs": type_refs,
     }
+
+
+def _declare_effect(
+    effects: dict[str, dict[str, Any]],
+    name: str,
+    node: t.Node,
+    scope: Scope,
+    rel: str,
+    declared_type: Any,
+) -> None:
+    if name in effects or name in scope.state or name in scope.setters:
+        raise Unsupported("SANKA_RN_NETWORK", f"{rel}: effect {name!r} collides with another name")
+    effect = capture_effect_function(node, name, scope, rel)
+    if effect["response"] is not None:
+        effect["response"] = declared_type_ir(effect["response"], declared_type)
+    effects[name] = effect
+
+
+def declared_type_ir(
+    lowered: dict[str, Any] | str, declared_type: Any
+) -> dict[str, Any] | str | None:
+    """Re-validate a type produced by ``type_ir`` so its models are registered."""
+    node = _type_node(lowered)
+    result: dict[str, Any] | str | None = declared_type(node)
+    return result
+
+
+def _type_node(lowered: dict[str, Any] | str) -> t.Node:
+    """Rebuild a minimal syntax node for a lowered type (used for model registration)."""
+    keywords = {"string": "StringKeyword", "number": "NumberKeyword", "boolean": "BooleanKeyword"}
+    if isinstance(lowered, str):
+        return {"k": keywords[lowered], "s": 0, "e": 0}
+    if "array" in lowered:
+        return {
+            "k": "ArrayType",
+            "s": 0,
+            "e": 0,
+            "f": {"elementType": _type_node(lowered["array"])},
+        }
+    if "nullable" in lowered:
+        null = {
+            "k": "LiteralType",
+            "s": 0,
+            "e": 0,
+            "f": {"literal": {"k": "NullKeyword", "s": 0, "e": 0}},
+        }
+        return {
+            "k": "UnionType",
+            "s": 0,
+            "e": 0,
+            "f": {"types": [_type_node(lowered["nullable"]), null]},
+        }
+    return {
+        "k": "TypeReference",
+        "s": 0,
+        "e": 0,
+        "f": {"typeName": {"k": "Identifier", "s": 0, "e": 0, "t": lowered["model"]}},
+    }
+
+
+def _model_names(lowered: dict[str, Any] | str) -> list[str]:
+    if isinstance(lowered, str):
+        return []
+    if "model" in lowered:
+        return [str(lowered["model"])]
+    inner = lowered.get("array", lowered.get("nullable"))
+    return _model_names(inner) if inner is not None else []
+
+
+def _resolve_response(effect: dict[str, Any], types: dict[str, Any], rel: str) -> None:
+    """Give every loader a response type: its annotation or the assigned state's type."""
+    if effect["kind"] != "fetch" or effect["method"] != "GET":
+        return
+    assigned = [
+        action["set"]
+        for action in effect["success"]
+        if "set" in action and action["value"] == {"data": []}
+    ]
+    # A response is never null: state declared as `T | null` receives a `T` response.
+    declared = [
+        item["nullable"] if isinstance(item, dict) and "nullable" in item else item
+        for item in (types[name] for name in assigned if name in types)
+    ]
+    if effect["response"] is None:
+        if not declared:
+            raise Unsupported(
+                "SANKA_RN_NETWORK",
+                f"{rel}: effect {effect['id']} needs a declared response type "
+                "(annotate the parsed value or the state it fills)",
+            )
+        effect["response"] = declared[0]
+    for item in declared:
+        if item != effect["response"]:
+            raise Unsupported(
+                "SANKA_RN_NETWORK",
+                f"{rel}: effect {effect['id']} assigns its response to state of another type",
+            )
 
 
 def _styles(parsed: ParsedFile, rel: str) -> dict[str, dict[str, Any]]:
