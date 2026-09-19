@@ -18,19 +18,21 @@ if __package__ in {None, ""}:  # Direct script execution keeps only scripts/ on 
 
 from scripts.build_release import LOCKED_DEPENDENCY_WHEELS  # noqa: E402
 
-RELEASE_TAG = "extensions-v0.1.0a26"
+RELEASE_TAG = "extensions-v0.1.0a31"
 LOCAL_MANIFEST_WHEELS = {
     "sanka-extension-drf-to-flask": (
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_drf_replay-0.1.0a2-py3-none-any.whl",
+        "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
+        "sanka_code_migration-0.1.0a3-py3-none-any.whl",
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-        "sanka_extension_drf_to_flask-0.1.0a7-py3-none-any.whl",
+        "sanka_extension_drf_to_flask-0.1.0a12-py3-none-any.whl",
     ),
     "sanka-extension-drf-to-fastapi": (
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_drf_replay-0.1.0a2-py3-none-any.whl",
+        "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
+        "sanka_code_migration-0.1.0a3-py3-none-any.whl",
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-        "sanka_extension_drf_to_fastapi-0.1.0a13-py3-none-any.whl",
+        "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl",
     ),
     "sanka-connector-markdown": (
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
@@ -89,6 +91,10 @@ MANIFEST_WHEELS = {
     for package, local in LOCAL_MANIFEST_WHEELS.items()
 }
 MANIFESTS = {package: ROOT / "packages" / package / "extension.json" for package in MANIFEST_WHEELS}
+UPDATED_MANIFESTS = {
+    "sanka-extension-drf-to-flask",
+    "sanka-extension-drf-to-fastapi",
+}
 
 
 def _wheel_hash(path: Path) -> str:
@@ -119,6 +125,7 @@ def update_manifests(release: Path, *, release_tag: str) -> dict[str, dict[str, 
             ]
         }
         for package, names in MANIFEST_WHEELS.items()
+        if package in UPDATED_MANIFESTS
     }
 
 
@@ -144,11 +151,12 @@ def main() -> int:
     parser.add_argument("--dist", type=Path, required=True)
     parser.add_argument("--release-tag", required=True)
     args = parser.parse_args()
-    for package, update in update_manifests(args.dist, release_tag=args.release_tag).items():
+    updates = update_manifests(args.dist, release_tag=args.release_tag)
+    for package, update in updates.items():
         manifest = json.loads(MANIFESTS[package].read_text(encoding="utf-8"))
         manifest.update(update)
         _atomic_write(MANIFESTS[package], manifest)
-    print(f"Updated {len(MANIFESTS)} marketplace manifests for {args.release_tag}")
+    print(f"Updated {len(updates)} marketplace manifests for {args.release_tag}")
     return 0
 
 

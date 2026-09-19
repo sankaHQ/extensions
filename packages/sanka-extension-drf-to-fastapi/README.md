@@ -149,3 +149,7 @@ columns. The generated API preserves the field's `coerce_to_string` override or
 JavaScript's exact integer range. Custom field subclasses still require adaptation.
 Django 6 / DRF 3.17 source and generated HTTP/database parity runs in Linux CI;
 this does not imply compatibility with every application using those versions.
+
+PostgreSQL differential verification is opt-in through `database_backend` and
+`postgres_admin_dsn_env`; see the shared [replay configuration](../sanka-drf-replay/README.md#postgresql-replay).
+It uses dedicated temporary databases and does not change generation defaults.

@@ -72,6 +72,7 @@ def test_scan_and_plan_use_only_project_django_without_pythonpath(tmp_path: Path
             "sanka_extensions",
             "sanka_extension_sdk",
             "sanka_connector",
+            "sanka_code_migration",
         ),
     )
     environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}

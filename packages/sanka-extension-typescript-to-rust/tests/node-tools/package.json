@@ -1,0 +1,11 @@
+{
+  "name": "sanka-typescript-to-rust-node-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pinned source-framework runtime used by the TypeScript to Rust replay tests",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "express": "5.2.1",
+    "pg": "8.23.0"
+  }
+}

@@ -27,6 +27,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import uuid
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -401,13 +402,8 @@ sys.path.insert(0, payload["project_root"])
 os.environ["DJANGO_SETTINGS_MODULE"] = payload["settings_module"]
 os.environ[payload["db_env"]] = payload["database"]
 import django
+validate_django_databases()
 django.setup()
-from django.db import connections
-for connection in connections.all():
-    if (connection.settings_dict["ENGINE"] != "django.db.backends.sqlite3"
-        or os.path.realpath(str(connection.settings_dict["NAME"]))
-           != os.path.realpath(payload["database"])):
-        raise SystemExit("every Django database alias must use the isolated SQLite path")
 from django.core.management import call_command
 call_command("migrate", interactive=False, verbosity=0, run_syncdb=True)
 if payload.get("seed"):
@@ -427,6 +423,7 @@ sys.path.insert(0, payload["project_root"])
 os.environ["DJANGO_SETTINGS_MODULE"] = payload["settings_module"]
 os.environ[payload["db_env"]] = payload["database"]
 import django
+validate_django_databases()
 django.setup()
 from django.test import Client
 client = Client(enforce_csrf_checks=True)
@@ -461,7 +458,11 @@ payload = json.load(sys.stdin)
 candidate_root = payload["candidate_root"]
 # A complete candidate tree must win over same-named source packages.
 sys.path[:0] = [candidate_root, payload["project_root"]]
-os.environ[payload["candidate_db_env"]] = payload["database"]
+candidate_url = (payload["database"].replace("postgresql://", "postgresql+psycopg://", 1)
+                 if payload.get("database_backend") == "postgresql" else payload["database"])
+os.environ[payload["candidate_db_env"]] = candidate_url
+if payload.get("database_backend") == "postgresql":
+    os.environ["SANKA_DATABASE_URL"] = candidate_url
 os.environ[payload["db_env"]] = payload["database"]
 entrypoint_path = os.path.join(candidate_root, payload["entrypoint"])
 spec = importlib.util.spec_from_file_location("_sanka_replay_candidate", entrypoint_path)
@@ -469,20 +470,31 @@ module = importlib.util.module_from_spec(spec)
 sys.modules["_sanka_replay_candidate"] = module
 spec.loader.exec_module(module)
 if "django" in sys.modules:
-    from django.db import connections
-    for connection in connections.all():
-        if (connection.settings_dict["ENGINE"] != "django.db.backends.sqlite3"
-            or os.path.realpath(str(connection.settings_dict["NAME"]))
-               != os.path.realpath(payload["database"])):
-            raise SystemExit("candidate database must use the isolated SQLite path")
+    validate_django_databases()
 app = getattr(module, "app", None)
+factory_used = app is None
+url = (payload["database"].replace("postgresql://", "postgresql+psycopg://", 1)
+       if payload.get("database_backend") == "postgresql" else "sqlite:///" + payload["database"])
+if app is None and payload["target"] == "flask" and callable(getattr(module, "create_app", None)):
+    app = module.create_app({"DATABASE_URL": url, "TESTING": True})
+if app is not None and payload["target"] == "flask":
+    engine = app.extensions.get("sanka_engine")
+    if payload.get("database_backend") == "postgresql":
+        from sqlalchemy.engine import make_url
+        if (engine is None and "django" not in sys.modules) or (
+            engine is not None and engine.url != make_url(url)):
+            raise SystemExit("candidate database must use the isolated PostgreSQL database")
+    elif (factory_used and engine is None) or (engine is not None and (
+          engine.url.get_backend_name() != "sqlite"
+          or os.path.realpath(str(engine.url.database)) != os.path.realpath(payload["database"]))):
+        raise SystemExit("candidate database must use the isolated SQLite path")
 if app is None:
-    raise SystemExit("candidate entrypoint does not expose `app`")
+    raise SystemExit("candidate entrypoint does not expose `app` or a supported Flask factory")
 if payload["target"] == "flask":
     from flask import Flask
     if not isinstance(app, Flask):
         raise SystemExit("candidate app is not Flask")
-    client_context = app.test_client()
+    client_context = app.test_client(use_cookies=False)
 else:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -552,12 +564,19 @@ def native(method, path):
             "is_apiroute": is_apiroute, "endpoint_in_candidate": inside}
 
 with client_context as client:
+    from http.cookies import SimpleCookie
+    cookies = SimpleCookie()
     def send(request):
         body, headers = request_bytes(request)
         if payload["target"] == "flask":
+            if cookies and "cookie" not in headers:
+                headers["cookie"] = "; ".join(sorted(
+                    f"{value.key}={value.coded_value}" for value in cookies.values()))
             response = client.open(request["path"], method=request["method"],
                                    data=body, headers=headers, follow_redirects=False,
                                    base_url="http://testserver")
+            for value in response.headers.getlist("Set-Cookie"):
+                cookies.load(value)
             content = response.data
         else:
             response = client.request(request["method"], request["path"],
@@ -609,6 +628,28 @@ def request_bytes(request):
         headers.setdefault("content-type", "application/json")
     return body, headers
 """
+_DATABASE_SCRIPT = r"""
+def validate_django_databases():
+    from django.db import connections
+    for connection in connections.all():
+        config = connection.settings_dict
+        if payload.get("database_backend") == "postgresql":
+            from urllib.parse import urlsplit, unquote, parse_qsl
+            expected = urlsplit(payload["database"])
+            valid = (config["ENGINE"] == "django.db.backends.postgresql"
+                     and str(config["NAME"]) == unquote(expected.path.lstrip("/"))
+                     and str(config.get("HOST", "")) == (expected.hostname or "")
+                     and str(config.get("PORT") or 5432) == str(expected.port or 5432)
+                     and str(config.get("USER", "")) == unquote(expected.username or "")
+                     and str(config.get("PASSWORD", "")) == unquote(expected.password or "")
+                     and (config.get("OPTIONS") or {}) == dict(parse_qsl(expected.query)))
+            if not valid:
+                raise SystemExit("every Django alias must use the isolated PostgreSQL database")
+        elif (config["ENGINE"] != "django.db.backends.sqlite3"
+              or os.path.realpath(str(config["NAME"])) != os.path.realpath(payload["database"])):
+            raise SystemExit("every Django database alias must use the isolated SQLite path")
+"""
+
 _MEDIA_SCRIPT = r"""
 import importlib
 os.environ["BENCH_MEDIA_ROOT"] = payload["media_root"]
@@ -616,27 +657,234 @@ os.environ["BENCH_MEDIA_ROOT"] = payload["media_root"]
 importlib.import_module(payload["settings_module"]).MEDIA_ROOT = payload["media_root"]
 """
 for _script_name in ("_PREPARE_SCRIPT", "_SOURCE_SCRIPT", "_CANDIDATE_SCRIPT"):
-    _script = globals()[_script_name]
+    _script = _DATABASE_SCRIPT + globals()[_script_name]
     _marker = 'os.environ[payload["db_env"]] = payload["database"]'
-    globals()[_script_name] = _script.replace(_marker, _marker + "\n" + _MEDIA_SCRIPT, 1)
+    binding = _marker + "\n" + _MEDIA_SCRIPT
+    if _script_name == "_CANDIDATE_SCRIPT":
+        binding += '\nif payload.get("database_backend") == "postgresql":\n'
+        binding += '    os.environ[payload["candidate_db_env"]] = candidate_url\n'
+        binding += '    os.environ["SANKA_DATABASE_URL"] = candidate_url\n'
+    globals()[_script_name] = _script.replace(_marker, binding, 1)
 _SOURCE_SCRIPT = _REQUEST_SCRIPT + _SOURCE_SCRIPT
 _CANDIDATE_SCRIPT = _REQUEST_SCRIPT + _CANDIDATE_SCRIPT
+
+
+_POSTGRES_SCRIPT = r"""
+import base64, datetime, decimal, json, math, sys, uuid
+from urllib.parse import quote, urlsplit
+import psycopg
+from psycopg import sql
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+payload = json.load(sys.stdin)
+params = conninfo_to_dict(payload["admin"])
+# Require a self-contained TCP URL: no libpq service/password-file/environment fallback.
+if (
+    not payload["admin"].startswith(("postgresql://", "postgres://"))
+    or not params.get("host")
+    or not params.get("user")
+    or not params.get("password")
+    or not params.get("dbname")
+    or set(params) - {"host", "port", "user", "password", "dbname", "sslmode"}
+):
+    raise SystemExit("dedicated PostgreSQL URL required")
+params.setdefault("port", "5432")
+params["connect_timeout"] = "10"
+action = payload["action"]
+if action in {"create", "cleanup"}:
+    with psycopg.connect(make_conninfo(**params), autocommit=True) as conn:
+        if action == "create":
+            if conn.execute("SELECT 1 FROM pg_database WHERE datname=%s",
+                            (payload["name"],)).fetchone():
+                print(json.dumps({"collision": True}))
+                sys.exit(0)
+            try:
+                conn.execute(
+                    sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+                        sql.Identifier(payload["name"]),
+                        sql.Identifier(payload.get("template") or "template0"),
+                    )
+                )
+            except psycopg.errors.DuplicateDatabase:
+                print(json.dumps({"collision": True}))
+                sys.exit(0)
+            conn.execute(sql.SQL("COMMENT ON DATABASE {} IS {}").format(
+                sql.Identifier(payload["name"]), sql.Literal(payload["ownership_token"])))
+            auth = quote(params["user"], safe="")
+            if params.get("password"):
+                auth += ":" + quote(params["password"], safe="")
+            host = params["host"]
+            if ":" in host:
+                host = "[" + host + "]"
+            url = "postgresql://" + auth + "@" + host + ":" + params["port"] + "/" + payload["name"]
+            if params.get("sslmode"):
+                url += "?sslmode=" + quote(params["sslmode"], safe="")
+            result = {"url": url}
+        else:
+            for name in payload["names"]:
+                ownership = conn.execute(
+                    "SELECT shobj_description(oid, 'pg_database') FROM pg_database "
+                    "WHERE datname = %s", (name,)).fetchone()
+                if ownership is None:
+                    continue
+                if ownership[0] != payload["ownership_token"]:
+                    print(json.dumps({"ownership_unconfirmed": True}))
+                    sys.exit(0)
+                conn.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = %s AND pid <> pg_backend_pid()",
+                    (name,),
+                )
+                conn.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
+            result = {"ok": True}
+else:
+    params["dbname"] = payload["name"]
+
+    def typed(value):
+        if value is None or isinstance(value, (str, bool, int)):
+            return value
+        if isinstance(value, float):
+            return value if math.isfinite(value) else {"float": str(value)}
+        if isinstance(value, (bytes, memoryview)):
+            return {"bytes": base64.b64encode(bytes(value)).decode()}
+        if isinstance(value, dict):
+            return {key: typed(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [typed(item) for item in value]
+        return {type(value).__name__: str(value)}
+
+    result = {}
+    with psycopg.connect(make_conninfo(**params), autocommit=True) as conn:
+        conn.execute("SET TIME ZONE 'UTC'")
+        objects = conn.execute(
+            "SELECT n.nspname, c.relname, c.relkind FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','S') "
+            "AND n.nspname NOT IN ('pg_catalog','information_schema') "
+            "AND n.nspname NOT LIKE 'pg_toast%' ORDER BY 1,2"
+        ).fetchall()
+        for schema, name, kind in objects:
+            key = schema + "." + name
+            if name in payload["ignored"] or key in payload["ignored"]:
+                continue
+            ident = sql.Identifier(schema, name)
+            if kind == "S":
+                row = conn.execute(
+                    sql.SQL("SELECT last_value, is_called FROM {}").format(ident)
+                ).fetchone()
+                result[key] = {
+                    "columns": [["last_value", "int8"], ["is_called", "bool"]],
+                    "rows": [list(row)],
+                }
+            else:
+                columns = conn.execute(
+                    "SELECT a.attname, format_type(a.atttypid, a.atttypmod) "
+                    "FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid "
+                    "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                    "WHERE n.nspname=%s AND c.relname=%s AND a.attnum>0 "
+                    "AND NOT a.attisdropped ORDER BY a.attnum",
+                    (schema, name),
+                ).fetchall()
+                rows = [
+                    [typed(value) for value in row]
+                    for row in conn.execute(sql.SQL("SELECT * FROM {}").format(ident)).fetchall()
+                ]
+                result[key] = {
+                    "columns": columns,
+                    "rows": sorted(rows, key=lambda row: json.dumps(row, sort_keys=True)),
+                }
+print(json.dumps(result, allow_nan=False))
+
+"""
+
+
+class _PostgresReplay:
+    """Own only databases allocated by this invocation; drivers run in source Python."""
+
+    def __init__(self, admin: str, python: Path, cwd: Path, env: Mapping[str, str]):
+        self.admin, self.python, self.cwd, self.env = admin, python, cwd, env
+        self.ownership_token = "sanka-replay-owner:" + os.urandom(32).hex()
+        self.names: list[str] = []
+        self.urls: dict[str, str] = {}
+
+    def call(self, action: str, **values: Any) -> dict[str, Any]:
+        try:
+            return _run_side(
+                _POSTGRES_SCRIPT,
+                {
+                    "side": "PostgreSQL " + action,
+                    "database_backend": "postgresql",
+                    "admin": self.admin,
+                    "ownership_token": self.ownership_token,
+                    "action": action,
+                    **values,
+                },
+                python=self.python,
+                cwd=self.cwd,
+                env=self.env,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            raise ReplayError(
+                "PostgreSQL operation failed or timed out (details redacted)"
+            ) from None
+
+    def create(self, template: str | None = None) -> str:
+        name = "sanka_replay_" + uuid.uuid4().hex
+        self.names.append(name)  # Cleanup requires server-side ownership, even after timeout.
+        result = self.call("create", name=name, template=self.urls[template] if template else None)
+        if result.get("collision"):
+            self.names.remove(name)
+            raise ReplayError("PostgreSQL database name collision; existing database untouched")
+        url = str(result["url"])
+        self.urls[url] = name
+        return url
+
+    def snapshot(self, url: str, ignored: Iterable[str]) -> dict[str, dict[str, Any]]:
+        return self.call("snapshot", name=self.urls[url], ignored=list(ignored))
+
+    def cleanup(self) -> None:
+        failures = 0
+        unconfirmed = 0
+        remaining: list[str] = []
+        for name in reversed(self.names):
+            try:
+                result = self.call("cleanup", names=[name])
+                if result.get("ownership_unconfirmed"):
+                    unconfirmed += 1
+                    remaining.append(name)
+            except ReplayError:
+                failures += 1
+                remaining.append(name)
+        if failures or unconfirmed:
+            raise ReplayError(
+                f"PostgreSQL cleanup failed for {failures + unconfirmed} isolated databases; "
+                f"ownership unconfirmed for {unconfirmed}, left untouched for manual inspection; "
+                f"database names: {', '.join(remaining)}"
+            )
 
 
 def _run_side(
     script: str, payload: Mapping[str, Any], *, python: Path, cwd: Path, env: Mapping[str, str]
 ) -> dict[str, Any]:
-    outcome = subprocess.run(
-        [str(python), "-c", script],
-        cwd=cwd,
-        env=dict(env),
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        timeout=_SIDE_TIMEOUT_SECONDS,
-        check=False,
-    )
+    try:
+        outcome = subprocess.run(
+            [str(python), "-c", script],
+            cwd=cwd,
+            env=dict(env),
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=_SIDE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        if payload.get("database_backend") == "postgresql":
+            raise ReplayError("PostgreSQL side failed or timed out (details redacted)") from None
+        raise
     if outcome.returncode != 0:
+        if payload.get("database_backend") == "postgresql":
+            raise ReplayError(
+                f"{payload.get('side', 'side')} PostgreSQL process failed (details redacted)"
+            )
         detail = (outcome.stderr or outcome.stdout or "no output").strip()
         raise ReplayError(f"{payload.get('side', 'side')} process failed: {detail[-4000:]}")
     lines = [line for line in outcome.stdout.splitlines() if line.strip()]
@@ -830,8 +1078,20 @@ def replay(
     candidate_python: Path | None = None,
     keep_temp: bool = False,
     target: str = "fastapi",
+    database_backend: str = "sqlite",
+    postgres_admin_dsn_env: str | None = None,
 ) -> dict[str, Any]:
     """Replay ``scenarios`` against the source and the candidate and return the report."""
+    if database_backend not in {"sqlite", "postgresql"}:
+        raise ReplayError("database_backend must be sqlite or postgresql")
+    if database_backend == "postgresql" and not (
+        postgres_admin_dsn_env and os.environ.get(postgres_admin_dsn_env)
+    ):
+        raise ReplayError(
+            "PostgreSQL replay requires postgres_admin_dsn_env naming a dedicated test admin URL"
+        )
+    if database_backend == "sqlite" and postgres_admin_dsn_env:
+        raise ReplayError("postgres_admin_dsn_env requires database_backend=postgresql")
     if target not in {"fastapi", "flask"}:
         raise ReplayError("target must be fastapi or flask")
     if not scenarios:
@@ -856,18 +1116,30 @@ def replay(
     base_environment = {
         key: value
         for key, value in os.environ.items()
-        if key not in {"DJANGO_SETTINGS_MODULE", db_env, target_db_env}
+        if key not in {"DJANGO_SETTINGS_MODULE", db_env, target_db_env, postgres_admin_dsn_env}
+        and (
+            database_backend != "postgresql"
+            or (not key.startswith("PG") and key not in {"DATABASE_URL", "SANKA_DATABASE_URL"})
+        )
     }
+    postgres = (
+        _PostgresReplay(
+            os.environ[str(postgres_admin_dsn_env)], source_python, project, base_environment
+        )
+        if database_backend == "postgresql"
+        else None
+    )
     reports: list[dict[str, Any]] = []
     replay_scenarios = [dict(scenario) for scenario in scenarios]
     try:
-        base_db = temp / "base.sqlite3"
+        base_db = postgres.create() if postgres else temp / "base.sqlite3"
         base_media = temp / "base-media"
         base_media.mkdir()
         _run_side(
             _PREPARE_SCRIPT,
             {
                 "side": "prepare",
+                "database_backend": database_backend,
                 "project_root": str(project),
                 "settings_module": settings_module,
                 "db_env": db_env,
@@ -931,11 +1203,16 @@ def replay(
                     source_python=source_python,
                     target_python=target_python,
                     environment=base_environment,
+                    postgres=postgres,
                 )
             )
     finally:
-        if not keep_temp:
-            shutil.rmtree(temp, ignore_errors=True)
+        try:
+            if postgres:
+                postgres.cleanup()
+        finally:
+            if not keep_temp:
+                shutil.rmtree(temp, ignore_errors=True)
     matched = [report for report in reports if report["match"]]
     summary = {
         "scenarios": len(reports),
@@ -1012,6 +1289,7 @@ def replay(
         "entrypoint": entrypoint,
         "settings_module": settings_module,
         "database": {
+            "backend": database_backend,
             "isolation_env": db_env,
             "candidate_isolation_env": target_db_env,
             "ignored_tables": list(ignored),
@@ -1037,7 +1315,7 @@ def _replay_one(
     settings_module: str,
     db_env: str,
     candidate_db_env: str,
-    base_db: Path,
+    base_db: Path | str,
     base_media: Path,
     temp: Path,
     ignored: tuple[str, ...],
@@ -1045,15 +1323,26 @@ def _replay_one(
     source_python: Path,
     target_python: Path,
     environment: Mapping[str, str],
+    postgres: _PostgresReplay | None = None,
 ) -> dict[str, Any]:
     identifier = str(scenario.get("id") or f"scenario-{index}")
-    source_db = temp / f"source-{index}.sqlite3"
-    candidate_db = temp / f"candidate-{index}.sqlite3"
-    shutil.copy2(base_db, source_db)
-    shutil.copy2(base_db, candidate_db)
-    before_counts = {
-        table: len(data["rows"]) for table, data in snapshot_database(base_db, ignored).items()
-    }
+    source_db: Path | str
+    candidate_db: Path | str
+    if postgres:
+        source_db = postgres.create(str(base_db))
+        candidate_db = postgres.create(str(base_db))
+        source_before = postgres.snapshot(source_db, ignored)
+        candidate_before = postgres.snapshot(candidate_db, ignored)
+        if source_before != candidate_before:
+            raise ReplayError("PostgreSQL scenario clones do not have identical seed state")
+    else:
+        source_db = temp / f"source-{index}.sqlite3"
+        candidate_db = temp / f"candidate-{index}.sqlite3"
+        shutil.copy2(base_db, source_db)
+        shutil.copy2(base_db, candidate_db)
+        source_before = snapshot_database(Path(base_db), ignored)
+        candidate_before = source_before
+    before_counts = {table: len(data["rows"]) for table, data in source_before.items()}
     source_media = temp / f"source-{index}-media"
     candidate_media = temp / f"candidate-{index}-media"
     shutil.copytree(base_media, source_media)
@@ -1077,7 +1366,13 @@ def _replay_one(
         }
         for step in scenario.get("setup") or []
     ]
-    common = {"request": request, "setup": setup, "db_env": db_env, "boundary": _MULTIPART_BOUNDARY}
+    common = {
+        "database_backend": "postgresql" if postgres else "sqlite",
+        "request": request,
+        "setup": setup,
+        "db_env": db_env,
+        "boundary": _MULTIPART_BOUNDARY,
+    }
     source_result = _run_side(
         _SOURCE_SCRIPT,
         {
@@ -1130,8 +1425,16 @@ def _replay_one(
         for name in compared
         if source_headers.get(name, "") != candidate_headers.get(name, "")
     }
-    source_snapshot = snapshot_database(source_db, ignored)
-    candidate_snapshot = snapshot_database(candidate_db, ignored)
+    source_snapshot = (
+        postgres.snapshot(str(source_db), ignored)
+        if postgres
+        else snapshot_database(Path(source_db), ignored)
+    )
+    candidate_snapshot = (
+        postgres.snapshot(str(candidate_db), ignored)
+        if postgres
+        else snapshot_database(Path(candidate_db), ignored)
+    )
     database_diffs = diff_snapshots(source_snapshot, candidate_snapshot)
     native = dict(candidate_result.get("native") or {})
     native_compliant = bool(native.get("is_apiroute")) and bool(native.get("endpoint_in_candidate"))

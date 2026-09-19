@@ -78,3 +78,14 @@ runtime acceptance.
 To update benchmark coverage, review and pin its new commit and update the route
 and independent evaluation floors together, then execute the real converter/evaluator run. Unit tests of
 the runner alone do not satisfy this check.
+
+## Flask route inventory correction for a31
+
+The router support added in PR52 inventories implicit HEAD and OPTIONS handlers.
+For the unchanged pinned fixtures, eligible counts are 10, 30 and 11 for Flask
+001, 002 and 003 respectively (previously 5, 12 and 9). Comparing the scanner
+before PR52 with the current scanner confirms no removed route identities and
+only HEAD/OPTIONS additions. Native-route minimums and independent evaluator
+thresholds are unchanged. The earlier a31 regression run stopped those three
+fixtures at the inventory gate; the corrected inventory requires a fresh complete
+run and does not establish behavioral acceptance by itself.

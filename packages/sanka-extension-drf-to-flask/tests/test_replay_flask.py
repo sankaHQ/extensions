@@ -5,6 +5,7 @@ import base64
 import json
 from pathlib import Path
 
+import pytest
 from test_lifecycle import call, project
 
 
@@ -121,3 +122,78 @@ def echo():
     invalid = call(tmp_path, "verify", config)
     assert invalid["error"]["code"] == "SANKA_EXTENSION_REPLAY_INVALID", invalid
     assert not (tmp_path / "do-not-touch.sqlite3").exists()
+
+
+def test_native_application_factory_replay_uses_isolated_database(tmp_path: Path) -> None:
+    project(tmp_path)
+    with (tmp_path / "settings.py").open("a") as out:
+        out.write(
+            'import os\nDATABASES={"default":{"ENGINE":"django.db.backends.sqlite3",'
+            '"NAME":os.environ.get("SANKA_TEST_DB", "never-open.sqlite3")}}\n'
+        )
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    (candidate / "target_app.py").write_text("""from flask import Flask, jsonify, request
+from sqlalchemy import create_engine
+
+def create_app(config):
+    app = Flask(__name__)
+    app.extensions['sanka_engine'] = create_engine(config['DATABASE_URL'])
+    @app.get('/quotes/<int:quantity>/')
+    def quote(quantity):
+        response = jsonify({'label': request.args.get('label', 'quote'), 'total': quantity * 7})
+        response.headers['X-Quote'] = 'calculated'
+        return response
+    return app
+""")
+    (tmp_path / "scenarios.json").write_text(
+        json.dumps(
+            [{"id": "quote", "method": "GET", "path": "/quotes/3/", "expected_source_status": 200}]
+        )
+    )
+    result = call(tmp_path, "verify", {"candidate": "candidate", "scenarios": "scenarios.json"})
+    assert result["outcome"] == "success", result
+    assert not (tmp_path / "never-open.sqlite3").exists()
+    entrypoint = candidate / "target_app.py"
+    entrypoint.write_text(
+        entrypoint.read_text().replace("config['DATABASE_URL']", "'sqlite:///wrong.db'")
+    )
+    rejected = call(tmp_path, "verify", {"candidate": "candidate", "scenarios": "scenarios.json"})
+    assert rejected["outcome"] == "error"
+    assert "isolated SQLite path" in rejected["error"]["message"]
+    assert not (candidate / "wrong.db").exists()
+
+
+@pytest.mark.parametrize(
+    "configuration,message",
+    [
+        ({"database_backend": "mysql"}, "database_backend must be"),
+        (
+            {
+                "database_backend": "postgresql",
+                "postgres_admin_dsn_env": "SANKA_MISSING_REPLAY_ADMIN",
+            },
+            "requires postgres_admin_dsn_env",
+        ),
+        (
+            {"database_backend": "sqlite", "postgres_admin_dsn_env": "SANKA_MISSING_REPLAY_ADMIN"},
+            "requires database_backend=postgresql",
+        ),
+        ({"candidate_db_env": False}, "candidate_db_env must be a non-empty string"),
+    ],
+)
+def test_verify_rejects_invalid_database_configuration(
+    tmp_path, monkeypatch, configuration, message
+):
+    project(tmp_path)
+    monkeypatch.delenv("SANKA_MISSING_REPLAY_ADMIN", raising=False)
+    (tmp_path / "scenarios.json").write_text(
+        json.dumps(
+            [{"id": "read", "method": "GET", "path": "/records/", "expected_source_status": 200}]
+        )
+    )
+    result = call(tmp_path, "verify", {"scenarios": "scenarios.json", **configuration})
+    assert result["outcome"] == "error", result
+    assert result["error"]["code"] == "SANKA_EXTENSION_REPLAY_INVALID"
+    assert message in result["error"]["message"]
+    assert not list(tmp_path.rglob("*.sqlite3"))

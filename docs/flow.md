@@ -1,5 +1,53 @@
 # Sanka Flow contracts
 
+## Native recipe families (SDK a7 candidate)
+
+The unreleased a7 source adds closed conversion, source-approval, assigned-task and
+business-process profiles for the remaining 27 catalog recipes behind
+Blueprint `sanka-flow-blueprint/v5`. V1–v4 retain their previous contracts. V5 is
+construction-only: it rejects scenarios and does not authorize shared verification
+or activation. Billing's a6 native verification cases are not valid evidence for
+record conversions, stock movement or approval decisions. Profile-specific native
+verification and the runtime/host adapters remain required follow-ups.
+
+`NativeRecordConversionWorkflow` declares one of five behaviors with exact typed
+settings. It never accepts action slugs, handlers, expressions or provider clients:
+
+| Conversion | Settings and fixed behavior |
+| --- | --- |
+| `deal_to_estimate` | No settings; created Deal produces a draft Estimate with its required customer. Amounts and lines are not copied by this recipe. |
+| `won_deal_to_order` | Exact `won_stage`; stage transition produces a draft Order with customer/lines and preserves an existing bound Order. |
+| `order_to_invoice` | Nullable `invoice_notes`; created Order produces a draft Invoice using native conversion defaults. This is distinct from HubSpot's due-days and skip-linked options. |
+| `purchase_order_to_bill` | `use_po_date`, `bill_due_days` (0–365), `bill_notes`; draft supplier bill retains supplier/lines and skips an existing linked bill. |
+| `order_to_stock_out` | `rotate_inventory`, `subtract_from_components`, `require_all_components_in_stock`; stock-out quantities come from order lines, with execution time and required source association. No universal one-record or retry guarantee is claimed. |
+
+`NativeSourceApprovalWorkflow` accepts `purchase_order`, `expense` or `absence`
+plus 1–100 ordered workspace-user IDs. The host resolves current active reviewers
+privately. Selection order is preserved in configuration and its digest. Native
+review records decisions in workflow history; it does not change source-record
+approval status. Node identities derive from the stable logical workflow ID and
+role, independently of settings or labels.
+
+`NativeAssignedTaskWorkflow` covers 14 scheduled follow-ups plus a created-project
+checklist. `NativeBusinessProcessWorkflow` covers monthly invoice consolidation,
+ticket owner assignment and the two remaining cross-department processes. Each
+discriminator has an exact settings shape and distinct required capability. See
+[the recipe migration map](native-recipe-families.md) for all 27 selections and
+the preserved scheduling, batching and side-effect boundaries.
+
+V5 generation requests contain exactly `parameters.native_workflow`, a typed
+profile document with fixed policies and logical node identities. Responses must
+preserve that complete document as well as target, template and extension identity.
+A closed decoder selects known schema versions; there is no registration hook or
+arbitrary native payload fallback. Hosts must advertise each behavior's required
+capability independently; SDK validation is not proof that a host implements it.
+
+This candidate changes only the SDK source and its workspace development lock.
+Business Flow package requirements, published manifests, CLI/API pins and existing
+workflow IDs remain unchanged. Publish approved SDK a6 first, then this reviewed
+successor before any consumer adopts it. Individual recipe generators and private
+translation parity remain separate reviewable migrations.
+
 ## Source API and execution status
 
 Use `sanka_extensions.flow` for business reconstruction. `Blueprint` may name the
@@ -375,3 +423,65 @@ The dispatch-only `publish-business-flows.yml` requires the exact reviewed
 `business-flows-v0.1.0a1` tag. Publish this package before the companion CLI 0.2.13
 release; the CLI publisher verifies its real package through public artifact URLs.
 This separate catalog does not change the default Data/Code marketplace.
+
+## Native billing verification contract (SDK a6 candidate)
+
+Blueprint `sanka-flow-blueprint/v4` adds a typed verification contract to the
+existing `NativeOrderBillingWorkflow`. V1/v2/v3 serialization and semantics remain
+unchanged. V3 still contains no scenarios and remains ineligible for shared
+verification/activation. This SDK candidate declares checks; it does not execute
+providers, prove native behavior or activate workflows.
+
+A v4 workflow requires `flow.native.order-billing-verification/v1` in addition
+to its existing native capabilities. `NativeBillingScenario` requires every case
+exactly once: complete, scoped complete, empty, partial, failed, cancelled,
+committed-invoice retry, import-handoff retry, repeated schedule, overlapping runs,
+and a complete import of at least 2,001 source records. Each fixture includes a
+billed existing Order, an unbilled existing Order, and a newly imported Order.
+The scoped-complete case leaves an existing unbilled Order outside the nonempty
+import. Incomplete cases import both new and existing unbilled Orders but must
+create no invoices. These negative controls prevent a verifier from passing
+merely because every tested Order was already billed or the import was empty.
+
+Deliveries distinguish a unique attempt ID from the durable run ID. Retries use
+the same run and pinned UTC clock; a later scheduled run uses a new run ID exactly
+one configured interval later. Overlap uses distinct runs in one concurrent group.
+The native harness must actually overlap their execution and provide admission/
+timing readback; sequential deliveries with the same label are insufficient.
+Failure injection is limited to the declared post-import and post-invoice-commit
+boundaries, without scripts or executable hooks.
+
+A scenario pins an immutable fixture manifest, the exact saved mapping artifact,
+and the executable configuration digest. The host must independently admit that
+fixture oracle before the plan is reviewed. The fixture contains synthetic source
+records and independently specified expected Order and Invoice business fields;
+expected values must not be calculated using the importer under test. A host
+without an oracle for the selected mapping must report unsupported verification.
+Mapping identity alone is not evidence that an arbitrary mapping is correct.
+
+`NativeBillingFixtureManifest` lists disjoint, complete source-key membership and
+immutable `NativeBillingFixturePageRef` artifacts. Pages contain at most 100
+`NativeBillingFixtureRecord` values and 256 KiB of canonical JSON. Every page must
+be loaded and hash-checked; every record and its seeded state must be compared.
+This keeps the complete 2,001-record oracle out of repeated Blueprint, plan and
+verification envelopes. Samples, host-reported counts and unchecked page hashes
+cannot establish a pass.
+
+Each fixture record declares a logical customer key, source data, expected Order
+and draft Invoice fields, and optional initial Order/Invoice snapshots. Expectations
+assert currency, totals, tax policy, complete line items and invoice dates. Money
+and quantities use canonical decimal strings without float tolerance. The native
+adapter binds source/customer/line keys to real isolated records, reads back actual
+fields and associations, and preserves the complete initial invoice snapshot and
+its identity across every attempt. The shared verifier must check due dates against
+the pinned clock and configured due days, exact import membership, one invoice per
+eligible Order, unchanged IDs on retry, and absence of outside billing effects.
+
+V4 generator requests include `native_configuration` and `native_verification`
+(the admitted scenario declarations and fixture references). Responses must preserve
+both exactly. Full fixture record values are passed through the host's immutable
+artifact port, not copied into definition parameters or executable action payloads.
+The shared runtime owns page comparison, durable evidence, claim renewal for long
+checks, revision-bound activation and recovery. SDK publication must precede
+consumer dependency upgrades; the Business Flow package remains pinned to SDK a5
+until its separately reviewed upgrade.

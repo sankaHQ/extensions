@@ -1,0 +1,394 @@
+{
+  "schema_version": "sanka/backend-contract-fixtures/v1",
+  "license": "Apache-2.0",
+  "profiles": {
+    "flask-retained-django": "Existing synchronous Flask behavior with Django persistence retained.",
+    "fastapi-native": "Existing generated FastAPI behavior across its qualified native engines.",
+    "shared-native-strict": "Future native targets must block uncaptured source behavior.",
+    "flask-native-sqlalchemy": "Standalone synchronous Flask/SQLAlchemy with strict captured HTTP contracts, schema ownership and source-free generated runtime."
+  },
+  "fixtures": [
+    {
+      "id": "flask-apiview-json-orm",
+      "capabilities": [
+        "routing.apiview"
+      ],
+      "profile": "flask-retained-django",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_json_orm.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_json_orm.py::test_json_orm_conversion_matches_source",
+      "source_success": {
+        "status": 201,
+        "database_effect": "one Item is created and returned by the following list request"
+      }
+    },
+    {
+      "id": "flask-apiview-form-upload",
+      "capabilities": [
+        "request.form_upload"
+      ],
+      "profile": "flask-retained-django",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_form_uploads.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_form_uploads.py::test_generated_forms_preserve_source_uploads",
+      "source_success": {
+        "status": 200,
+        "database_effect": "not applicable; response preserves repeated fields, file bytes, and filename"
+      }
+    },
+    {
+      "id": "flask-stock-viewset-nested-crud",
+      "capabilities": [
+        "routing.viewset_crud",
+        "routing.format_suffix_alias",
+        "write.nested_crud"
+      ],
+      "profile": "flask-retained-django",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_model_viewsets.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_model_viewsets.py::test_native_nested_crud",
+      "source_success": {
+        "status": 201,
+        "database_effect": "one Bundle and one nested Part are created atomically"
+      },
+      "target_difference": "Flask retains the supported .json suffix alias and rejects the unconfigured .xml alias."
+    },
+    {
+      "id": "fastapi-generic-crud",
+      "capabilities": [
+        "routing.generic_crud"
+      ],
+      "profile": "fastapi-native",
+      "fixture": "packages/sanka-extension-drf-to-fastapi/tests/fixtures/drf_crud_project",
+      "required_check": "packages/sanka-extension-drf-to-fastapi/tests/test_generic_views.py::test_generic_crud_generated_http_and_database_parity",
+      "source_success": {
+        "status": 201,
+        "database_effect": "one Gadget is created and source and target database snapshots match"
+      }
+    },
+    {
+      "id": "fastapi-uuid-boolean-crud",
+      "capabilities": [
+        "field.uuid",
+        "field.boolean"
+      ],
+      "profile": "fastapi-native",
+      "fixture": "packages/sanka-extension-drf-to-fastapi/tests/fixtures/drf_crud_project",
+      "required_check": "packages/sanka-extension-drf-to-fastapi/tests/test_uuid_boolean.py::test_uuid_boolean_generic_crud_http_and_database_parity",
+      "source_success": {
+        "status": 201,
+        "database_effect": "created UUID rows retain canonical API and database identity"
+      }
+    },
+    {
+      "id": "fastapi-large-integer-crud",
+      "capabilities": [
+        "field.large_integer"
+      ],
+      "profile": "fastapi-native",
+      "fixture": "packages/sanka-extension-drf-to-fastapi/tests/fixtures/drf_crud_project",
+      "required_check": "packages/sanka-extension-drf-to-fastapi/tests/test_big_integer.py::test_big_integer_generated_http_and_database_parity",
+      "source_success": {
+        "status": 201,
+        "database_effect": "a value above the JavaScript safe-integer range is persisted and replayed"
+      }
+    },
+    {
+      "id": "fastapi-owner-access",
+      "capabilities": [
+        "access.owner"
+      ],
+      "profile": "fastapi-native",
+      "fixture": "packages/sanka-extension-drf-to-fastapi/tests/fixtures/drf_auth_project",
+      "required_check": "packages/sanka-extension-drf-to-fastapi/tests/test_native_auth.py::test_auth_native_output_matches_drf",
+      "source_success": {
+        "status": 201,
+        "database_effect": "the authenticated owner creates a Bulletin and denied cross-owner writes do not alter it"
+      }
+    },
+    {
+      "id": "fastapi-member-access",
+      "capabilities": [
+        "access.member"
+      ],
+      "profile": "fastapi-native",
+      "fixture": "packages/sanka-extension-drf-to-fastapi/tests/fixtures/drf_membership_project",
+      "required_check": "packages/sanka-extension-drf-to-fastapi/tests/test_access_contracts.py::test_generated_membership_application_parity",
+      "source_success": {
+        "status": 200,
+        "database_effect": "member-scoped reads and writes preserve the source database state across allowed and denied requests"
+      }
+    },
+    {
+      "id": "fastapi-cursor-search-ordering",
+      "capabilities": [
+        "listing.cursor",
+        "listing.search",
+        "listing.ordering"
+      ],
+      "profile": "fastapi-native",
+      "fixture": "packages/sanka-extension-drf-to-fastapi/tests/fixtures/drf_records_project",
+      "required_check": "packages/sanka-extension-drf-to-fastapi/tests/test_native_records.py::test_native_list_semantics_match_drf",
+      "source_success": {
+        "status": 201,
+        "database_effect": "a Record is created and final source and target table snapshots match"
+      }
+    },
+    {
+      "id": "fastapi-format-suffix-disclosure",
+      "capabilities": [
+        "routing.format_suffix_alias"
+      ],
+      "profile": "fastapi-native",
+      "fixture": "packages/sanka-extension-drf-to-fastapi/tests/fixtures/drf_crud_project",
+      "required_check": "packages/sanka-extension-drf-to-fastapi/tests/test_native_fastapi.py::test_native_plan_explains_unsupported_middleware_and_separates_alias_drops",
+      "source_success": {
+        "status": 200,
+        "database_effect": "not applicable; canonical collection route remains successful"
+      },
+      "target_difference": "FastAPI reports format-suffix aliases as dropped instead of counting them as migrated routes."
+    },
+    {
+      "id": "unsupported-middleware",
+      "capabilities": [
+        "negative.middleware"
+      ],
+      "profile": "shared-native-strict",
+      "fixture": "packages/sanka-extension-drf-to-fastapi/tests/fixtures/oss_drf_middleware_stacks.json",
+      "required_check": "packages/sanka-extension-drf-to-fastapi/tests/test_native_fastapi.py::test_native_plan_continues_past_unsupported_middleware",
+      "source_success": {
+        "status": 200,
+        "database_effect": "not applicable; the source health route remains callable"
+      },
+      "variant": "inject a middleware class outside the qualified allowlist",
+      "expected_disposition": "blocking_gap"
+    },
+    {
+      "id": "unsupported-view-hook",
+      "capabilities": [
+        "negative.hook"
+      ],
+      "profile": "shared-native-strict",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_model_viewsets.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_model_viewsets.py::test_custom_behavior_stays_blocked",
+      "source_success": {
+        "status": 201,
+        "database_effect": "the unmodified stock ViewSet creates its Bundle and nested Part"
+      },
+      "variant": "add custom permission, queryset, serializer validation, or throttling behavior",
+      "expected_disposition": "blocking_gap"
+    },
+    {
+      "id": "unsupported-raw-sql",
+      "capabilities": [
+        "negative.raw_sql"
+      ],
+      "profile": "shared-native-strict",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_replay_flask.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_replay_flask.py::test_flask_replay_and_mutation_controls",
+      "source_success": {
+        "status": 200,
+        "database_effect": "the source counter increments once and replay detects a changed increment"
+      },
+      "variant": "treat direct cursor execution as a blocking gap for a source-independent native profile",
+      "expected_disposition": "blocking_gap"
+    },
+    {
+      "id": "unsupported-custom-migration-operation",
+      "capabilities": [
+        "negative.custom_migration_operation"
+      ],
+      "profile": "shared-native-strict",
+      "fixture": "packages/sanka-extension-drf-to-fastapi/tests/fixtures/order_tracker/orders/migrations/0001_initial.py",
+      "required_check": "packages/sanka-extension-drf-to-fastapi/tests/test_nested_create_contract.py::test_source_and_generated_handler_preserve_order_tracker_rules",
+      "source_success": {
+        "status": 201,
+        "database_effect": "the pinned source fixture creates the Order and nested OrderItem rows"
+      },
+      "variant": "add a RunSQL or RunPython migration operation to the pinned fixture",
+      "expected_disposition": "blocking_gap"
+    },
+    {
+      "id": "flask-native-crud",
+      "capabilities": [
+        "routing.viewset_crud",
+        "routing.generic_crud",
+        "field.uuid",
+        "field.boolean",
+        "request.strict_json"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy.py::test_standalone_sqlalchemy_crud_and_contracts",
+      "source_success": {
+        "status": 201,
+        "database_effect": "Successful create and per-request source/target row snapshots match."
+      }
+    },
+    {
+      "id": "flask-native-token-owner",
+      "capabilities": [
+        "access.owner",
+        "auth.token"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py::test_native_token_owner_contract_and_denied_writes",
+      "source_success": {
+        "status": 201,
+        "database_effect": "Owner create succeeds; denied foreign writes leave database state unchanged."
+      }
+    },
+    {
+      "id": "flask-native-nested",
+      "capabilities": [
+        "write.nested_crud",
+        "write.atomic_rollback"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_nested.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_nested.py::test_nested_source_and_standalone_target",
+      "source_success": {
+        "status": 201,
+        "database_effect": "SQLite and PostgreSQL parent/child writes, rollback and successful writes after rollback match."
+      }
+    },
+    {
+      "id": "flask-native-listing",
+      "capabilities": [
+        "listing.cursor",
+        "listing.page_number",
+        "listing.limit_offset",
+        "listing.search",
+        "listing.ordering"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py::test_generated_page_limit_search_ordering_matches_source_without_source_imports",
+      "source_success": {
+        "status": 200,
+        "database_effect": "SQLite and PostgreSQL source/target bodies, headers, row snapshots and cursor/page traversal match."
+      }
+    },
+    {
+      "id": "flask-native-middleware",
+      "capabilities": [
+        "middleware.order",
+        "middleware.security",
+        "middleware.slash_redirect"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_middleware.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_middleware.py::test_stock_middleware_matches_source_order_and_redirects",
+      "source_success": {
+        "status": 200,
+        "database_effect": "No persistence; successful response and early redirects preserve source middleware order."
+      }
+    },
+    {
+      "id": "flask-native-deletion",
+      "capabilities": [
+        "write.cascade",
+        "write.protect",
+        "write.restrict",
+        "write.set_null"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_deletion.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_deletion.py::test_collected_deletion_matches_django",
+      "source_success": {
+        "status": 204,
+        "database_effect": "Collected deletion matches source CASCADE, PROTECT, RESTRICT, SET_NULL and failed DO_NOTHING effects."
+      }
+    },
+    {
+      "id": "flask-native-membership",
+      "capabilities": [
+        "access.member",
+        "access.parent_scope",
+        "write.membership"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_access.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_access.py::test_generated_membership_matches_source_responses_and_effects",
+      "source_success": {
+        "status": 201,
+        "database_effect": "Scoped source and target responses and final rows match for create, denied writes, add/remove members and malformed requests."
+      }
+    },
+    {
+      "id": "flask-native-response-overrides",
+      "capabilities": [
+        "routing.response_overrides",
+        "write.crud"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py::test_literal_responses_match_source",
+      "source_success": {
+        "status": 202,
+        "database_effect": "one record is created; later update/PATCH and delete effects match after literal response transformations"
+      },
+      "target_difference": "Only fully recognized literal transformations after the matching stock CRUD call qualify; arbitrary Python and renderer-owned headers remain unsupported."
+    },
+    {
+      "id": "flask-native-django-filter",
+      "capabilities": [
+        "listing.django_filter",
+        "validation.filter_errors"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py::test_stock_django_filters_match_source_without_source_imports",
+      "source_success": {
+        "status": 200,
+        "database_effect": "Source and target listing/detail filtering and validation errors match without changing rows."
+      }
+    },
+    {
+      "id": "flask-native-request-size",
+      "capabilities": [
+        "request.body_limit",
+        "write.denied_no_effect"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py::test_request_body_limit_matches_source",
+      "source_success": {
+        "status": 201,
+        "database_effect": "Requests accepted by the source persist rows; source-enforced size rejection preserves its error response and performs no write."
+      }
+    },
+    {
+      "id": "flask-native-session-csrf",
+      "capabilities": [
+        "auth.session",
+        "auth.csrf",
+        "write.denied_no_effect"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py::test_database_session_auth_and_csrf_match_source",
+      "source_success": {
+        "status": 201,
+        "database_effect": "Authenticated writes with valid CSRF succeed; denied requests preserve application rows and source session lifecycle effects."
+      },
+      "target_difference": "Only the captured stock database-session and IsAuthenticated profile qualifies; signing keys must be supplied through the generated environment contract."
+    },
+    {
+      "id": "flask-composed-backend-qualification",
+      "capabilities": [
+        "replay.postgresql",
+        "replay.sequence_state",
+        "architecture.yagni",
+        "auth.session",
+        "write.atomic_rollback"
+      ],
+      "profile": "flask-native-sqlalchemy",
+      "fixture": "packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py",
+      "required_check": "packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py::test_representative_backend_protocol",
+      "source_success": {
+        "status": 201,
+        "database_effect": "Inventory CRUD, authenticated notes and nested orders preserve expected responses and database effects through the public migration lifecycle on SQLite and PostgreSQL."
+      },
+      "target_difference": "These bounded synthetic applications qualify represented contracts, not arbitrary customer code."
+    }
+  ]
+}
