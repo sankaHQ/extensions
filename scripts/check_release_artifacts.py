@@ -36,6 +36,14 @@ CATALOG: dict[str, Any] = {
     "schema_version": "sanka-marketplace/v1",
     "extensions": [
         {
+            "id": "sanka/python-to-golang",
+            "manifest": "packages/sanka-extension-python-to-golang/extension.json",
+        },
+        {
+            "id": "sanka/typescript-to-rust",
+            "manifest": "packages/sanka-extension-typescript-to-rust/extension.json",
+        },
+        {
             "id": "sanka/llm-to-jev",
             "manifest": "packages/sanka-extension-llm-to-jev/extension.json",
         },
@@ -254,6 +262,14 @@ def _catalog_errors(root: Path, release: Path) -> list[str]:
         jev_manifest(root)
     except (ValueError, OSError) as error:
         errors.append(f"Jev catalog manifest is invalid: {error}")
+    from scripts.build_api_release import PACKAGES as API_PACKAGES
+    from scripts.build_api_release import manifest as api_manifest
+
+    for package in API_PACKAGES[:2]:
+        try:
+            api_manifest(package, root)
+        except (ValueError, OSError) as error:
+            errors.append(f"API converter catalog manifest is invalid: {error}")
     for package, expected in MANIFESTS.items():
         manifest_path = root / "packages" / package / "extension.json"
         try:
