@@ -44,6 +44,10 @@ CATALOG: dict[str, Any] = {
             "manifest": "packages/sanka-extension-typescript-to-rust/extension.json",
         },
         {
+            "id": "sanka/llm-to-jev",
+            "manifest": "packages/sanka-extension-llm-to-jev/extension.json",
+        },
+        {
             "id": "sanka/drf-to-fastapi",
             "manifest": "packages/sanka-extension-drf-to-fastapi/extension.json",
         },
@@ -250,6 +254,14 @@ def _catalog_errors(root: Path, release: Path) -> list[str]:
     if catalog != CATALOG:
         return ["marketplace.json does not match the official sanka-marketplace/v1 catalog"]
     errors: list[str] = []
+    # Jev publishes its wheels under a separate immutable tag. Validate its
+    # catalog contract here; the dedicated release gate validates those bytes.
+    from scripts.build_jev_release import manifest as jev_manifest
+
+    try:
+        jev_manifest(root)
+    except (ValueError, OSError) as error:
+        errors.append(f"Jev catalog manifest is invalid: {error}")
     from scripts.build_api_release import PACKAGES as API_PACKAGES
     from scripts.build_api_release import manifest as api_manifest
 

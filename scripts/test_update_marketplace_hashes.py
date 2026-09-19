@@ -204,6 +204,10 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
     release = root / "dist"
     release.mkdir(parents=True)
     shutil.copy2(Path("marketplace.json"), root / "marketplace.json")
+    jev_path = Path("packages/sanka-extension-llm-to-jev")
+    (root / jev_path).mkdir(parents=True)
+    for name in ("extension.json", "extension.template.json"):
+        shutil.copy2(jev_path / name, root / jev_path / name)
     packages = {
         "sanka-drf-replay": ("0.1.0a4", "sanka_drf_replay-0.1.0a4-py3-none-any.whl", ""),
         "sanka-code-migration": (
