@@ -7,7 +7,11 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Sanka, Inc." }]
-dependencies = ["sanka-extension-sdk==0.1.0a4", "sanka-ts-capture==0.1.0a1"]
+dependencies = [
+  "sanka-extension-sdk==0.1.0a4",
+  "sanka-ts-capture==0.1.0a1",
+  "sanka-http-replay==0.1.0a1",
+]
 
 [project.scripts]
 sanka-extension-typescript-to-rust = "sanka_extension_typescript_to_rust.__main__:main"

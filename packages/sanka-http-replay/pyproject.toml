@@ -1,0 +1,21 @@
+[project]
+name = "sanka-http-replay"
+version = "0.1.0a1"
+description = "Versioned HTTP scenario and observation contract shared by Sanka code extensions"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Sanka, Inc." }]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/sankaHQ/extensions"
+Issues = "https://github.com/sankaHQ/extensions/issues"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sanka_http_replay"]

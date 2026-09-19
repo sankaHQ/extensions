@@ -1,0 +1,40 @@
+{
+  "recipe_id": "projects.milestone-reminders",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ],
+    "task_names": [
+      " Launch ",
+      "Launch"
+    ]
+  },
+  "expected_configuration": {
+    "task": "milestone_reminder",
+    "settings": {
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "task_names": [
+        "Launch"
+      ],
+      "open_statuses": [
+        "todo",
+        "in_progress"
+      ],
+      "days_before_due": 7
+    }
+  },
+  "expected_node_ids": [
+    "projects-milestone-reminders/schedule",
+    "projects-milestone-reminders/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "local_hour": 9,
+    "exclude_tasks": "completed_projects_and_follow_up_generated_tasks"
+  }
+}

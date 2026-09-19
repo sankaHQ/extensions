@@ -1,0 +1,36 @@
+{
+  "recipe_id": "sales.stalled-deal-follow-up",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ],
+    "open_stages": [
+      "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    ]
+  },
+  "expected_configuration": {
+    "task": "stalled_deal_follow_up",
+    "settings": {
+      "local_hour": 9,
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "open_stages": [
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+      ],
+      "stale_days": 7
+    }
+  },
+  "expected_node_ids": [
+    "sales-stalled-deal-follow-up/schedule",
+    "sales-stalled-deal-follow-up/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "selection": "active_deals_in_selected_stages_unchanged_since_cutoff"
+  }
+}

@@ -23,10 +23,12 @@ from .swift_expressions import (
     UNKNOWN,
     Env,
     Ty,
+    accepts,
     bind_names,
     collect_objects,
     describe,
     emit,
+    emit_condition,
     emit_decode,
     emit_json,
     emit_run,
@@ -34,12 +36,17 @@ from .swift_expressions import (
     identifier,
     infer,
     is_complete,
+    narrowed_state,
+    optional_of,
+    required,
     swift_number,
     swift_string,
     swift_type,
+    type_from_ir,
     unify,
 )
 from .swift_runtime import (
+    API_CLIENT_SWIFT,
     ASSET_IMAGE_SWIFT,
     HEADER,
     NAVIGATION_RUNTIME,
@@ -64,13 +71,25 @@ RUNTIME_TYPES = frozenset(
         "JSONValue",
         "Node",
         "Route",
+        "SankaAPIError",
+        "SankaFixtureMode",
+        "SankaFixtureTransport",
+        "SankaFixtures",
         "SankaKeyed",
+        "SankaMemoryStorage",
         "SankaNavigator",
+        "SankaRequest",
+        "SankaResponse",
         "SankaScreen",
+        "SankaStorage",
         "SankaStyle",
         "SankaStyleModifier",
+        "SankaTransport",
+        "URLSessionTransport",
+        "UserDefaultsStorage",
     }
 )
+GAP_EFFECT = "SANKA_RN_SWIFTUI_EFFECT"
 IOS_VERSIONS = {"16.0": ".v16", "17.0": ".v17", "18.0": ".v18"}
 STYLE_KINDS = dict(STYLE_FIELDS)
 _ASSET_SEGMENT = re.compile(r"[A-Za-z0-9_.-]+\Z")
@@ -202,6 +221,7 @@ def render_swiftui(captured: dict[str, Any]) -> Rendered:
         files[f"Sources/AppUI/Screens/{type_name}.swift"] = outputs[type_name].source
     files["Sources/AppUI/Styles.swift"] = _styles_file(outputs, project.used_assets)
     files["Sources/AppUI/Tree.swift"] = TREE_SWIFT
+    files["Sources/AppUI/APIClient.swift"] = API_CLIENT_SWIFT
     files["Sources/AppUI/Navigation.swift"] = _navigation_file(captured, project)
     if project.models:
         files["Sources/AppUI/Models.swift"] = _models_file(project.models)
@@ -300,11 +320,23 @@ def _project(captured: dict[str, Any], screens: list[dict[str, Any]]) -> Project
                     GAP_NAVIGATION,
                     f"{screen['module']}: screen parameters differ from the route declaration",
                 )
+    models: dict[str, Ty] = {}
+    for model in captured.get("models", []):
+        name = identifier(str(model["name"]), "model name")
+        if name in RUNTIME_TYPES or name in screen_types.values() or name in models:
+            raise Unsupported(GAP_IDENTIFIER, f"model {name} collides with another type")
+        fields: dict[str, Ty] = {}
+        for field_entry in model["fields"]:
+            field_name = identifier(str(field_entry["name"]), f"model {name} field", members=True)
+            scalar = PARAM_TYPES[str(field_entry["type"])]
+            fields[field_name] = optional_of(scalar) if field_entry["optional"] else scalar
+        models[name] = Ty("object", fields=tuple(sorted(fields.items())), name=name, model=True)
     return Project(
         navigation=navigation,
         routes=routes,
         screen_types=screen_types,
         params_by_module=params_by_module,
+        models=models,
         assets=dict(captured.get("assets", {})),
     )
 
@@ -366,7 +398,18 @@ class ScreenEmitter:
         self.handler_index: dict[tuple[int, str], int] = {}
         self.uses_navigation = False
         self.uses_back = False
+        self.uses_run = False
+        self.uses_store = False
         self.set_names: list[str] = []
+        self.effects: dict[str, dict[str, Any]] = {
+            str(effect["id"]): effect for effect in screen.get("effects", [])
+        }
+        self.appear: list[str] = [str(item) for item in screen.get("on_appear", [])]
+        self.submit_effects: list[str] = [
+            effect_id
+            for effect_id, effect in self.effects.items()
+            if effect["kind"] == "fetch" and effect["method"] == "POST"
+        ]
 
     # -- analysis ---------------------------------------------------------------------
 
@@ -376,28 +419,42 @@ class ScreenEmitter:
         for handler in self.handlers:
             for action in handler.actions:
                 self._analyze_action(action, handler)
+        for effect in self.effects.values():
+            self._analyze_effect(effect)
         styles = self._styles()
         body_env = Env(self.state, self.params, item_access=".element")
         tree_env = Env(self.state, self.params)
         body = self._body(self.screen["tree"], body_env, root=True)
         tree = self._tree(self.screen["tree"], tree_env, root=True)
         handlers = [self._handler_source(handler) for handler in self.handlers]
-        source = self._screen_source(body, tree, handlers)
+        effects = [
+            self._effect_source(index, effect) for index, effect in enumerate(self.effects.values())
+        ]
+        source = self._screen_source(body, tree, handlers, effects)
         return ScreenOutput(source=source, styles=styles, native=True)
 
     def _state_types(self) -> None:
         empty = Env({}, {})
+        declared: set[str] = set()
         for entry in self.screen["state"]:
             name = identifier(entry["name"], "state value", members=True)
             identifier(entry["setter"], "state setter")
-            self.state[name] = infer(entry["initial"], empty)
             self.setters[name] = entry["setter"]
             self.initial[name] = entry["initial"]
+            if "type" in entry:
+                ty = type_from_ir(entry["type"], self.project.models, f"state {name!r}")
+                accepts(ty, infer(entry["initial"], empty), f"state {name!r} initial value")
+                self.state[name] = ty
+                declared.add(name)
+            else:
+                self.state[name] = infer(entry["initial"], empty)
         assignments = list(self._assignments(self.screen["tree"], ()))
         for _ in range(8):
             changed = False
-            for name, value, items in assignments:
-                env = Env(self.state, self.params, items=items)
+            for name, value, items, data in assignments:
+                if name in declared:
+                    continue
+                env = Env(self.state, self.params, items=items, data=data)
                 try:
                     inferred = infer(value, env)
                 except Unsupported as error:
@@ -414,13 +471,15 @@ class ScreenEmitter:
             if not is_complete(ty):
                 raise Unsupported(
                     "SANKA_RN_SWIFTUI_TYPE",
-                    f"state {name!r} has no complete Swift type ({describe(ty)})",
+                    f"state {name!r} has no complete Swift type ({describe(ty)}); "
+                    "declare it with useState<T>",
                 )
-            self.state[name] = bind_names(ty, self.type + name[:1].upper() + name[1:], name)
+            if name not in declared:
+                self.state[name] = bind_names(ty, self.type + name[:1].upper() + name[1:], name)
             collect_objects(self.state[name], self.project.models)
 
     def _assignments(self, node: Any, items: tuple[Ty, ...]) -> Any:
-        """Yield ``(state name, value expression, item types)`` for every set action."""
+        """Yield ``(state, value, item types, data type)`` for every set action."""
         if not isinstance(node, dict):
             return
         if "when" in node:
@@ -439,7 +498,7 @@ class ScreenEmitter:
                         raise Unsupported(
                             GAP_TREE, f"setter targets unknown state {action['set']!r}"
                         )
-                    yield action["set"], action["value"], items
+                    yield action["set"], action["value"], items, None
         if node["kind"] == "FlatList":
             element = self._element_type(node, items)
             yield from self._assignments(node["item"]["element"], (*items, element))
@@ -500,8 +559,49 @@ class ScreenEmitter:
             self.uses_navigation = True
         elif "back" in action:
             self.uses_back = True
+        elif "run" in action:
+            if action["run"] not in self.effects:
+                raise Unsupported(GAP_EFFECT, f"handler runs unknown effect {action['run']!r}")
+            if handler.event == "onRefresh" and handler.actions != [action]:
+                raise Unsupported(GAP_EFFECT, "onRefresh must run exactly one loader")
+            self.uses_run = True
+        elif "store" in action:
+            self.uses_store = True
         else:
             raise Unsupported(GAP_TREE, f"unsupported action {sorted(action)}")
+
+    def _analyze_effect(self, effect: dict[str, Any]) -> None:
+        """Record the state names effects assign and validate their shapes."""
+        for phase in ("before", "success", "failure", "after"):
+            for action in effect.get(phase, []):
+                if "set" in action:
+                    if action["set"] not in self.state:
+                        raise Unsupported(
+                            GAP_EFFECT,
+                            f"effect {effect['id']} sets unknown state {action['set']!r}",
+                        )
+                    if action["set"] not in self.set_names:
+                        self.set_names.append(action["set"])
+                elif "navigate" in action or "push" in action:
+                    self.uses_navigation = True
+                elif "back" in action:
+                    self.uses_back = True
+                else:
+                    raise Unsupported(
+                        GAP_EFFECT,
+                        f"effect {effect['id']} has an unsupported action {sorted(action)}",
+                    )
+        if effect["kind"] == "fetch":
+            for name in effect["headers"]:
+                if not name.isascii() or not name.strip() or any(c in name for c in ":\r\n"):
+                    raise Unsupported(GAP_EFFECT, f"header name {name!r} is not qualified")
+
+    def _data_type(self, effect: dict[str, Any]) -> Ty | None:
+        if effect["kind"] == "storage-read":
+            return optional_of(STRING)
+        if effect.get("response") is None:
+            return None
+        return type_from_ir(effect["response"], self.project.models, f"effect {effect['id']}")
 
     def _styles(self) -> str:
         lines = [f"public enum {self.styles_type} {{"]
@@ -655,7 +755,7 @@ class ScreenEmitter:
     def _body(self, node: dict[str, Any], env: Env, *, root: bool = False) -> list[str]:
         if "when" in node:
             lines = [f"if {self._condition(node['when'], env)} {{"]
-            lines.extend(_indent(self._body(node["then"], env)))
+            lines.extend(_indent(self._body(node["then"], self._narrow(node["when"], env))))
             if node["else"] is not None:
                 lines.append("} else {")
                 lines.extend(_indent(self._body(node["else"], env)))
@@ -743,17 +843,24 @@ class ScreenEmitter:
             lines.append("    }")
             lines.append("}")
             lines.append("    .listStyle(.plain)")
+            refresh = (node.get("events") or {}).get("onRefresh")
+            if refresh:
+                effect = swift_string(str(refresh[0]["run"]))
+                lines.append(f"    .refreshable {{ await perform(effect: {effect}) }}")
+            if node["props"].get("refreshing") is not None:
+                infer(node["props"]["refreshing"], env)
             return lines + self._modifiers(node)
         if kind == "ActivityIndicator":
             return ["ProgressView()", *self._modifiers(node)]
         raise Unsupported(GAP_TREE, f"<{kind}> has no SwiftUI rendering")
 
     def _condition(self, expr: dict[str, Any], env: Env) -> str:
-        if infer(expr, env) != BOOLEAN:
-            raise Unsupported(
-                "SANKA_RN_SWIFTUI_TYPE", "conditions must be boolean, not JavaScript truthiness"
-            )
-        return emit(expr, env)
+        return emit_condition(expr, env)
+
+    def _narrow(self, expr: dict[str, Any], env: Env) -> Env:
+        """Inside a null check's then-branch the checked state value is non-null."""
+        name = narrowed_state(expr, env)
+        return env.with_narrowed(name) if name is not None else env
 
     def _stack(
         self,
@@ -879,7 +986,8 @@ class ScreenEmitter:
         for child in children:
             if "when" in child:
                 lines.append(f"if {self._condition(child['when'], env)} {{")
-                lines.extend(_indent(self._tree_statements([child["then"]], env)))
+                narrowed = self._narrow(child["when"], env)
+                lines.extend(_indent(self._tree_statements([child["then"]], narrowed)))
                 if child["else"] is not None:
                     lines.append("} else {")
                     lines.extend(_indent(self._tree_statements([child["else"]], env)))
@@ -935,9 +1043,19 @@ class ScreenEmitter:
             if action["value"] == {"arg": 0}:
                 return f".{setter}(value)", f".bind({swift_string(name)})"
             code = emit(action["value"], env, self.state[name])
+            accepts(self.state[name], infer(action["value"], env), f"state {name!r}")
             return f".{setter}({code})", f"{self.action_type}.{setter}({code}).intent"
         if "back" in action:
             return ".back", "Intent.back"
+        if "run" in action:
+            effect = swift_string(str(action["run"]))
+            return f".run({effect})", f"Intent.run({effect})"
+        if "store" in action:
+            key = swift_string(str(action["store"]))
+            if infer(action["value"], env) != STRING:
+                raise Unsupported("SANKA_RN_SWIFTUI_TYPE", "stored values must be strings")
+            value = emit(action["value"], env)
+            return f".store({key}, {value})", f"{self.action_type}.store({key}, {value}).intent"
         if "navigate" in action:
             route = self.project.route_for_screen(str(action["navigate"]))
             values = dict(action.get("params") or {})
@@ -962,9 +1080,86 @@ class ScreenEmitter:
         constructed = f"Route.{route.case}" + (f"({', '.join(arguments)})" if arguments else "")
         return f".navigate({constructed})", f"{self.action_type}.navigate({constructed}).intent"
 
+    def _effect_source(self, index: int, effect: dict[str, Any]) -> str:
+        """Emit one effect as a static async function over a state reader and an emitter."""
+        env = Env(self.state, self.params)
+        signature = (
+            f"    @MainActor\n"
+            f"    static func effect{index}(\n"
+            f"        _ read: () -> {self.state_type},\n"
+            f"        _ params: {self.params_type},\n"
+            f"        _ emit: ({self.action_type}) -> Void,\n"
+            "        transport: SankaTransport,\n"
+            "        storage: SankaStorage\n"
+            "    ) async {"
+        )
+        lines = [signature]
+
+        def emits(actions: list[dict[str, Any]], scope: Env, level: int) -> list[str]:
+            return [
+                "    " * level + f"emit({self._action(action, scope)[0]})" for action in actions
+            ]
+
+        data_type = self._data_type(effect)
+        if effect["kind"] == "storage-read":
+            lines.append("        do {")
+            lines.append(
+                f"            let data = try await storage.get({swift_string(effect['key'])})"
+            )
+            lines.extend(emits(effect["success"], env.with_data(data_type), 3))
+            lines.append("        } catch {")
+            lines.append("            return")
+            lines.append("        }")
+            lines.append("    }")
+            return "\n".join(lines) + "\n"
+        lines.extend(emits(effect["before"], env, 2))
+        lines.append("        do {")
+        lines.append("            var state = read()")
+        url = emit_template({"template": effect["url"]}, env)
+        headers = ", ".join(
+            f"{swift_string(name)}: {emit_template(value, env)}"
+            for name, value in sorted(effect["headers"].items())
+        )
+        if effect["body"] is None:
+            body = "nil"
+        else:
+            fields = ", ".join(
+                f"{swift_string(name)}: {emit_json(emit(value, env), infer(value, env))}"
+                for name, value in sorted(effect["body"].items())
+            )
+            body = f".object([{fields}])"
+        lines.append(
+            f"            let request = SankaRequest(effect: {swift_string(effect['id'])}, "
+            f"method: {swift_string(effect['method'])}, url: {url}, "
+            f"headers: [{headers or ':'}], body: {body})"
+        )
+        lines.append("            let response = try await transport.send(request)")
+        if effect["checks_ok"]:
+            lines.append("            guard (200..<300).contains(response.status) else {")
+            lines.append("                throw SankaAPIError.status(response.status)")
+            lines.append("            }")
+        if data_type is not None:
+            decode = emit_decode("json", data_type, optional=False)
+            lines.append(
+                f"            let data = try decodeResponse(response) {{ json in {decode} }}"
+            )
+        lines.append("            state = read()")
+        lines.append("            _ = state")
+        lines.extend(emits(effect["success"], env.with_data(data_type), 3))
+        lines.append("        } catch SankaAPIError.pending {")
+        lines.append("            return")
+        lines.append("        } catch {")
+        lines.extend(emits(effect["failure"], env, 3))
+        lines.append("        }")
+        lines.extend(emits(effect["after"], env, 2))
+        lines.append("    }")
+        return "\n".join(lines) + "\n"
+
     # -- assembly ---------------------------------------------------------------------
 
-    def _screen_source(self, body: list[str], tree: str, handlers: list[str]) -> str:
+    def _screen_source(
+        self, body: list[str], tree: str, handlers: list[str], effects: list[str]
+    ) -> str:
         state_lines = []
         empty = Env({}, {})
         for name, ty in self.state.items():
@@ -983,6 +1178,10 @@ class ScreenEmitter:
             cases.append("    case navigate(Route)")
         if self.uses_back:
             cases.append("    case back")
+        if self.uses_run:
+            cases.append("    case run(String)")
+        if self.uses_store:
+            cases.append("    case store(String, String)")
         intent_cases = []
         decode_cases = []
         reduce_cases = []
@@ -1010,9 +1209,20 @@ class ScreenEmitter:
             )
         if self.uses_back:
             intent_cases.append("        case .back:\n            return .back")
+        if self.uses_run:
+            intent_cases.append("        case .run(let effect):\n            return .run(effect)")
+        if self.uses_store:
+            intent_cases.append(
+                "        case .store(let key, let value):\n            return .store(key, value)"
+            )
         ignored = [
             case
-            for case, used in ((".navigate", self.uses_navigation), (".back", self.uses_back))
+            for case, used in (
+                (".navigate", self.uses_navigation),
+                (".back", self.uses_back),
+                (".run", self.uses_run),
+                (".store", self.uses_store),
+            )
             if used
         ]
         if ignored:
@@ -1024,6 +1234,16 @@ class ScreenEmitter:
             )
         if self.uses_back:
             dispatch_cases.append("            case .back:\n                navigator.back()")
+        if self.uses_run:
+            dispatch_cases.append(
+                "            case .run(let effect):\n"
+                "                Task { await perform(effect: effect) }"
+            )
+        if self.uses_store:
+            dispatch_cases.append(
+                "            case .store(let key, let value):\n"
+                "                Task { await storage.set(key, value) }"
+            )
         if cases:
             intent_body = "        switch self {\n" + "\n".join(intent_cases) + "\n        }"
             decode_body = (
@@ -1077,6 +1297,16 @@ class ScreenEmitter:
             )
             + "}\n"
         )
+        effect_ids = list(self.effects)
+        run_cases = "".join(
+            f"        case {swift_string(effect_id)}:\n"
+            f"            await effect{index}(read, params, emit, transport: transport, "
+            "storage: storage)\n"
+            for index, effect_id in enumerate(effect_ids)
+        )
+        appear = ", ".join(swift_string(item) for item in self.appear)
+        submits = ", ".join(swift_string(item) for item in self.submit_effects)
+        task = "" if not self.appear else "        .task { await appear() }\n"
         return (
             HEADER + f"// Screen {self.screen['name']} from {self.screen['module']}.\n"
             "import SwiftUI\n\n"
@@ -1094,6 +1324,9 @@ class ScreenEmitter:
             f"    public typealias ScreenState = {self.state_type}\n"
             f"    public typealias ScreenParams = {self.params_type}\n\n"
             f"    public static let screenName = {swift_string(self.screen['name'])}\n"
+            f"    public static let module = {swift_string(self.screen['module'])}\n"
+            f"    public static let appearEffects: [String] = [{appear}]\n"
+            f"    public static let submitEffects: [String] = [{submits}]\n"
             f"    public static var initialState: {self.state_type} {{ {self.state_type}() }}\n"
             f"    public static var sampleParams: {self.params_type} {{\n"
             f"        {self.params_type}({sample_arguments})\n    }}\n"
@@ -1101,6 +1334,8 @@ class ScreenEmitter:
             f"        .object([{sample_json or ':'}])\n    }}\n\n"
             f"    @State private var state = {self.state_type}()\n"
             "    @Environment(\\.sankaNavigator) private var navigator\n"
+            "    @Environment(\\.sankaTransport) private var transport\n"
+            "    @Environment(\\.sankaStorage) private var storage\n"
             f"    private let params: {self.params_type}\n\n"
             f"    public init(params: {self.params_type}) {{\n"
             "        self.params = params\n    }\n\n"
@@ -1111,14 +1346,67 @@ class ScreenEmitter:
             f"        guard let action = {self.action_type}(intent: intent) else {{\n"
             "            return false\n        }\n"
             "        apply(action, to: &state)\n        return true\n    }\n\n"
+            "    @MainActor\n"
+            "    static func runEffect(\n"
+            "        _ effect: String,\n"
+            f"        read: () -> {self.state_type},\n"
+            f"        params: {self.params_type},\n"
+            f"        emit: ({self.action_type}) -> Void,\n"
+            "        transport: SankaTransport,\n"
+            "        storage: SankaStorage\n"
+            "    ) async {\n"
+            "        switch effect {\n" + run_cases + "        default:\n            break\n"
+            "        }\n    }\n\n"
+            "    @MainActor\n"
+            "    public static func run(\n"
+            "        effect: String,\n"
+            f"        state: inout {self.state_type},\n"
+            f"        params: {self.params_type},\n"
+            "        transport: SankaTransport,\n"
+            "        storage: SankaStorage\n"
+            "    ) async -> [Intent] {\n"
+            "        var current = state\n"
+            "        var raised: [Intent] = []\n"
+            "        await runEffect(\n"
+            "            effect,\n"
+            "            read: { current },\n"
+            "            params: params,\n"
+            "            emit: { action in\n"
+            "                raised.append(action.intent)\n"
+            "                apply(action, to: &current)\n"
+            "            },\n"
+            "            transport: transport,\n"
+            "            storage: storage\n"
+            "        )\n"
+            "        state = current\n"
+            "        return raised\n    }\n\n"
+            "    @MainActor\n"
+            "    private func perform(effect: String) async {\n"
+            "        await Self.runEffect(\n"
+            "            effect,\n"
+            "            read: { state },\n"
+            "            params: params,\n"
+            "            emit: { action in dispatch([action]) },\n"
+            "            transport: transport,\n"
+            "            storage: storage\n"
+            "        )\n    }\n\n"
+            "    @MainActor\n"
+            "    private func appear() async {\n"
+            "        for effect in Self.appearEffects {\n"
+            "            await perform(effect: effect)\n"
+            "        }\n    }\n\n"
             f"    private func dispatch(_ actions: [{self.action_type}]) {{\n"
             + dispatch_body
             + "\n    }\n\n"
             + "\n".join(handlers)
             + ("\n" if handlers else "")
+            + "\n".join(effects)
+            + ("\n" if effects else "")
             + "    public var body: some View {\n"
             + "\n".join(_indent(body, 2))
-            + "\n    }\n\n"
+            + "\n"
+            + task
+            + "    }\n\n"
             f"    public static func tree(state: {self.state_type}, "
             f"params: {self.params_type}) -> Node {{\n"
             + "\n".join(_indent(tree.split("\n"), 2))
@@ -1191,6 +1479,7 @@ def _models_file(models: dict[str, Ty]) -> str:
     blocks = []
     for name in sorted(models):
         ty = models[name]
+        conformance = "Codable, Equatable" if ty.model else "Equatable"
         fields = [
             f"    public var {field_name}: {swift_type(item)}" for field_name, item in ty.fields
         ]
@@ -1200,25 +1489,44 @@ def _models_file(models: dict[str, Ty]) -> str:
         assigns = "".join(
             f"\n        self.{field_name} = {field_name}" for field_name, _ in ty.fields
         )
-        json_fields = ", ".join(
+        json_required = ", ".join(
             f"{swift_string(field_name)}: {emit_json(field_name, item)}"
             for field_name, item in ty.fields
+            if not item.optional
         )
-        decodes = "".join(
-            f"        guard let {field_name} = {decoded} else {{\n"
-            "            return nil\n        }\n"
-            for field_name, decoded in (
-                (field_name, emit_decode(f"fields[{swift_string(field_name)}]", item))
-                for field_name, item in ty.fields
-            )
+        json_optional = "".join(
+            f"        if let {field_name} = {field_name} {{\n"
+            f"            fields[{swift_string(field_name)}] = "
+            f"{emit_json(field_name, required(item))}\n        }}\n"
+            for field_name, item in ty.fields
+            if item.optional
         )
+        decodes = ""
+        for field_name, item in ty.fields:
+            key = swift_string(field_name)
+            if item.optional:
+                decoded = emit_decode("raw", required(item), optional=False)
+                decodes += (
+                    f"        var {field_name}: {swift_type(item)} = nil\n"
+                    f"        if let raw = fields[{key}] {{\n"
+                    f"            guard let value = {decoded} else {{ return nil }}\n"
+                    f"            {field_name} = value\n        }}\n"
+                )
+            else:
+                decoded = emit_decode(f"fields[{key}]", item)
+                decodes += (
+                    f"        guard let {field_name} = {decoded} else {{\n"
+                    "            return nil\n        }\n"
+                )
         init_call = ", ".join(f"{field_name}: {field_name}" for field_name, _ in ty.fields)
         blocks.append(
-            f"public struct {name}: Equatable {{\n"
+            f"public struct {name}: {conformance} {{\n"
             + ("\n".join(fields) + "\n\n" if fields else "")
             + f"    public init({init_params}) {{{assigns}\n    }}\n\n"
             "    public var json: JSONValue {\n"
-            f"        .object([{json_fields}])\n"
+            f"        var fields: [String: JSONValue] = [{json_required or ':'}]\n"
+            + json_optional
+            + "        return .object(fields)\n"
             "    }\n\n"
             "    public init?(json: JSONValue) {\n"
             "        guard let fields = json.objectValue else { return nil }\n"
@@ -1226,7 +1534,10 @@ def _models_file(models: dict[str, Ty]) -> str:
             + f"        self.init({init_call})\n"
             "    }\n}\n"
         )
-    return HEADER + "// Value types inferred from literal state.\n\n" + "\n".join(blocks)
+    return (
+        HEADER + "// Value types: declared response models (Codable) and shapes inferred from "
+        "literal state.\n\n" + "\n".join(blocks)
+    )
 
 
 def _navigation_file(captured: dict[str, Any], project: Project) -> str:
@@ -1340,15 +1651,30 @@ def _entry_view(
 
 
 def _dump_file(native_types: list[str]) -> str:
-    calls = "".join(f"documents.append(contentsOf: {name}.replay())\n" for name in native_types)
+    calls = "".join(
+        f"documents.append(contentsOf: await {name}.replay(fixtures: fixtures))\n"
+        for name in native_types
+    )
     return (
-        HEADER + "// Prints the normalized tree of every native screen and scenario as JSON.\n"
+        HEADER + "// Prints the normalized tree of every native screen and scenario as JSON. The\n"
+        "// optional second argument is verify-cases.json with fixture responses and storage.\n"
         "import AppUI\n"
         "import Foundation\n\n"
         "let arguments = CommandLine.arguments\n"
-        "guard arguments.count == 2 else {\n"
-        '    FileHandle.standardError.write(Data("usage: sanka-tree-dump <output.json>\\n".utf8))\n'
+        "guard arguments.count == 2 || arguments.count == 3 else {\n"
+        "    FileHandle.standardError.write(\n"
+        '        Data("usage: sanka-tree-dump <output.json> [verify-cases.json]\\n".utf8)\n'
+        "    )\n"
         "    exit(2)\n"
+        "}\n"
+        "var fixtures = SankaFixtures.empty\n"
+        "if arguments.count == 3 {\n"
+        "    do {\n"
+        "        fixtures = try SankaFixtures.load(path: arguments[2])\n"
+        "    } catch {\n"
+        '        FileHandle.standardError.write(Data("sanka-tree-dump: \\(error)\\n".utf8))\n'
+        "        exit(1)\n"
+        "    }\n"
         "}\n"
         "var documents: [JSONValue] = []\n"
         + calls
@@ -1461,7 +1787,11 @@ def _readme(
         "  SwiftUI `body` and `tree(state:params:)`, the normalized tree of any state.\n"
         "- `Sources/AppUI/Styles.swift`: `StyleSheet` entries as `SankaStyle` values applied\n"
         "  by one bounded modifier; `Sources/AppUI/Tree.swift`: tree, intent and JSON types.\n"
-        "- `Sources/AppUI/Models.swift`: value types inferred from literal state, when any.\n"
+        "- `Sources/AppUI/Models.swift`: declared response models (Codable) and value types\n"
+        "  inferred from literal state, when any.\n"
+        "- `Sources/AppUI/APIClient.swift`: `SankaTransport` (URLSession) and `SankaStorage`\n"
+        "  (UserDefaults) protocols with fixture implementations; screens run their effects\n"
+        "  through the environment values `sankaTransport` and `sankaStorage`.\n"
         "- `Sources/AppUI/Resources/`: image assets copied byte for byte.\n"
         "- `App/`: the iOS app shell as an XcodeGen spec (`project.yml`, pinned to XcodeGen\n"
         f"  {XCODEGEN_VERSION}, Xcode {MIN_XCODE} or later); run `xcodegen generate --spec\n"
@@ -1486,6 +1816,8 @@ def _readme(
         "  `resizeMode` beyond fit/fill are ignored.\n"
         "- Navigating to a screen that is already on the stack pushes it again.\n"
         "- The iOS app shell is not built by the replay; open it with Xcode after XcodeGen.\n"
+        "- Effects apply state changes as they happen; a request in flight is not cancelled\n"
+        "  when the screen disappears.\n"
         + (
             "\n## Screens needing manual adaptation\n\n" + "\n".join(pending) + "\n"
             if pending

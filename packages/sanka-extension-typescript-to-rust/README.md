@@ -135,13 +135,24 @@ spellings, bodies are read as raw bytes and validated with the same rules (a JSO
 `7.0` is the integer 7 on both sides), unique violations answer 409, and other
 database failures answer a generic 500 JSON envelope without driver details.
 
-Public `test` and `verify` refuse contracts that contain lookups or writes with
-the same message as the Go extension: write replay needs the versioned shared HTTP
-scenario adapter. Until it lands, parity is proven by the qualified PostgreSQL
-lifecycle test in `tests/test_rust_writes.py`, which drives both applications
-through the same scenario list and compares every response together with the
-table rows and identity sequence after each step, and detects a candidate whose
-responses match while its database differs.
+`test` and `verify` replay lookups and writes through the shared
+`sanka-http-replay` contract (`sanka.http-scenarios/v1` in, one
+`sanka.http-observations/v1` record per scenario out). Scenarios come from a
+`sanka-verify.json` in the project root when present (it is excluded from the source
+digest, so declaring scenarios never invalidates a reviewed plan; the hosted spelling with
+`expected_source_status` is accepted; `setup` requests are not, list them as
+earlier scenarios) and otherwise from `default_scenarios`, which derives an
+ordered sequence from the captured contract: invalid bodies, unknown keys,
+creation, duplicates, lookups, partial and full updates with null and absent
+semantics, deletes twice, creation after deletion and finally every list or
+literal route. Every observation records the status, media type, JSON body,
+the rows of every captured table and the identity sequences after the request,
+so a candidate whose responses match cannot hide a different database. Write
+contracts start from the captured baseline: the target runs `migrate down` and
+`migrate up`, the source runner drops and recreates the captured tables from
+`schema.sql`, which is why both fixture databases must be dedicated. Read-only
+contracts replay against the fixtures as they are. The Go extension can adopt
+the same documents for its probes; until then its write replay stays refused.
 
 Disclosed non-parity for writes: malformed JSON and non-object JSON documents get
 Express's HTML 400 but a JSON 400 from the crate; bodies above Express's 100 kB
@@ -191,4 +202,4 @@ Replay executes source and candidate code; the temporary directory is not a
 security sandbox. It does not start TCP listeners or alter candidate files.
 Manual edits to `src/lib.rs` are tested; changes to `Cargo.toml`, `Cargo.lock`,
 `rust-toolchain.toml`, `contract.json` or the generated migrations are rejected.
-Contracts with lookups or writes are refused by both commands (see above).
+Contracts with lookups or writes reset the captured tables (see above).

@@ -308,9 +308,18 @@ def test_source_rust_parity(tmp_path: Path, node_tools: Path) -> None:
     verified = handle(dataclasses.replace(request(tmp_path), command="verify"))
     assert verified.outcome == "success", verified.error
     assert verified.data["source"] == [
-        {"path": "/health", "status": 200, "body": PAYLOAD, "media_type": "application/json"}
+        {
+            "id": "get.health",
+            "method": "GET",
+            "path": "/health",
+            "status": 200,
+            "body": PAYLOAD,
+            "media_type": "application/json",
+        }
     ]
     assert verified.data["candidate"] == verified.data["source"]
+    assert verified.data["scenario_origin"] == "default"
+    assert verified.data["comparison"]["ok"] is True
     assert verified.data["rust_version"] == "rustc 1.93.1"
     assert verified.data["node_version"].startswith("v22.")
     assert {

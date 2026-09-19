@@ -52,12 +52,19 @@ class Scope:
     item: str | None = None
     args: tuple[str, ...] = ()
     locals: frozenset[str] = field(default_factory=frozenset)
+    effects: frozenset[str] = field(default_factory=frozenset)
+    storage: str | None = None
+    data: str | None = None
+    constants: dict[str, str] = field(default_factory=dict)
 
     def with_item(self, name: str) -> Scope:
         return replace(self, item=name)
 
     def with_args(self, names: tuple[str, ...]) -> Scope:
         return replace(self, args=names)
+
+    def with_data(self, name: str | None) -> Scope:
+        return replace(self, data=name)
 
 
 def number(text: str) -> int | float:
@@ -143,6 +150,8 @@ def lower(node: t.Node, scope: Scope) -> Expr:
         right = t.field(node, "right")
         if operator is None or left is None or right is None:
             raise Unsupported("SANKA_RN_EXPRESSION", "malformed binary expression")
+        if t.kind(operator) == "QuestionQuestionToken":
+            return {"nullish": lower(left, scope), "default": lower(right, scope)}
         symbol = BINARY.get(t.kind(operator))
         if symbol is None:
             raise Unsupported(
@@ -212,6 +221,10 @@ def _reference(chain: tuple[str, ...], scope: Scope) -> Expr:
         )
     if head in scope.state:
         return {"ref": [head, *rest]}
+    if scope.data is not None and head == scope.data:
+        return {"data": rest}
+    if head in scope.constants and not rest:
+        return {"lit": scope.constants[head]}
     if head in scope.params and not rest:
         return {"param": head}
     if scope.item is not None and head == scope.item:
@@ -220,7 +233,13 @@ def _reference(chain: tuple[str, ...], scope: Scope) -> Expr:
         return {"arg": scope.args.index(head)}
     if head in scope.locals and not rest:
         return {"local": head}
-    if head in scope.setters or head == scope.navigation or head == scope.styles:
+    if (
+        head in scope.setters
+        or head == scope.navigation
+        or head == scope.styles
+        or head in scope.effects
+        or head == scope.storage
+    ):
         raise Unsupported("SANKA_RN_EXPRESSION", f"'{'.'.join(chain)}' cannot be used as a value")
     raise Unsupported(
         "SANKA_RN_SYMBOL",
@@ -236,7 +255,11 @@ def lower_handler(node: t.Node, scope: Scope) -> list[dict[str, Any]]:
         name = t.text(node) or ""
         if name in scope.setters:
             return [{"set": scope.setters[name], "value": {"arg": 0}}]
-        raise Unsupported("SANKA_RN_EVENT", f"handler '{name}' is not a state setter")
+        if name in scope.effects:
+            return [{"run": name}]
+        raise Unsupported(
+            "SANKA_RN_EVENT", f"handler '{name}' is not a state setter or an effect function"
+        )
     if kind == "PropertyAccessExpression":
         chain = t.property_chain(node)
         if (
@@ -288,6 +311,17 @@ def _action(node: t.Node, scope: Scope) -> dict[str, Any]:
         if len(arguments) != 1:
             raise Unsupported("SANKA_RN_EVENT", "state setters take exactly one value")
         return {"set": scope.setters[chain[0]], "value": lower(arguments[0], scope)}
+    if chain is not None and len(chain) == 1 and chain[0] in scope.effects:
+        if arguments:
+            raise Unsupported("SANKA_RN_EVENT", "effect functions take no arguments")
+        return {"run": chain[0]}
+    if chain is not None and scope.storage is not None and chain == (scope.storage, "setItem"):
+        key = t.string_value(t.unparenthesize(arguments[0])) if len(arguments) == 2 else None
+        if key is None:
+            raise Unsupported(
+                "SANKA_RN_STORAGE", "AsyncStorage.setItem needs a literal key and a value"
+            )
+        return {"store": key, "value": lower(arguments[1], scope)}
     if chain is None or scope.navigation is None or chain[0] != scope.navigation or len(chain) != 2:
         raise Unsupported("SANKA_RN_EVENT", "actions must be navigation or state setter calls")
     method = chain[1]

@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Bounded replay of the qualified GET contract with cargo and the real Express source."""
+"""Bounded replay of the captured contract with cargo and the real Express source.
+
+Scenarios, observations and their comparison follow the shared
+``sanka-http-replay`` contract, so the Go extension can run the same documents
+against its own probes. Runners here are a generated ``cargo test`` probe for the
+candidate and a Node script serving the transpiled source on a Unix socket.
+"""
 
 from __future__ import annotations
 
@@ -11,35 +17,58 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from sanka_http_replay import (
+    ScenarioError,
+    cases_document,
+    compare,
+    default_scenarios,
+    load_scenarios,
+    validate_observations,
+)
 from sanka_ts_capture import node_executable, node_version, transpile_sources
 
-from .capture import canonical, capture, digest
-from .render import RUST_VERSION, render, rust_string
+from .capture import SCENARIO_FILE, canonical, capture, digest
+from .render import RUST_VERSION, read_sql, render, rust_string
 
 NODE_MAJOR = 22
 PINNED_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "contract.json")
 DATABASE_PINNED = ("migrations/0001_initial.up.sql", "migrations/0001_initial.down.sql")
 TARGET_DATABASE = "SANKA_RUST_TARGET_TEST_DATABASE_URL"
 SOURCE_DATABASE = "SANKA_RUST_SOURCE_TEST_DATABASE_URL"
-RESERVED = ("tests/sanka_contract_probe.rs", "sanka-observed.json")
+RESERVED = ("tests/sanka_contract_probe.rs", "sanka-cases.json", "sanka-observed.json")
 EXPRESS_RUNNER = Path(__file__).resolve().parent / "node" / "express-run.js"
 CARGO_TIMEOUT = 1200
+REPLAY_SCHEMA = "sanka.typescript-to-rust.replay/v2"
+FIELD_TYPES = {"i32": "integer", "i64": "bigint", "bool": "boolean", "String": "string"}
 
 PROBE = """// SPDX-License-Identifier: Apache-2.0
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
+use serde_json::{Map, Value, json};
 use tower::ServiceExt;
-
+@IMPORTS@
 #[tokio::test]
 async fn sanka_contract_replay() {
-    let paths = [@PATHS@];
+    let raw = std::fs::read_to_string("sanka-cases.json").expect("cases");
+    let document: Value = serde_json::from_str(&raw).expect("cases json");
+    let scenarios = document["scenarios"].as_array().expect("scenarios").clone();
 @SETUP@    let mut observed = Vec::new();
-    for path in paths {
-        let request = Request::builder()
-            .method("GET")
-            .uri(path)
-            .body(Body::empty())
-            .expect("request");
+    for scenario in scenarios {
+        let method = scenario["method"].as_str().expect("method").to_string();
+        let path = scenario["path"].as_str().expect("path").to_string();
+        let mut builder = Request::builder().method(method.as_str()).uri(&path);
+        if let Some(headers) = scenario["headers"].as_object() {
+            for (name, value) in headers {
+                builder = builder.header(name.as_str(), value.as_str().expect("header"));
+            }
+        }
+        let request = match scenario.get("body") {
+            Some(value) => builder
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(value).expect("encode body"))),
+            None => builder.body(Body::empty()),
+        }
+        .expect("request");
         let response = @APP@
             .oneshot(request)
             .await
@@ -54,18 +83,26 @@ async fn sanka_contract_replay() {
             .next()
             .unwrap_or("")
             .to_string();
-        let body = to_bytes(response.into_body(), 1_048_576)
-            .await
-            .expect("body");
-        let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON body");
-        observed.push(serde_json::json!({
-            "path": path,
-            "status": status,
-            "media_type": media_type,
-            "body": value,
-        }));
+        let bytes = to_bytes(response.into_body(), 1_048_576).await.expect("body");
+        let body: Value = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes).expect("JSON body")
+        };
+        let mut record = Map::new();
+        record.insert("id".into(), scenario["id"].clone());
+        record.insert("method".into(), Value::String(method));
+        record.insert("path".into(), Value::String(path));
+        record.insert("status".into(), json!(status));
+        record.insert("media_type".into(), Value::String(media_type));
+        record.insert("body".into(), body);
+@TABLES@        observed.push(Value::Object(record));
     }
-    let encoded = serde_json::to_vec(&observed).expect("encode");
+    let encoded = serde_json::to_vec(&json!({
+        "schema": "sanka.http-observations/v1",
+        "observations": observed,
+    }))
+    .expect("encode");
     std::fs::write("sanka-observed.json", encoded).expect("write");
 }
 """
@@ -76,6 +113,51 @@ PROBE_SETUP = """    let url = std::env::var("DATABASE_URL").expect("DATABASE_UR
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
+"""
+
+PROBE_TABLES_HEAD = """        let mut tables = Map::new();
+        let mut sequences = Map::new();
+"""
+
+PROBE_TABLE = """        let rows = sqlx::query_as::<_, migrated_backend::models::@MODEL@>(@SQL@)
+            .fetch_all(&pool)
+            .await
+            .ok()
+            .map(|items| serde_json::to_value(items).expect("rows json"))
+            .unwrap_or(Value::Null);
+        tables.insert(@TABLE@.into(), rows);
+"""
+
+PROBE_SEQUENCE = """        let named: Option<Option<String>> = sqlx::query_scalar(SEQUENCE_NAME)
+            .bind(@TABLE@)
+            .bind(@KEY@)
+            .fetch_one(&pool)
+            .await
+            .ok();
+        let sequence = match named.flatten() {
+            Some(name) => sqlx::query(&format!("{SEQUENCE_STATE} {name}"))
+                .fetch_one(&pool)
+                .await
+                .ok()
+                .map(|row| {
+                    let value: String = row.get("value");
+                    let called: bool = row.get("is_called");
+                    json!([value, called])
+                })
+                .unwrap_or(Value::Null),
+            None => Value::Null,
+        };
+        sequences.insert(@TABLE@.into(), sequence);
+"""
+
+PROBE_TABLES_TAIL = """        record.insert("tables".into(), Value::Object(tables));
+        record.insert("sequences".into(), Value::Object(sequences));
+"""
+
+PROBE_IMPORTS = """use sqlx::Row;
+
+const SEQUENCE_NAME: &str = "SELECT pg_get_serial_sequence($1, $2)";
+const SEQUENCE_STATE: &str = "SELECT last_value::text AS value, is_called FROM";
 """
 
 
@@ -140,7 +222,7 @@ def _node(command: list[str], cwd: Path, modules: Path, database_url: str | None
             env=environment,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -192,14 +274,88 @@ def _snapshot(output: Path) -> dict[str, bytes]:
     return snapshot
 
 
+def operations(captured: dict[str, Any]) -> list[dict[str, Any]]:
+    """The captured routes in the shared scenario generator's vocabulary."""
+    result: list[dict[str, Any]] = []
+    for route in captured["routes"]:
+        record: dict[str, Any] = {"method": route["method"], "path": route["path"]}
+        if "read" in route:
+            record.update(kind="list", model=route["read"]["model"], status=route["status"])
+        elif "lookup" in route:
+            record.update(kind="lookup", model=route["lookup"]["model"])
+        elif "write" in route:
+            write = route["write"]
+            record.update(kind=write["operation"], model=write["model"])
+            if "conflict" in write:
+                record["conflict"] = bool(write["conflict"])
+        else:
+            record.update(kind="literal", status=route["status"])
+        result.append(record)
+    return result
+
+
+def scenario_models(captured: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": model["name"],
+            "table": model["table"],
+            "fields": [
+                {
+                    "name": field["name"],
+                    "type": FIELD_TYPES[field["rust_type"]],
+                    "nullable": bool(field["nullable"]),
+                    "primary_key": bool(field["primary_key"]),
+                    "auto": bool(field["auto"]),
+                    "unique": bool(field["unique"]),
+                }
+                for field in model["fields"]
+            ],
+        }
+        for model in captured.get("models", [])
+    ]
+
+
+def scenarios_for(root: Path, captured: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+    """Declared ``sanka-verify.json`` scenarios when present, otherwise the defaults."""
+    declared = root / SCENARIO_FILE
+    if declared.exists():
+        return load_scenarios(declared), "declared"
+    return default_scenarios(operations(captured), scenario_models(captured)), "default"
+
+
+def _probe(captured: dict[str, Any], database: bool) -> str:
+    tables = ""
+    if database:
+        parts = [PROBE_TABLES_HEAD]
+        for model in captured.get("models", []):
+            parts.append(
+                PROBE_TABLE.replace("@MODEL@", model["name"])
+                .replace("@SQL@", rust_string(read_sql(model).rsplit(" LIMIT", 1)[0]))
+                .replace("@TABLE@", rust_string(model["table"]))
+            )
+            primary = next(field for field in model["fields"] if field["primary_key"])
+            if primary["auto"]:
+                parts.append(
+                    PROBE_SEQUENCE.replace("@TABLE@", rust_string(model["table"])).replace(
+                        "@KEY@", rust_string(primary["name"])
+                    )
+                )
+        parts.append(PROBE_TABLES_TAIL)
+        tables = "".join(parts)
+    return (
+        PROBE.replace("@IMPORTS@", PROBE_IMPORTS if database else "")
+        .replace("@SETUP@", PROBE_SETUP if database else "")
+        .replace(
+            "@APP@",
+            "migrated_backend::app(pool.clone())" if database else "migrated_backend::app()",
+        )
+        .replace("@TABLES@", tables)
+    )
+
+
 def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> dict[str, Any]:
     if captured["gaps"]:
         raise ValueError("cannot replay unsupported source behavior")
-    if any("write" in route or "lookup" in route for route in captured["routes"]):
-        raise ValueError(
-            "write replay requires the versioned shared HTTP scenario adapter; "
-            "use the qualified PostgreSQL lifecycle test until it is adopted"
-        )
     if not output.is_dir():
         raise ValueError("apply the reviewed plan before testing")
     snapshot = _snapshot(output)
@@ -209,6 +365,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
     )
     config = captured["configuration"]
     database = config.get("database_layer") == "sqlx"
+    writes = any("write" in route for route in captured["routes"])
     target_url = _database_url(TARGET_DATABASE) if database else None
     source_url = _database_url(SOURCE_DATABASE) if database and command == "verify" else None
     if database and command == "verify" and source_url == target_url:
@@ -218,9 +375,13 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
         if snapshot.get(name) != expected_files[name].encode():
             raise ValueError(f"candidate {name} differs from the applied plan")
     source_text = (root / config["source_file"]).read_text(encoding="utf-8")
+    schema_text = (root / config["schema_file"]).read_text(encoding="utf-8") if database else ""
+    try:
+        scenarios, origin = scenarios_for(root, captured)
+    except ScenarioError as error:
+        raise ValueError(f"scenarios: {error}") from error
     if capture(root, config) != captured:
         raise ValueError("source changed before replay")
-    paths = [str(route["path"]) for route in captured["routes"]]
     with tempfile.TemporaryDirectory(prefix="sanka-rust-replay-") as temporary:
         workspace = Path(temporary)
         candidate = workspace / "candidate"
@@ -232,44 +393,66 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
         if any((candidate / name).exists() for name in RESERVED):
             raise ValueError("candidate uses reserved replay filenames")
         (candidate / "tests").mkdir(exist_ok=True)
-        (candidate / "tests" / "sanka_contract_probe.rs").write_text(
-            PROBE.replace("@PATHS@", ", ".join(rust_string(path) for path in paths))
-            .replace("@SETUP@", PROBE_SETUP if database else "")
-            .replace(
-                "@APP@",
-                "migrated_backend::app(pool.clone())" if database else "migrated_backend::app()",
-            )
-        )
+        (candidate / "tests" / "sanka_contract_probe.rs").write_text(_probe(captured, database))
+        cases = canonical(cases_document(scenarios))
+        (candidate / "sanka-cases.json").write_text(cases)
         rust_version = _toolchain(candidate)
         offline = ["--offline"] if os.environ.get("SANKA_RUST_OFFLINE") == "1" else []
         target_dir = output.parent / "rust-target"
         target_dir.mkdir(exist_ok=True)
+        if writes:
+            # Write contracts start from the captured baseline on the target database.
+            for direction in ("down", "up"):
+                _cargo(
+                    [
+                        "cargo",
+                        "run",
+                        "--locked",
+                        "--quiet",
+                        *offline,
+                        "--bin",
+                        "migrate",
+                        "--",
+                        direction,
+                    ],
+                    candidate,
+                    target_dir.resolve(),
+                    target_url,
+                )
         _cargo(
             ["cargo", "test", "--locked", "--quiet", *offline, "--test", "sanka_contract_probe"],
             candidate,
             target_dir.resolve(),
             target_url,
         )
-        actual = json.loads((candidate / "sanka-observed.json").read_text())
+        actual = validate_observations(
+            json.loads((candidate / "sanka-observed.json").read_text()), scenarios
+        )
+        comparison = compare(scenarios, actual)
         result: dict[str, Any] = {
-            "schema": "sanka.typescript-to-rust.replay/v1",
+            "schema": REPLAY_SCHEMA,
             "command": command,
             "rust_version": rust_version,
             "source_digest": captured["source_digest"],
             "candidate_digest": candidate_hash,
+            "scenarios": scenarios,
+            "scenario_origin": origin,
             "scope": (
-                "GET status, JSON body and media type for captured routes"
+                "status, media type, JSON body, captured table rows and identity sequences "
+                "for every scenario, source against candidate"
                 if command == "verify"
-                else "axum handler execution and JSON response parsing"
+                else "axum handler execution, JSON responses and expected statuses per scenario"
             ),
             "complete_backend": False,
             "candidate": actual,
-            "ok": len(actual) == len(paths)
-            and all(
-                item["status"] == route["status"] and item["media_type"] == "application/json"
-                for item, route in zip(actual, captured["routes"], strict=True)
-            ),
+            "comparison": comparison,
+            "ok": comparison["ok"],
         }
+        if database:
+            result["database_scope"] = (
+                "captured tables reset to the baseline before write contracts; "
+                "read-only contracts replay against the supplied fixtures as they are"
+            )
         if command == "verify":
             node = node_executable()
             version = node_version(node)
@@ -283,18 +466,39 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             source_directory = workspace / "source"
             source_directory.mkdir()
             (source_directory / "app.js").write_text(transpiled[config["source_file"]])
+            (source_directory / "cases.json").write_text(cases)
             observed = source_directory / "source-observed.json"
-            _node(
-                [node, str(EXPRESS_RUNNER), "app.js", canonical(paths), str(observed)],
-                source_directory,
-                modules,
-                source_url,
-            )
-            expected = json.loads(observed.read_text())
+            arguments = [node, str(EXPRESS_RUNNER), "app.js", "cases.json", str(observed)]
+            if database:
+                spec = {
+                    "reset": writes,
+                    "schema": schema_text,
+                    "models": [
+                        {
+                            "table": model["table"],
+                            "columns": [field["name"] for field in model["fields"]],
+                            "primary_key": next(
+                                field["name"] for field in model["fields"] if field["primary_key"]
+                            ),
+                            "auto": next(
+                                bool(field["auto"])
+                                for field in model["fields"]
+                                if field["primary_key"]
+                            ),
+                        }
+                        for model in captured.get("models", [])
+                    ],
+                }
+                (source_directory / "database.json").write_text(canonical(spec))
+                arguments.append("database.json")
+            _node(arguments, source_directory, modules, source_url)
+            expected = validate_observations(json.loads(observed.read_text()), scenarios)
+            comparison = compare(scenarios, actual, expected)
             result.update(
                 source=expected,
                 node_version="v" + ".".join(str(item) for item in version),
-                ok=result["ok"] and canonical(actual) == canonical(expected),
+                comparison=comparison,
+                ok=comparison["ok"],
             )
         if capture(root, config) != captured:
             raise ValueError("source changed during replay; discard observations")

@@ -44,12 +44,24 @@ Intents (typed, values evaluated in the scenario state):
 - ``{"back": true}``
 - ``{"set": <state name>, "value": <new value>}``
 - ``{"bind": <state name>}`` for a handler that assigns the event argument directly
+- ``{"run": <effect id>}`` for a handler that starts a fetch effect
+- ``{"store": <key>, "value": <string>}`` for an ``AsyncStorage.setItem`` call
 
-Scenarios: ``initial``; ``press:<path>`` for each button whose action contains a
-``set`` intent; ``toggle:<path>`` for each switch and ``type:<path>`` for each text
-field whose action contains a ``bind`` intent (the switch receives the negated
-value, the text field receives ``PROBE_TEXT``). ``<path>`` is the child-index path
-of the node in the initial tree (``"2"``, ``"3.0.1"``; the root is ``""``).
+Scenarios: ``initial`` (mounted, appear effects started, their requests still in
+flight); ``loaded`` and ``load-failed`` when the screen runs effects on appear (every
+fetch succeeds or fails with its fixture, storage reads resolve); then, from the
+loaded state when it exists and the initial state otherwise, ``press:<path>`` for
+each button whose action contains a ``set`` intent, ``toggle:<path>`` for each switch
+and ``type:<path>`` for each text field whose action contains a ``bind`` intent (the
+switch receives the negated value, the text field receives ``PROBE_TEXT``), and
+``submit:<path>`` plus ``submit-failed:<path>`` for each button whose action runs a
+POST effect. ``<path>`` is the child-index path of the node in that base tree
+(``"2"``, ``"3.0.1"``; the root is ``""``).
+
+Every scenario document also carries ``raised``, the intents produced while the
+scenario ran (state assignments in order, navigation, storage writes), and
+``requests``, the network requests made (``effect``, ``method``, ``url``,
+``headers``, JSON ``body`` or null).
 """
 
 from __future__ import annotations
@@ -85,7 +97,9 @@ COMPONENT_ROLES: dict[str, str] = {
     "FlatList": "list",
     "ActivityIndicator": "indicator",
 }
-INTENT_KINDS = ("navigate", "push", "back", "set", "bind")
+INTENT_KINDS = ("navigate", "push", "back", "set", "bind", "run", "store")
+DOCUMENT_KEYS = ("screen", "scenario", "params", "tree", "raised", "requests")
+REQUEST_KEYS = ("effect", "method", "url", "headers", "body")
 SCENARIO_KINDS: dict[str, str] = {"button": "press", "switch": "toggle", "textfield": "type"}
 INTERACTIVE_ROLES = tuple(SCENARIO_KINDS)
 PROBE_TEXT = "Sanka"
@@ -146,6 +160,8 @@ def validate_intent(intent: Any, where: str) -> None:
         "back": {"back"},
         "set": {"set", "value"},
         "bind": {"bind"},
+        "run": {"run"},
+        "store": {"store", "value"},
     }[kind]
     if set(intent) != expected:
         raise ValueError(f"{where}: {kind} intents carry exactly {', '.join(sorted(expected))}")
@@ -156,6 +172,20 @@ def validate_intent(intent: Any, where: str) -> None:
         raise ValueError(f"{where}: {kind} target must be a string")
     if "params" in intent and not isinstance(intent["params"], dict):
         raise ValueError(f"{where}: params must be an object")
+    if kind == "store" and type(intent["value"]) is not str:
+        raise ValueError(f"{where}: stored values must be strings")
+
+
+def validate_request(request: Any, where: str) -> None:
+    if not isinstance(request, dict) or set(request) != set(REQUEST_KEYS):
+        raise ValueError(f"{where}: requests carry exactly {', '.join(REQUEST_KEYS)}")
+    for key in ("effect", "method", "url"):
+        if type(request[key]) is not str:
+            raise ValueError(f"{where}: {key} must be a string")
+    if not isinstance(request["headers"], dict) or not all(
+        type(value) is str for value in request["headers"].values()
+    ):
+        raise ValueError(f"{where}: headers must map names to strings")
 
 
 def index_documents(documents: Any, screens: list[str]) -> dict[str, dict[str, Any]]:
@@ -165,13 +195,8 @@ def index_documents(documents: Any, screens: list[str]) -> dict[str, dict[str, A
     indexed: dict[str, dict[str, Any]] = {name: {} for name in screens}
     for position, document in enumerate(documents):
         where = f"document[{position}]"
-        if not isinstance(document, dict) or set(document) != {
-            "screen",
-            "scenario",
-            "params",
-            "tree",
-        }:
-            raise ValueError(f"{where}: documents carry screen, scenario, params and tree")
+        if not isinstance(document, dict) or set(document) != set(DOCUMENT_KEYS):
+            raise ValueError(f"{where}: documents carry exactly {', '.join(DOCUMENT_KEYS)}")
         screen, scenario = document["screen"], document["scenario"]
         if screen not in indexed:
             raise ValueError(f"{where}: unexpected screen {screen!r}")
@@ -180,7 +205,15 @@ def index_documents(documents: Any, screens: list[str]) -> dict[str, dict[str, A
         if not isinstance(document["params"], dict):
             raise ValueError(f"{where}: params must be an object")
         validate_node(document["tree"], f"{where}.tree")
-        indexed[screen][scenario] = {"params": document["params"], "tree": document["tree"]}
+        if not isinstance(document["raised"], list) or not isinstance(document["requests"], list):
+            raise ValueError(f"{where}: raised and requests must be lists")
+        for index, intent in enumerate(document["raised"]):
+            validate_intent(intent, f"{where}.raised[{index}]")
+        for index, request in enumerate(document["requests"]):
+            validate_request(request, f"{where}.requests[{index}]")
+        indexed[screen][scenario] = {
+            key: document[key] for key in ("params", "tree", "raised", "requests")
+        }
     for name, scenarios in indexed.items():
         if "initial" not in scenarios:
             raise ValueError(f"screen {name} has no initial scenario")
