@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sanka.com/schemas/jev-decision-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision_id",
+    "review",
+    "source",
+    "contract",
+    "state",
+    "question",
+    "abstention",
+    "fallback",
+    "confidence",
+    "target"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "sanka-jev-decision/v1"
+    },
+    "decision_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reviewer"
+      ],
+      "properties": {
+        "status": {
+          "const": "reviewed"
+        },
+        "reviewer": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "function",
+        "call_site",
+        "sha256",
+        "adapter"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "function": {
+          "type": "string",
+          "minLength": 1
+        },
+        "call_site": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "adapter": {
+          "const": "openai-responses-enum/v1"
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "return"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "type"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "const": "str"
+            }
+          }
+        },
+        "return": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "labels"
+          ],
+          "properties": {
+            "type": {
+              "const": "str"
+            },
+            "labels": {
+              "type": "array",
+              "minItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projection",
+        "input_name"
+      ],
+      "properties": {
+        "projection": {
+          "const": "text"
+        },
+        "input_name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "text",
+        "options"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "description"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "abstention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "label"
+      ],
+      "properties": {
+        "policy": {
+          "const": "return_unknown"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "fallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "label",
+        "on"
+      ],
+      "properties": {
+        "policy": {
+          "const": "return_unknown"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "on": {
+          "const": [
+            "provider_error",
+            "timeout",
+            "malformed_output",
+            "low_confidence"
+          ]
+        }
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "threshold",
+        "status",
+        "owner"
+      ],
+      "properties": {
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "status": {
+          "const": "uncalibrated"
+        },
+        "owner": {
+          "const": "application"
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "sdk",
+        "credential_env",
+        "timeout_seconds",
+        "max_attempts"
+      ],
+      "properties": {
+        "provider": {
+          "const": "typesafe"
+        },
+        "model": {
+          "const": "jev-1.13.0"
+        },
+        "sdk": {
+          "const": "typesafe-sdk==0.7.0"
+        },
+        "credential_env": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 120
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        }
+      }
+    }
+  }
+}

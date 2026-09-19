@@ -1,0 +1,19 @@
+[project]
+name = "sanka-extension-llm-to-jev"
+version = "0.1.0a1"
+description = "Offline bounded Python enum-classifier migration to application-owned Jev"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = ["sanka-extension-sdk==0.1.0a4"]
+
+[project.scripts]
+sanka-extension-llm-to-jev = "sanka_extension_llm_to_jev.__main__:main"
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sanka_extension_llm_to_jev"]
