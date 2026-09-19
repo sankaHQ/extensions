@@ -1,0 +1,29 @@
+{
+  "recipe_id": "inventory.stock-discrepancy-review",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "task": "stock_discrepancy_review",
+    "settings": {
+      "local_hour": 9,
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "difference_tolerance": 0
+    }
+  },
+  "expected_node_ids": [
+    "inventory-stock-discrepancy-review/schedule",
+    "inventory-stock-discrepancy-review/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "selection": "active_inventory_bucket_mismatch_or_negative_over_tolerance"
+  }
+}

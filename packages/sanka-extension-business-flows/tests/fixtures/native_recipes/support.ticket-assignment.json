@@ -1,0 +1,27 @@
+{
+  "recipe_id": "support.ticket-assignment",
+  "input": {
+    "assignee_ids": [
+      " 502 ",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "process": "ticket_assignment",
+    "settings": {
+      "assignee_ids": [
+        "501",
+        "502"
+      ]
+    }
+  },
+  "expected_node_ids": [
+    "support-ticket-assignment/trigger",
+    "support-ticket-assignment/assign-owner"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "pool_order": "ascending_workspace_user_id",
+    "existing_owner": "preserve"
+  }
+}

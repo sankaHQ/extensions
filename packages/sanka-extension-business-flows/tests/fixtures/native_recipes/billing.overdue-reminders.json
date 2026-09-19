@@ -1,0 +1,29 @@
+{
+  "recipe_id": "billing.overdue-reminders",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "task": "overdue_invoice_reminder",
+    "settings": {
+      "local_hour": 9,
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "overdue_days": 1
+    }
+  },
+  "expected_node_ids": [
+    "billing-overdue-reminders/schedule",
+    "billing-overdue-reminders/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "external_delivery": "none"
+  }
+}

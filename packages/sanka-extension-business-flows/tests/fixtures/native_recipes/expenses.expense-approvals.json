@@ -1,0 +1,25 @@
+{
+  "recipe_id": "expenses.expense-approvals",
+  "input": {
+    "approver_ids": [
+      "５０２",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "subject": "expense",
+    "approver_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_node_ids": [
+    "expenses-expense-approvals/trigger",
+    "expenses-expense-approvals/review"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "approvals": "selected_sequence",
+    "source_status": "unchanged"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "recipe_id": "hr.employee-onboarding",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ],
+    "task_titles": [
+      " Welcome ",
+      "Access"
+    ]
+  },
+  "expected_configuration": {
+    "task": "employee_onboarding",
+    "settings": {
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "task_titles": [
+        "Welcome",
+        "Access"
+      ],
+      "days_before_start": 7,
+      "catch_up_days": 7
+    }
+  },
+  "expected_node_ids": [
+    "hr-employee-onboarding/schedule",
+    "hr-employee-onboarding/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "batch_unit": "employees",
+    "transaction": "complete_source_checklist_and_receipt"
+  }
+}

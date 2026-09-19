@@ -22,3 +22,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sanka_extension_business_flows"]
+# SDK a7 candidates stay source-only until the SDK is published and this package
+# receives its next reviewed version and manifest. Preserve the released a1 bytes.
+exclude = [
+    "src/sanka_extension_business_flows/native_generator.py",
+    "src/sanka_extension_business_flows/native_parameters.py",
+    "src/sanka_extension_business_flows/native_recipes.py",
+]

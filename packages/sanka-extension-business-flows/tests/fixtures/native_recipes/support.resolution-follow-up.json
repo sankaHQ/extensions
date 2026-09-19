@@ -1,0 +1,28 @@
+{
+  "recipe_id": "support.resolution-follow-up",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "task": "ticket_resolution_follow_up",
+    "settings": {
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "wait_days": 3
+    }
+  },
+  "expected_node_ids": [
+    "support-resolution-follow-up/schedule",
+    "support-resolution-follow-up/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "selection": "active_resolved_tickets_resolved_before_cutoff"
+  }
+}

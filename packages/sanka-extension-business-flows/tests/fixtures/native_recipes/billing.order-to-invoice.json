@@ -1,0 +1,18 @@
+{
+  "recipe_id": "billing.order-to-invoice",
+  "input": {},
+  "expected_configuration": {
+    "conversion": "order_to_invoice",
+    "settings": {
+      "invoice_notes": null
+    }
+  },
+  "expected_node_ids": [
+    "billing-order-to-invoice/trigger",
+    "billing-order-to-invoice/draft-invoice"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "billing_options": "native_conversion_defaults"
+  }
+}

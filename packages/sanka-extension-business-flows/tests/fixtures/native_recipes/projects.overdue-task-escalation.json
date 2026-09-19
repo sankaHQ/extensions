@@ -1,0 +1,32 @@
+{
+  "recipe_id": "projects.overdue-task-escalation",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "task": "overdue_task_escalation",
+    "settings": {
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "open_statuses": [
+        "todo",
+        "in_progress"
+      ],
+      "overdue_days": 1
+    }
+  },
+  "expected_node_ids": [
+    "projects-overdue-task-escalation/schedule",
+    "projects-overdue-task-escalation/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "external_delivery": "none"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "recipe_id": "expenses.missing-receipt-reminders",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ]
+  },
+  "expected_configuration": {
+    "task": "missing_expense_receipt",
+    "settings": {
+      "local_hour": 9,
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "wait_days": 3
+    }
+  },
+  "expected_node_ids": [
+    "expenses-missing-receipt-reminders/schedule",
+    "expenses-missing-receipt-reminders/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "selection": "submitted_or_approved_expenses_older_than_cutoff_without_files"
+  }
+}
