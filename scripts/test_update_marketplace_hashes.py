@@ -447,3 +447,15 @@ def test_dependency_cache_does_not_reuse_symlinks(
     build_release.download_locked_wheel(tmp_path, wheel)
     assert not target.is_symlink()
     assert source.read_bytes() == target.read_bytes() == content
+
+
+def test_manifest_wheel_builders_are_exactly_pinned() -> None:
+    # Both release targets compare immutable wheel hashes, including WHEEL metadata.
+    for package in (*build_release.MARKETPLACE_PACKAGES, "sanka-extension-business-flows"):
+        project = tomllib.loads(
+            (build_release.ROOT / "packages" / package / "pyproject.toml").read_text()
+        )
+        requirements = project["build-system"]["requires"]
+        assert len(requirements) == 1
+        assert requirements[0].startswith("hatchling=="), package
+        assert all(part.isdigit() for part in requirements[0].split("==")[1].split("."))

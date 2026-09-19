@@ -313,3 +313,308 @@ Final cookie review also covers empty/short incoming session cookies on early
 responses, both SESSION_SAVE_EVERY_REQUEST settings, and untouched 500 responses.
 The source/target fixture compares cookie and Vary behavior and verifies lazy SQL
 access; valid untouched cookies remain unread when save-every-request is disabled.
+
+
+## Python-to-Golang coordination: target selection
+
+Implementation rebased onto main `5842af1` after approved filter PR70 merged.
+The extension now accepts `target` as an alias for `target_framework`, rejects
+invalid/conflicting selections and normalizes both spellings before capture and
+plan hashing. Fiber remains the default only when neither key is supplied.
+Tests cover all four targets, equivalent plans, apply and changed-target rejection
+in test/verify. Native parity tests also exercise the alias during test/verify.
+The runtime forwarding change remains separately owned; this does not claim that
+current CLI versions forward `--to` or that a marketplace manifest is published.
+
+Initial Go-enabled package checks passed 118 tests with 24 PostgreSQL service skips.
+The final focused native alias suite passed 43 tests. Post-rebase repository and Go
+checks are recorded in the PR; local PostgreSQL cases require the CI service.
+
+
+## Task 11: scalar field-presence contract (2026-09-18)
+
+The shared helper now contains an opt-in `InputValue` contract. An absent field
+uses `value_json=None`; explicit JSON null uses the text `"null"`. Boolean,
+integer and string values retain canonical JSON text, so null, false, zero and
+empty string remain distinct and large integers do not pass through float64.
+Existing BackendIR, TargetProfile and EffectiveInputs serialization is unchanged.
+A native Go map/RawMessage probe compares the same representation and runs in
+the Go CI lane. Focused checks passed 21 tests with Go 1.26.5.
+
+This is the scalar representation prerequisite, not a source validation policy
+or generated write support. Decimal/time/nested input contracts, source-specific
+coercion/errors, shared profile generalization, renderer adoption and transactional
+CRUD/PATCH remain open. No helper release or extension dependency update is made
+in this slice; published adoption requires a separately versioned helper release.
+
+
+## Task 11: exact decimal representation (2026-09-18)
+
+`DecimalValue` carries a canonical signed coefficient string and integer exponent.
+It preserves trailing scale, signed zero and coefficients beyond int64 without
+float conversion or dependence on the ambient Python Decimal precision. Large
+exponents stay compact instead of expanding into enormous strings. Non-finite
+values, floats, non-ASCII digits and invalid wire types are rejected.
+
+The shared-helper suite passes 91 tests including native Go decoding/encoding of
+exact decimal components. This is a representation contract only: source coercion,
+rounding, database precision bounds, renderer adoption and write endpoints remain
+open. InputValue v1 and existing IR serialization are unchanged. Candidate helper
+hashes are refreshed and checked by a second canonical build; no publication occurs.
+
+
+## Task 11: timestamp representation (2026-09-18)
+
+`TimestampValue` preserves a canonical UTC instant with six fractional digits and
+the original integer offset in seconds. It rejects naive datetimes, fractional-
+second offsets, invalid dates and noncanonical wire timestamps. UTC/local year
+boundaries are validated without clipping. Python and native Go fixtures cover
+microseconds, unusual offsets, leap-day rollover and years 1/9999; DST fold fixtures
+keep the two instants distinct. The focused value-contract suite passes 60 tests.
+
+This freezes an instant plus fixed offset only. Named-zone identity, future DST
+arithmetic, source timezone defaults and coercion remain separate qualification
+work. Existing value schemas and generated endpoints remain unchanged. No hosted
+integration, write support or package publication is implied.
+
+
+## Task 11: nested input representation (2026-09-18)
+
+After merging Go bootstrap PR77 at `e3d1b1d`, the pending contract PR76 also
+qualifies objects and arrays in `InputValue`. Existing scalar serialization is
+unchanged. Objects use sorted keys; arrays retain order. Nested absent fields,
+explicit null, false, zero, empty strings, empty objects and empty arrays remain
+distinct. Values are immutable JSON snapshots, including integers beyond 64 bits; mutable caller objects cannot change a captured value afterward.
+
+Validation rejects floats and unsupported Python types at every depth, non-string
+object keys, duplicate/noncanonical wire keys and invalid Unicode. Paths beyond
+64 child levels and cyclic Python containers fail with a bounded validation error.
+The native Go RawMessage probe now includes nested objects/arrays and integers
+larger than 64 bits, alongside the existing decimal and timestamp checks.
+
+This contract still applies no source coercion, defaults, field merging or write
+policy. Generated PATCH/CRUD, transaction/error contracts, shared target profile
+generalization and helper publication remain unfinished. Decimal and timestamp
+values use their explicit typed contracts, not implicit conversion inside JSON.
+
+Validation of the combined contract change: `make check` passed 1,153 tests,
+89 documented skips and 24 packaging checks. All 112 shared-helper checks passed
+with native Go enabled. Both release builds passed; all 194 marketplace wheel
+hashes matched, and an isolated import from the built helper wheel passed nested,
+decimal and timestamp smoke checks. An initial broad run hit a PyPI DNS failure
+in the unrelated FastAPI dependency-install fixture; that fixture and the full
+suite passed on retry without source changes. These are local candidate checks,
+not publication or completion of arbitrary Python-to-Go migrations.
+
+
+## Task 11: transaction qualification (2026-09-18)
+
+PR76 merged at `002d6a88` after all checks and exact-head approval. This follow-up
+qualifies the already-pinned pgx transaction primitive; it adds no custom
+transaction manager or unused service/repository layer to generated read projects.
+The normative behavior and remaining boundaries are in
+`docs/python-to-golang-transactions.md`.
+
+Native fault injection exercises begin, operation, rollback and commit failure,
+panic cleanup, error preservation and no automatic retries. PostgreSQL fixtures
+compare Django atomic scopes and SQLAlchemy scopes with pgx against independently
+created source/target schemas. They cover successful writes, rollback after an
+application/constraint error, a deferred constraint failing only at commit, and
+pool reuse after failure. Go additionally exercises cancellation and an expired
+operation context. A transport-level commit failure is not proof of rollback;
+HTTP status/error mapping, idempotency and cancellation wiring remain unqualified.
+
+POST/PUT/PATCH capture is still blocked. This is the executable transaction
+prerequisite for those handlers, not completed write migration. No existing
+project output, package lock, wheel hash or published dependency changes.
+
+Local validation passed `make check`: 1,153 tests, 93 documented service/toolchain
+skips and 24 packaging checks. Native transaction fault injection passed with
+Go enabled; the three PostgreSQL cases await the dedicated CI service. Existing
+Python-to-Go, Django 6 and TypeScript-to-Rust lanes passed on merged PR76;
+PR78 then passed the full general and specialized CI matrix and merged as
+`ed43a00a` from exact approved head `61bcfc34`.
+
+
+## Task 12: first Fiber create/PATCH slice (2026-09-18)
+
+Fiber + pgx now lowers one exact flat-model create/PATCH recipe from DRF, Flask,
+or FastAPI. Static capture requires explicit source validation for unknown,
+missing, null, scalar-type and PostgreSQL integer-width cases. Any changed recipe
+fails closed. Generated JSON decoding retains missing/null/false/zero/empty-string
+distinctions, SQL is parameterized, and each write uses `pgx.BeginFunc`. PATCH
+updates only present fields and supports an empty read-back.
+
+The slice intentionally emits no service/repository layer: one model and one
+transaction do not justify either. chi, mux and Gin writes remain rejected.
+Authentication, permissions, middleware, relationships, decimal/time fields,
+PUT/delete, error parity beyond this recipe, shared HTTP replay adoption and hosted
+execution remain open. The PostgreSQL lifecycle test applies the generated Goose
+baseline, exercises Fiber HTTP requests, and reads back database effects for all
+three captured source frameworks when the explicit CI fixture is available.
+
+
+## Task 12: target process boundaries (2026-09-18)
+
+Fiber output now has a runnable `cmd/api` with validated `PORT`, conditional
+`DATABASE_URL`, bounded pgx startup, pool ownership, HTTP body/read/write/idle
+limits, and Fiber's native signal-driven graceful shutdown with a ten-second
+shutdown bound. chi, mux and Gin now use the same configuration and pgx ownership
+contract with a bounded standard `net/http` server, including body/header limits,
+timeouts and graceful shutdown. Database migrations remain an explicit `cmd/migrate`
+operation; the API never migrates on boot. Generated configuration tests and Go
+test, vet and build checks cover all four targets with and without database-backed
+handlers without starting a listener.
+
+The shared HTTP replay package is still absent from `main`, so this slice does
+not create a competing replay implementation. Health/readiness policy, deployment
+packaging, hosted recipes and write replay remain separate
+qualification work.
+
+
+## Task 12: all-target create/PATCH adapters (2026-09-18)
+
+The existing bounded flat-model create/PATCH contract now renders for Fiber,
+chi, mux and Gin. All adapters retain the same validation and field-presence
+contract, 1 MiB body limit, parameterized SQL, `pgx.BeginFunc` transaction,
+status mapping and generic database errors. Router-specific code is limited to
+path lookup, request-body access and JSON responses; no service or repository
+layer is added.
+
+Generated projects compile for every target. The PostgreSQL lifecycle matrix now
+applies migrations and exercises all three Python source recipes against all four
+Go routers when the explicit CI fixture is available. Shared public write replay,
+PUT, relationships, decimal/time writes, auth, permissions and richer
+validation remain separate qualification work.
+
+
+## Task 12: bounded DELETE adapters (2026-09-18)
+
+All three source scanners now recognize one exact flat-model DELETE recipe:
+integer primary-key lookup, captured 404, explicit delete/commit and empty 204.
+Fiber, chi, mux and Gin lower it to a parameterized PostgreSQL DELETE inside
+`pgx.BeginFunc`; zero affected rows map to the source-specific 404 key and other
+database errors remain generic.
+
+Generated projects compile for every router. The isolated PostgreSQL lifecycle
+matrix now verifies missing-row DELETE, successful deletion, repeated deletion,
+empty 204 bodies and final database state across all twelve source/target pairs.
+Cascading/on-delete relationships, authorization and shared public write replay remain open.
+
+## Task 12: bounded PUT adapters (2026-09-18)
+
+The same twelve source/target pairs now recognize one exact flat-model PUT recipe.
+The source must fully validate required fields, replace every writable field and
+return the updated row. Generated handlers decode the full body, execute a fixed
+parameterized PostgreSQL UPDATE inside `pgx.BeginFunc`, and map an absent row to
+the source-specific 404 response.
+
+The isolated lifecycle covers incomplete bodies, invalid and missing lookups,
+successful replacement and final deletion. Rich serializer coercion, relationships,
+authorization and shared public write replay remain open.
+
+## Task 12: bounded detail reads (2026-09-18)
+
+DRF, Flask and FastAPI now recognize one exact flat-model GET by integer primary
+key, including the source-specific not-found response. Fiber, chi, mux and Gin
+lower it to a parameterized pgx query and use each router's native path lookup.
+
+Generated projects compile across all twelve combinations. Public replay uses a
+deterministic concrete ID against independently seeded PostgreSQL schemas and
+detects changed target rows or missing rows. Relationships, authorization, richer
+field types and broader handler shapes remain open.
+
+## PostgreSQL existing-schema adoption (2026-09-18)
+
+The pgx profile now accepts `schema_mode: "adopt-existing"` as a validation-only
+Goose baseline. It compares captured tables, ordered columns, types, nullability,
+automatic sequence semantics, primary and unique constraints, and blocks extra
+application relations, unsupported constraints, user triggers and row security.
+Captured tables are locked for the validation transaction. Application rows and
+extra indexes are preserved; rollback only unregisters the baseline.
+
+The existing `empty` mode and its destructive rollback contract are unchanged.
+Opt-in PostgreSQL qualification creates source schemas through Django or
+SQLAlchemy, preserves seeded rows across apply/reapply/down/up, and verifies that
+a mismatched schema is rejected without marking the baseline applied. Generic
+shared write replay and broader model semantics remain separate work.
+
+
+## Consolidated project routing batch (2026-09-18)
+
+PR84 merged as `9830fa0` after the PostgreSQL and broad CI gates passed. The next
+batch combines Flask Blueprints and simple factories, FastAPI APIRouters, DRF
+nested literal URL lists, and explicit imports from flat local modules. Static
+capture retains source-specific prefix rules and rejects unsupported registration
+options, hooks, name collisions, unregistered routers and cyclic import graphs.
+Replay runs original source snapshots, including imported modules, rather than
+executing a normalized substitute. Imported-file changes invalidate reviewed plans.
+
+The acceptance matrix covers all three sources and four Go routers, plus factory
+and multi-file replay. PostgreSQL detail-read and CRUD lifecycle fixtures also
+exercise grouped paths in the service-backed CI lane. Serializers, Pydantic request
+models, auth/permissions, middleware, relationships and shared write replay remain
+open. Keep delivering coherent batches with one review checkpoint per batch;
+these routing capabilities do not close the full backend milestone.
+
+
+## Strict Pydantic validation batch (2026-09-18)
+
+PR85 merged as `d7c9126` with all required checks passing. Explicit strict Pydantic
+schemas now lower to the existing Flask/FastAPI SQLAlchemy write validator for
+Fiber, chi, mux and Gin. Capture requires flat fields matching captured database
+types, integer bounds, forbidden extras, explicit generic validation errors and
+presence-preserving dumps. Source schemas remain unchanged for execution; capture
+only inspects ASTs. Imported schema files remain included in the source hash.
+
+Native Go decoder tests compare acceptance, field values and presence with the
+original Pydantic classes. Original Flask/FastAPI clients check invalid JSON object
+responses. The existing PostgreSQL CRUD lifecycle also covers schema-based grouped
+routes in the opt-in CI lane. These checks do not claim general source/target write
+replay or native FastAPI 422 parity. DRF serializers, general Pydantic coercion and
+constraints, auth, middleware, relationships and shared replay remain unfinished;
+Task 14 remains open.
+
+
+## DRF strict serializer continuation (2026-09-18)
+
+PR86 was approved while CI was still running. Follow-on validation found that a
+schema named after a handler local could be normalized despite failing in Python.
+The PR is expanded before merge to reject those collisions for both schema paths;
+the final changed head requires renewed approval.
+
+DRF explicit strict `BaseSerializer.to_internal_value` methods now reuse the
+qualified write validator. Capture verifies the full method, imports, invocation,
+partial mode, generic error response and validated-data consumption, rejecting
+coercion and custom hooks. Native tests compare acceptance and values with Go and
+exercise original DRF POST/PUT/PATCH error responses. The PostgreSQL CI lane adds
+schema-based grouped CRUD for Fiber, chi, mux and Gin. General field-based DRF
+serializers and native field errors remain open, as do the broader Task 14 gates.
+
+
+## Routed write parity continuation (2026-09-18)
+
+PR86 merged as `f58427a` after its exact-head approval and all required CI checks.
+Real source-router coverage identified that separate DRF views registered at the
+same path cannot dispatch by HTTP method. Capture now supports explicit multi-method
+`api_view` branches and rejects overlapping URL patterns. CRUD fixtures use one
+real detail view; DRF invalid-input checks now traverse Django's URL resolver.
+
+The new opt-in PostgreSQL matrix compares original Python and generated Go writes
+for all twelve source/target pairs, with manual and strict schema validation.
+Each request compares status, body, media type, rows and sequence state in independently
+created schemas. A negative control mutates only database effects. Generated DELETE
+handlers preserve source-specific empty-body content types. Local native
+compilation and request tests are separate from the database CI acceptance result.
+
+No competing generic replay package is introduced. Shared `sanka-http-replay` is
+not present in this checkout, and public write `verify` remains blocked pending its
+versioned adapter. Standard serializers, native request errors, auth/permissions,
+middleware, relationships, richer queries and hosted/publication gates remain open.
+
+
+The CLI selected-target dependency is already implemented in `sankaHQ/sanka` PR119
+(`690d857`), with green CI but still open when checked. Its diff forwards the selected
+target into reviewed plan configuration and rejects conflicting explicit targets;
+the Go extension already normalizes that key. No duplicate runtime implementation
+was started. Cross-repository lifecycle acceptance remains open until it lands.

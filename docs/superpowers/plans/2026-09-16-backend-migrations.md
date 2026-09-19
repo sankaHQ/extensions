@@ -13,7 +13,8 @@ a shared helper package. Keep synchronous Flask and asynchronous FastAPI emitter
 independent. Generate only layers justified by the captured application.
 
 **Tech stack:** existing Python/uv/pytest tooling; Flask, synchronous SQLAlchemy and
-Alembic; later Go with selectable chi/Gin/Fiber and pgx/sqlc or GORM profiles.
+Alembic; Go with Fiber by default, selectable Fiber/chi/mux/Gin and pgx/Goose first.
+Additional database layers require separate qualification.
 
 **Spec:** [Backend migration design and current comparison](../specs/2026-09-16-backend-migration-design.md).
 
@@ -44,8 +45,8 @@ Alembic; later Go with selectable chi/Gin/Fiber and pgx/sqlc or GORM profiles.
 | A. Evidence and shared foundation | 1–3 | Baselines captured; shared extraction preserves both converters |
 | B. Complete Flask generation | 4–8 | Schema, runtime, auth, queries, validation and business behavior qualified |
 | C. Flask release gate | 9–10 | Deterministic standalone output, parity, packaging and reviewed release evidence |
-| D. First Go backend | 11–12 | DRF → chi/pgx/sqlc/Goose passes equivalent gates |
-| E. Broader source/target matrix | 13–14 | Gin/Fiber/GORM and Flask/FastAPI sources qualified independently |
+| D. First Go backend | 11–12 | Python → Fiber/pgx/Goose passes equivalent gates |
+| E. Broader source/target matrix | 13–14 | DRF/FastAPI/Flask × Fiber/chi/mux/Gin qualified per capability |
 
 Tasks are review boundaries, not a promise that a complex task fits one PR. Split
 schema, security or scanner changes further when needed, retaining the same exit gate.
@@ -338,16 +339,81 @@ FastAPI has no regressions, native generated output runs without source dependen
 schema lifecycle works on both supported dialects, determinism passes, and unresolved
 gaps are honest blockers. A lower readiness percentage is not a waiver of this gate.
 
-## 11. Add the language-neutral operation contract and first Go profile
+## Coordination update: Python to Golang (2026-09-17)
+
+This update supersedes the original chi-first, DRF-only sequence in tasks 11–14.
+The extension is `python-to-golang`, with Fiber as default and selectable Fiber,
+chi, Gorilla mux (`mux`) and Gin. Sources are DRF, FastAPI and Flask. The existing
+experimental implementation covers bounded static capture, literal GET, PostgreSQL
+schema generation and ordered reads. Request-driven string filters landed in PR70 at `5842af1`. These bounded
+capabilities do not establish complete backend qualification.
+
+The TypeScript-to-Rust team proposed the ownership below. This is the intended
+coordination plan, not evidence that cross-team agreement or shared code has landed.
+
+| Work | Proposed owner | Python-to-Golang responsibility |
+| --- | --- | --- |
+| `packages/sanka-http-replay`, stdlib orchestration and compiled-target protocol | TypeScript-to-Rust team | Review contract; supply Python/Go adapters and parity fixtures |
+| Hosted recipe table and checksum-verified toolchain layers in `sanka-api/runners/developer` | TypeScript-to-Rust team | Supply Go recipe, target selection, toolchain and vendored module requirements |
+| CLI selected-target forwarding in `sanka` | TypeScript-to-Rust team | Normalize aliases, reject conflicts and verify lifecycle persistence |
+| Shared IR and PATCH representation | Joint contract review | Preserve Flask behavior and qualify Go lowering before enabling writes |
+| Go capture, generation and backend semantics | Python-to-Golang work | Continue independently; adopt shared infrastructure after compatibility checks |
+
+Do not create a competing generic replay package or hosted recipe framework.
+Keep existing Go replay until its replacement passes the same cases. Mobile
+SwiftUI/Compose verification remains separate from HTTP replay. Helpers must not
+import extensions or the Sanka runtime; publish and pin helpers before dependent
+releases. Hosted delivery remains a separately reviewed downstream change.
+
+### Shared integration gates
+
+- [ ] CLI: forwarding is implemented in [sanka PR119](https://github.com/sankaHQ/sanka/pull/119)
+  (open, CI green when checked on 2026-09-18); adopt and verify after merge.
+  Forward `--to` into `configuration.target`; map it to `target_framework`
+  and reject conflicting explicit values. Adding `target` to the allowlist alone
+  still defaults generation to Fiber. Default to Fiber only when neither selects
+  a framework. Persist the resolved target in the hashed plan and apply/test/verify.
+  Test `--to chi`, defaults, matching aliases, conflicts and invalid values, plus
+  regression coverage for existing extensions before enabling global forwarding.
+- [ ] IR: `TargetProfile` currently accepts only Flask and `EffectiveInputs` requires
+  that exact profile type. Generalize through a shared reviewed change, preserving
+  existing Flask validation, serialization and hashes for unchanged inputs; version
+  incompatible changes. Reuse `VersionPin` without weakening pin validation.
+- [ ] PATCH: agree on absent/null/false/zero/empty-string distinctions, integer and
+  decimal precision, time values, transaction and error contracts before rendering
+  writes. Preserve source-specific validation. Task 11 is not yet a completed
+  language-neutral PATCH contract.
+- [ ] Replay: version the scenario/observation protocol, starting from hosted
+  `sanka-verify.json` compatibility and explicitly defining `sanka-observed.json`.
+  Include method/path/query/headers/body, ordered setup, source expectations,
+  status/headers/body and database effects. Preserve numeric precision, missing/null,
+  existing malformed/repeated-query behavior, hosted limits and coverage failures.
+- [ ] Database isolation: reuse PostgreSQL clone handling from `sanka-drf-replay`
+  through a shared helper boundary. Keep framework/driver dependencies in runner
+  environments. Verify independent seeding, failure cleanup and protection against
+  accidental customer-database use. Current Go public replay expects prepared
+  databases; it does not clone or seed them or establish write parity.
+- [ ] Go adapter: preserve exact toolchain/lock checks, bounded execution/output,
+  credential-safe failures, source/candidate snapshot checks and stale-report
+  invalidation. Run existing Go replay regressions before replacing its runner.
+- [ ] Hosted: distinguish extension identity, source runner and target profile in
+  the recipe table. Pin checksum-verified Go toolchain and vendored modules, with
+  no implicit build downloads. Preserve existing Flask/FastAPI behavior and keep
+  generated-project dependencies outside the SDK/runtime environment.
+
+Shared infrastructure delivery must not block independent Go capture/rendering
+work. Its acceptance gates must pass before claiming adoption or hosted readiness.
+
+## 11. Complete the language-neutral operation contract and Go profile
 
 **Create in helper:** `operations_go.py` only if Go lowering needs a separate unit;
 otherwise extend `operations.py`; add `tests/test_go_semantics.py`.
-**Create:** `packages/sanka-extension-python-to-go/` with the existing subprocess
+**Extend:** `packages/sanka-extension-python-to-golang/` with its existing subprocess
 lifecycle, target profile validation and tests. Register only qualified source/target pairs.
 
 - [ ] Extend the existing IR for concrete cross-language needs: absent/null fields,
   typed decimal/integer/time values, transaction operations, context and error contracts.
-- [ ] Select `target_framework=chi`, `database_layer=sqlc-pgx`, PostgreSQL and Goose
+- [ ] Use `target_framework=fiber` by default, `database_layer=pgx`, PostgreSQL and Goose
   explicitly. Resolve and pin current compatible Go/module/tool versions once.
 - [ ] Write source/target tests for false/zero/null PATCH, big integers, decimals,
   timezone changes, password hashes and deterministic names before rendering code.
@@ -362,23 +428,24 @@ assert lower_patch({"enabled": None}).is_null("enabled") is True
 
 **Exit:** all representation rules have fixtures; no Go framework types enter shared IR.
 
-## 12. Deliver DRF → Go/chi as one complete backend
+## 12. Deliver Python → Fiber as a complete backend and adopt shared replay
 
-**Create under Go extension:** `src/sanka_extension_python_to_go/{adapter,emit_go,
-emit_chi,emit_sqlc}.py`, versioned templates/profile, `tests/test_drf_chi.py`.
-**Extend:** shared scenario format and replay process adapter for compiled Go targets.
+**Extend:** existing `src/sanka_extension_python_to_golang/` capture, generation
+and tests; retain all three-source/four-target bounded-read regressions.
+**Adopt:** shared scenario format and compiled Go adapter under the ownership and
+compatibility gates above. Fiber is the first complete-backend qualification gate.
 
-- [ ] Generate models, request validation, handlers, parameterized SQL, sqlc config,
+- [ ] Generate models, request validation, handlers, parameterized SQL,
   pgx pooling, Goose migrations, configuration, tests and documented build/run commands.
 - [ ] Generate conditional services/repositories using the same evidence rules as Flask.
   Domain functions take `context.Context`; constructors wire concrete dependencies.
 - [ ] Port qualified access/query/middleware contracts with source-compatible errors.
 - [ ] Handle cancellation, transaction rollback, commit errors, pool closure, HTTP
   timeouts, panic recovery and shutdown. Avoid storing request context after completion.
-- [ ] Support empty-schema setup and verified adoption, never automatic migration on boot.
+- [x] Support empty-schema setup and verified adoption, never automatic migration on boot.
 - [ ] Run language-neutral requests against Python source and Go target with independently
   seeded PostgreSQL databases. Native Go must not shell out to Python at request time.
-- [ ] Compare generated files and sqlc output across independent locked runs.
+- [ ] Compare generated files across independent locked runs.
 
 Generated-project checks:
 
@@ -392,50 +459,57 @@ go build ./cmd/api
 **Exit:** the Flask production qualification categories also pass for this exact Go
 profile, including database effects and authorization, not just compiling binaries.
 
-## 13. Add Gin, Fiber and the optional Go ORM profile
+## 13. Qualify complete backends across chi, mux and Gin
 
-**Create under Go extension:** `emit_gin.py`, `emit_fiber.py`, `emit_gorm.py`, and
-profile-specific contract tests. Reuse domain/query emission rather than forking it.
+**Extend:** existing target generation and profile-specific contract tests.
+All four frameworks already have bounded support; qualify additional behavior
+per target. Reuse domain/query emission rather than forking it.
 
-- [ ] Add Gin behind the same contract corpus; verify binding, route conflicts,
+- [ ] Qualify chi, mux and Gin behind the same contract corpus; verify binding, route conflicts,
   middleware order, HEAD/OPTIONS and response differences explicitly.
-- [ ] Add Fiber with its own request-context lifetime, cancellation, body parsing and
+- [ ] Retain Fiber-specific qualification for request-context lifetime, cancellation, body parsing and
   native test adapter. Never assume net/http middleware is directly interchangeable.
-- [ ] Add GORM as an explicit alternative database layer; preserve precision,
+- [ ] Add sqlc or GORM only as separately qualified, explicit database alternatives; preserve precision,
   null/default/update semantics and transactions. Do not use AutoMigrate as migrations.
 - [ ] Keep Goose schema ownership consistent across Go persistence profiles.
 - [ ] Publish a support matrix; each offered combination needs its own CI acceptance.
 
 ```python
-assert contract_results("chi", "sqlc-pgx") == expected_contract
-assert contract_results("gin", "sqlc-pgx") == expected_contract
-assert contract_results("fiber", "sqlc-pgx") == expected_contract
+assert contract_results("chi", "pgx") == expected_contract
+assert contract_results("gin", "pgx") == expected_contract
+assert contract_results("fiber", "pgx") == expected_contract
 assert contract_results("chi", "gorm") == expected_contract
 ```
 
 **Exit:** each enabled combination passes; other frameworks and database layers are
 rejected by configuration validation until implemented, not advertised as generic support.
 
-## 14. Add Flask and FastAPI as source frameworks
+## 14. Expand DRF, Flask and FastAPI source coverage
 
-**Create in helper:** `flask/scan.py`, `fastapi/scan.py`, source fixtures and scanner tests.
-**Modify:** Go extension matching/dispatch and release capability matrix.
+**Extend:** existing source capture and fixtures; extract shared scanner code only
+when reuse requires it. Bounded support already exists for all three sources.
+**Modify:** Go capability matrix as each additional behavior is qualified.
+
+- [ ] DRF scanner: explicit strict BaseSerializer validation is bounded support;
+  expand field-based serializers, views/routers, permissions and application
+  settings without silently dropping unsupported behavior.
 
 - [ ] Flask scanner: application factories, Blueprints, installed ORM/schema libraries,
   request hooks, auth decorators, error handlers and registered routes.
-- [ ] FastAPI scanner: APIRouters, Pydantic models, dependencies/security dependencies,
+- [ ] FastAPI scanner: APIRouters and explicit flat strict Pydantic write schemas are
+  bounded implementations; general Pydantic models, dependencies/security dependencies,
   async/session lifecycle, middleware and exception handlers.
 - [ ] Preserve source framework semantics rather than normalizing everything to DRF
   defaults, especially status/error bodies and dependency execution order.
 - [ ] Capture source tests as evidence; add independent business-effect fixtures.
   Recognize third-party integrations individually and report unknown ones as gaps.
-- [ ] Require a complete vertical slice to the already-qualified chi profile before
-  expanding each scanner to Gin/Fiber. Run every advertised combination in CI.
+- [ ] Require a complete vertical slice to the Fiber profile before
+  qualifying the same additional behavior on chi/mux/Gin. Run every advertised combination in CI.
 - [ ] Repeat wheel installation, artifact determinism and exact-commit release gates.
 
 ```python
-assert replay("flask", "chi", scenario).matches_source
-assert replay("fastapi", "chi", scenario).matches_source
+assert replay("flask", "fiber", scenario).matches_source
+assert replay("fastapi", "fiber", scenario).matches_source
 assert unsupported_custom_dependency.completion_allowed is False
 ```
 

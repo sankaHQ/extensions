@@ -161,6 +161,10 @@ jobs:
           uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/python-to-golang"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}]'
           uv --no-config pip install --reinstall --no-index --find-links release/python-to-golang release/python-to-golang/sanka_extension_python_to_golang-*.whl
           uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_python_to_golang as m; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve())"
+      - name: Qualify shared input presence with native Go
+        env:
+          SANKA_GO_TESTS: "1"
+        run: uv run --no-sync python -m pytest packages/sanka-code-migration/tests/test_input_values.py -q
       - name: Compare all three Python sources with all four Go targets
         env:
           SANKA_GO_TESTS: "1"
