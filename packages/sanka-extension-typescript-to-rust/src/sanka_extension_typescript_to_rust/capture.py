@@ -20,6 +20,7 @@ from sanka_ts_capture import tree as t
 
 from .queries import capture_read
 from .schema import capture_interfaces, capture_tables, match_models
+from .writes import OPERATIONS, idiom_shapes, match_idiom
 
 SOURCES = ("express",)
 TARGETS = ("axum",)
@@ -37,6 +38,8 @@ DATABASE_OPTIONS = (
 )
 LAUNCHER_NAMES = ("server.ts", "index.ts")
 PATH = re.compile(r"/[A-Za-z0-9_./-]*\Z")
+PARAM_PATH = re.compile(r"/[A-Za-z0-9_./-]*/:([A-Za-z_][A-Za-z0-9_]*)\Z")
+BODY_OPERATIONS = frozenset({"create", "update", "replace"})
 SOURCE_SUFFIXES = frozenset({".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"})
 IGNORED = frozenset({".git", ".sanka", "node_modules", "dist"})
 MAX_SOURCE_BYTES = 10_000_000
@@ -192,14 +195,15 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             )
     if not routes:
         gaps.append("no qualified endpoints")
-    result = {
+    routes.sort(key=lambda item: (str(item["path"]), str(item["method"])))
+    result: dict[str, Any] = {
         "schema": "sanka.typescript-to-rust.capture/v1",
         "source_digest": digest(records),
         "configuration": config,
         "typescript": {"version": TYPESCRIPT_VERSION, "sha256": TYPESCRIPT_SHA256},
         "package": package,
         "launcher": launcher,
-        "routes": sorted(routes, key=lambda item: str(item["path"])),
+        "routes": routes,
         "gaps": sorted(set(gaps)),
         "scope": "literal public JSON GET endpoints",
         "complete_backend": False,
@@ -207,6 +211,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     if database:
         result["models"] = models
         result["scope"] = "literal public JSON GET endpoints and bounded flat table reads"
+        if any("write" in route or "lookup" in route for route in routes):
+            result["scope"] += " and qualified single-table lookups and writes"
     return result
 
 
@@ -257,7 +263,9 @@ def _module(
     pool_class: str | None = None
     pool_name: str | None = None
     exported = False
+    json_parser = False
     routes: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
 
     def gap(node: t.Node, message: str) -> None:
         gaps.append(f"{rel}:{t.line_of(source, node)}: {message}")
@@ -304,7 +312,16 @@ def _module(
                 gap(statement, "statements before the app declaration require additional capture")
                 continue
             route = _registration(statement, app_name, express_name, gap, models, pool_name)
-            if route is not None:
+            if route is None:
+                continue
+            if route.get("middleware") == "json":
+                json_parser = True
+            elif "handler" in route:
+                if route["operation"] in BODY_OPERATIONS and not json_parser:
+                    gap(statement, "app.use(express.json()) must precede body-reading routes")
+                    continue
+                pending.append(route)
+            else:
                 routes.append(route)
         elif kind == "ExportAssignment":
             expression = t.field(statement, "expression")
@@ -326,15 +343,49 @@ def _module(
             continue
         else:
             gap(statement, f"unsupported {kind}")
+    routes.extend(_resolve_idioms(pending, models, pool_name, gap))
     if express_name is None:
         gaps.append(f'{rel}: import express from "express" is required')
     if app_name is None:
         gaps.append(f"{rel}: const app = express() is required")
     if not exported:
         gaps.append(f"{rel}: the application must be exported (export default app)")
-    if len({route["path"] for route in routes}) != len(routes):
+    if len({(route["path"], route["method"]) for route in routes}) != len(routes):
         gaps.append(f"{rel}: duplicate routes require ordering analysis")
     return routes, gaps
+
+
+def _resolve_idioms(
+    pending: list[dict[str, Any]],
+    models: list[dict[str, Any]],
+    pool_name: str | None,
+    gap: Gap,
+) -> list[dict[str, Any]]:
+    """Compare lookup and write handlers with the canonical idioms, parsed once."""
+    if not pending:
+        return []
+    routes: list[dict[str, Any]] = []
+    if not models:
+        for item in pending:
+            gap(item["handler"], "lookups and writes require database_layer: sqlx with models")
+        return routes
+    shapes = idiom_shapes(models, {item["param"] for item in pending if item["param"]})
+    for item in pending:
+        try:
+            payload = match_idiom(
+                item["handler"],
+                item["operation"],
+                item["param"] or "id",
+                models,
+                shapes,
+                item["names"],
+                pool_name,
+            )
+        except ValueError as error:
+            gap(item["handler"], str(error))
+            continue
+        routes.append({"path": item["path"], "method": item["method"], **payload})
+    return routes
 
 
 def _express_import(statement: t.Node, gap: Gap) -> str | None:
@@ -484,23 +535,53 @@ def _registration(
     if method == "use":
         if len(arguments) != 1 or not _is_call(arguments[0], (express_name, "json"), 0):
             gap(statement, "middleware other than express.json() requires additional capture")
-        return None
-    if method != "get":
+            return None
+        return {"middleware": "json"}
+    if method.upper() not in OPERATIONS:
         gap(statement, f"{method} routes require additional capture")
         return None
     if len(arguments) != 2:
-        gap(statement, "app.get requires a literal path and one inline handler")
+        gap(statement, f"app.{method} requires a literal path and one inline handler")
         return None
     route_path = t.string_value(t.unparenthesize(arguments[0]))
-    if route_path is None or not PATH.fullmatch(route_path) or "//" in route_path:
-        gap(arguments[0], "dynamic route parameters or nonliteral paths are not qualified")
+    if route_path is None or "//" in route_path:
+        gap(arguments[0], "nonliteral paths are not qualified")
         return None
+    handler = t.unparenthesize(arguments[1])
+    param_match = PARAM_PATH.fullmatch(route_path)
+    if param_match is None:
+        if not PATH.fullmatch(route_path):
+            gap(arguments[0], "only literal paths with at most one trailing :param are qualified")
+            return None
+        if method == "get":
+            try:
+                payload = _handler(handler, models, pool_name)
+            except ValueError as error:
+                gap(arguments[1], str(error))
+                return None
+            return {"path": route_path, "method": "GET", **payload}
+        if method != "post":
+            gap(arguments[0], f"{method} routes need a trailing :param segment")
+            return None
+        operation, param = "create", ""
+    else:
+        if method == "post":
+            gap(arguments[0], "post routes with parameters require additional capture")
+            return None
+        operation, param = OPERATIONS[method.upper()], param_match.group(1)
     try:
-        payload = _handler(arguments[1], models, pool_name)
+        names = _parameters(handler)
     except ValueError as error:
         gap(arguments[1], str(error))
         return None
-    return {"path": route_path, "method": "GET", **payload}
+    return {
+        "path": route_path,
+        "method": method.upper(),
+        "operation": operation,
+        "param": param,
+        "handler": handler,
+        "names": names,
+    }
 
 
 def _exports_app(statement: t.Node, app_name: str | None) -> bool:
@@ -522,8 +603,8 @@ def _exports_app(statement: t.Node, app_name: str | None) -> bool:
     return exported == app_name and local == app_name
 
 
-def _handler(node: t.Node, models: list[dict[str, Any]], pool_name: str | None) -> dict[str, Any]:
-    node = t.unparenthesize(node)
+def _parameters(node: t.Node) -> tuple[str, str]:
+    """The (request, response) parameter names of an inline handler function."""
     if t.kind(node) not in {"ArrowFunction", "FunctionExpression"}:
         raise ValueError("only inline handler functions are qualified")
     if t.modifier_kinds(node) - {"AsyncKeyword"}:
@@ -546,7 +627,12 @@ def _handler(node: t.Node, models: list[dict[str, Any]], pool_name: str | None) 
         ):
             raise ValueError("destructured, default or rest parameters require additional capture")
         names.append(name)
-    response = names[1]
+    return names[0], names[1]
+
+
+def _handler(node: t.Node, models: list[dict[str, Any]], pool_name: str | None) -> dict[str, Any]:
+    node = t.unparenthesize(node)
+    response = _parameters(node)[1]
     body = t.field(node, "body")
     if body is None:
         raise ValueError("handler body is required")
