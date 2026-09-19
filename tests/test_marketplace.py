@@ -11,6 +11,15 @@ import yaml
 RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/"
 NEW_RELEASE_PREFIX = RELEASE_PREFIX + "extensions-v0.1.0a31/"
 EXPECTED = {
+    "sanka/llm-to-jev": {
+        "kind": "migration",
+        "protocol_version": "sanka-extension/v1",
+        "distribution": {
+            "name": "sanka-extension-llm-to-jev",
+            "version": "0.1.0a1",
+            "executable": "sanka-extension-llm-to-jev",
+        },
+    },
     "sanka/drf-to-flask": {
         "kind": "migration",
         "protocol_version": "sanka-extension/v1",
@@ -92,7 +101,8 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
         expected = EXPECTED[item["id"]]
         assert manifest["schema_version"] == "sanka-extension-manifest/v2"
         assert manifest["id"] == item["id"]
-        assert manifest["runtime"] == {"sanka_cli": ">=0.2.0,<0.3"}
+        cli = "==0.2.12" if item["id"] == "sanka/llm-to-jev" else ">=0.2.0,<0.3"
+        assert manifest["runtime"] == {"sanka_cli": cli}
         assert manifest["kind"] == expected["kind"]
         assert manifest["protocol_version"] == expected["protocol_version"]
         assert manifest["distribution"] == expected["distribution"]
@@ -100,6 +110,8 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
             assert manifest["providers"] == expected["providers"]
         assert manifest["wheels"]
         expected_prefix = NEW_RELEASE_PREFIX if expected["kind"] == "migration" else RELEASE_PREFIX
+        if item["id"] == "sanka/llm-to-jev":
+            expected_prefix = RELEASE_PREFIX + "llm-to-jev-v0.1.0a1/"
         assert all(wheel["url"].startswith(expected_prefix) for wheel in manifest["wheels"])
         assert all(len(wheel["sha256"]) == 64 for wheel in manifest["wheels"])
 
@@ -115,6 +127,7 @@ def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> No
         if line.startswith("cp packages/") and line.endswith(".json")
     ]
     assert destinations == [
+        "release-assets/sanka-extension-llm-to-jev.json",
         "release-assets/sanka-extension-drf-to-fastapi.json",
         "release-assets/sanka-extension-drf-to-flask.json",
         "release-assets/sanka-connector-markdown.json",
