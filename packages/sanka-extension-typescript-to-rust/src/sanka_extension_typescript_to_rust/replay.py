@@ -18,6 +18,9 @@ from .render import RUST_VERSION, render, rust_string
 
 NODE_MAJOR = 22
 PINNED_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "contract.json")
+DATABASE_PINNED = ("migrations/0001_initial.up.sql", "migrations/0001_initial.down.sql")
+TARGET_DATABASE = "SANKA_RUST_TARGET_TEST_DATABASE_URL"
+SOURCE_DATABASE = "SANKA_RUST_SOURCE_TEST_DATABASE_URL"
 RESERVED = ("tests/sanka_contract_probe.rs", "sanka-observed.json")
 EXPRESS_RUNNER = Path(__file__).resolve().parent / "node" / "express-run.js"
 CARGO_TIMEOUT = 1200
@@ -30,14 +33,14 @@ use tower::ServiceExt;
 #[tokio::test]
 async fn sanka_contract_replay() {
     let paths = [@PATHS@];
-    let mut observed = Vec::new();
+@SETUP@    let mut observed = Vec::new();
     for path in paths {
         let request = Request::builder()
             .method("GET")
             .uri(path)
             .body(Body::empty())
             .expect("request");
-        let response = migrated_backend::app()
+        let response = @APP@
             .oneshot(request)
             .await
             .expect("response");
@@ -67,13 +70,39 @@ async fn sanka_contract_replay() {
 }
 """
 
+PROBE_SETUP = """    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .expect("connect to DATABASE_URL");
+"""
 
-def _cargo(command: list[str], cwd: Path, target_dir: Path | None = None) -> str:
+
+def _database_url(name: str) -> str:
+    value = os.environ.get(name, "")
+    if not value.startswith(("postgres://", "postgresql://")):
+        raise ValueError(
+            f"replay with database_layer sqlx requires {name} to name a dedicated "
+            "PostgreSQL test database (postgres://...)"
+        )
+    return value
+
+
+def _cargo(
+    command: list[str],
+    cwd: Path,
+    target_dir: Path | None = None,
+    database_url: str | None = None,
+) -> str:
     environment = os.environ | {
         "CARGO_TERM_COLOR": "never",
         "CARGO_NET_RETRY": "2",
         "CARGO_INCREMENTAL": "0",
     }
+    environment.pop("DATABASE_URL", None)
+    if database_url is not None:
+        environment["DATABASE_URL"] = database_url
     if target_dir is not None:
         # The candidate is compiled from a temporary copy; keep build artifacts beside the
         # output so repeated test/verify runs do not rebuild every dependency. An explicit
@@ -96,12 +125,14 @@ def _cargo(command: list[str], cwd: Path, target_dir: Path | None = None) -> str
     return result.stdout
 
 
-def _node(command: list[str], cwd: Path, modules: Path) -> None:
+def _node(command: list[str], cwd: Path, modules: Path, database_url: str | None = None) -> None:
     environment = {
         "PATH": os.environ.get("PATH", ""),
         "NODE_PATH": str(modules),
         "NODE_OPTIONS": "",
     }
+    if database_url is not None:
+        environment["DATABASE_URL"] = database_url
     try:
         result = subprocess.run(
             command,
@@ -128,14 +159,15 @@ def _toolchain(candidate: Path) -> str:
     return " ".join(version[:2])
 
 
-def _node_modules(root: Path) -> Path:
+def _node_modules(root: Path, packages: tuple[str, ...]) -> Path:
     explicit = os.environ.get("SANKA_NODE_TOOLS")
     modules = Path(explicit) if explicit else root / "node_modules"
-    if not (modules / "express" / "package.json").is_file():
-        raise ValueError(
-            "verify requires the source project's express installation under node_modules, "
-            "or SANKA_NODE_TOOLS pointing at a directory that contains it"
-        )
+    for package in packages:
+        if not (modules / package / "package.json").is_file():
+            raise ValueError(
+                f"verify requires the source project's {package} installation under "
+                "node_modules, or SANKA_NODE_TOOLS pointing at a directory that contains it"
+            )
     return modules.resolve()
 
 
@@ -171,8 +203,13 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
         {key: hashlib.sha256(value).hexdigest() for key, value in snapshot.items()}
     )
     config = captured["configuration"]
+    database = config.get("database_layer") == "sqlx"
+    target_url = _database_url(TARGET_DATABASE) if database else None
+    source_url = _database_url(SOURCE_DATABASE) if database and command == "verify" else None
+    if database and command == "verify" and source_url == target_url:
+        raise ValueError("source and target test databases must be distinct")
     expected_files = render(captured)
-    for name in PINNED_FILES:
+    for name in PINNED_FILES + (DATABASE_PINNED if database else ()):
         if snapshot.get(name) != expected_files[name].encode():
             raise ValueError(f"candidate {name} differs from the applied plan")
     source_text = (root / config["source_file"]).read_text(encoding="utf-8")
@@ -192,6 +229,11 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
         (candidate / "tests").mkdir(exist_ok=True)
         (candidate / "tests" / "sanka_contract_probe.rs").write_text(
             PROBE.replace("@PATHS@", ", ".join(rust_string(path) for path in paths))
+            .replace("@SETUP@", PROBE_SETUP if database else "")
+            .replace(
+                "@APP@",
+                "migrated_backend::app(pool.clone())" if database else "migrated_backend::app()",
+            )
         )
         rust_version = _toolchain(candidate)
         offline = ["--offline"] if os.environ.get("SANKA_RUST_OFFLINE") == "1" else []
@@ -201,6 +243,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             ["cargo", "test", "--locked", "--quiet", *offline, "--test", "sanka_contract_probe"],
             candidate,
             target_dir.resolve(),
+            target_url,
         )
         actual = json.loads((candidate / "sanka-observed.json").read_text())
         result: dict[str, Any] = {
@@ -230,7 +273,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
                     f"verify requires Node.js {NODE_MAJOR}.x to execute the source "
                     f"(found {version[0]}); set SANKA_NODE"
                 )
-            modules = _node_modules(root)
+            modules = _node_modules(root, ("express", "pg") if database else ("express",))
             transpiled = transpile_sources({config["source_file"]: source_text}, node=node)
             source_directory = workspace / "source"
             source_directory.mkdir()
@@ -240,6 +283,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
                 [node, str(EXPRESS_RUNNER), "app.js", canonical(paths), str(observed)],
                 source_directory,
                 modules,
+                source_url,
             )
             expected = json.loads(observed.read_text())
             result.update(

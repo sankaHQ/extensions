@@ -6,7 +6,6 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +17,6 @@ from sanka_extension_typescript_to_rust.capture import capture, configuration
 from sanka_extensions.code import ExtensionRequest
 from sanka_ts_capture import MIN_NODE_MAJOR, TypeScriptDriverError, node_executable, node_version
 
-TOOLS = Path(__file__).resolve().parent / "node-tools"
 # The integer above 2^53 pins JavaScript double rounding, exactly as Express serves it.
 PAYLOAD_SOURCE = (
     "{ message: 'hello \"world\" 日本語', items: [1, true, null, 9223372036854775809], "
@@ -97,25 +95,6 @@ needs_node = pytest.mark.skipif(not _node_ready(), reason="requires Node.js 20 o
 needs_rust = pytest.mark.skipif(
     os.getenv("SANKA_RUST_TESTS") != "1", reason="set SANKA_RUST_TESTS=1 for cargo replay"
 )
-
-
-@pytest.fixture
-def node_tools(monkeypatch: pytest.MonkeyPatch) -> Path:
-    modules = TOOLS / "node_modules"
-    if not (modules / "express" / "package.json").is_file():
-        if os.getenv("SANKA_NODE_TESTS") != "1":
-            pytest.skip("set SANKA_NODE_TESTS=1 to install the pinned Express toolset")
-        npm = shutil.which("npm")
-        assert npm, "npm is required to install the pinned Express toolset"
-        subprocess.run(
-            [npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
-            cwd=TOOLS,
-            check=True,
-            capture_output=True,
-            timeout=600,
-        )
-    monkeypatch.setenv("SANKA_NODE_TOOLS", str(modules))
-    return modules
 
 
 @needs_node
