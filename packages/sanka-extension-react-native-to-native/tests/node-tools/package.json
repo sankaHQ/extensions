@@ -1,0 +1,11 @@
+{
+  "name": "sanka-react-native-to-native-node-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pinned React renderer used by the React Native to native replay tests",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "react": "19.3.0",
+    "react-test-renderer": "19.3.0"
+  }
+}

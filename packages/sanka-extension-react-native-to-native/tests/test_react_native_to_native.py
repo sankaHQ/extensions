@@ -33,7 +33,7 @@ needs_node = pytest.mark.skipif(not _node_ready(), reason="requires Node.js 20 o
 
 def fixture(tmp_path: Path, name: str) -> Path:
     root = tmp_path / name
-    shutil.copytree(FIXTURES / name, root)
+    shutil.copytree(FIXTURES / name, root, ignore=shutil.ignore_patterns(".sanka"))
     return root
 
 
@@ -347,7 +347,7 @@ def test_scan_and_plan_artifacts_and_unsupported_stages(tmp_path: Path) -> None:
     scanned = handle(request(root, "scan"))
     assert scanned.outcome == "success", scanned.error
     assert (root / ".sanka" / "native" / "scan.json").is_file()
-    planned = handle(request(root))
+    planned = handle(request(root, target_framework="compose"))
     assert planned.outcome == "success", planned.error
     assert planned.data["files"] == {}
     assert planned.data["generated"] is False
@@ -357,16 +357,16 @@ def test_scan_and_plan_artifacts_and_unsupported_stages(tmp_path: Path) -> None:
         "native-screen",
     ]
     assert planned.data["plan_hash"].startswith("sha256:")
-    assert handle(request(root)).data == planned.data
+    assert handle(request(root, target_framework="compose")).data == planned.data
     other = fixture(tmp_path / "elsewhere", "rn-todo")
-    assert handle(request(other)).data == planned.data
+    assert handle(request(other, target_framework="compose")).data == planned.data
     for command in ("apply", "test", "verify"):
         response = handle(
             dataclasses.replace(
                 request(root, command),
                 reviewed_plan_hash="runtime-review",
                 configuration={
-                    "target_framework": "swiftui",
+                    "target_framework": "compose",
                     "extension_plan_hash": planned.data["plan_hash"],
                 },
             )
