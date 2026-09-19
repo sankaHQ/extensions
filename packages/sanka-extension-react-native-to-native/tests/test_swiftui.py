@@ -25,6 +25,7 @@ COMMON_FILES = {
     "App/project.yml",
     "Package.swift",
     "README.md",
+    "Sources/AppUI/APIClient.swift",
     "Sources/AppUI/Models.swift",
     "Sources/AppUI/Navigation.swift",
     "Sources/AppUI/Styles.swift",
@@ -200,8 +201,9 @@ def test_emitter_gaps_become_dispositions(tmp_path: Path) -> None:
     assert planned.data["generated"] is True
     placeholder = planned.data["files"]["Sources/AppUI/Screens/DetailScreen.swift"]
     assert "Needs manual adaptation" in placeholder
-    assert "DetailScreen.replay()" not in planned.data["files"]["Sources/SankaTreeDump/main.swift"]
-    assert "HomeScreen.replay()" in planned.data["files"]["Sources/SankaTreeDump/main.swift"]
+    dump = planned.data["files"]["Sources/SankaTreeDump/main.swift"]
+    assert "DetailScreen.replay(" not in dump
+    assert "HomeScreen.replay(fixtures: fixtures)" in dump
 
 
 @needs_node
