@@ -25,6 +25,7 @@ members = [
     "sanka-extension-sdk",
     "sanka-extension-typescript-to-rust",
     "sanka-extensions-workspace",
+    "sanka-http-replay",
     "sanka-ts-capture",
 ]
 overrides = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
@@ -1300,12 +1301,14 @@ version = "0.1.0a1"
 source = { editable = "packages/sanka-extension-typescript-to-rust" }
 dependencies = [
     { name = "sanka-extension-sdk" },
+    { name = "sanka-http-replay" },
     { name = "sanka-ts-capture" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+    { name = "sanka-http-replay", editable = "packages/sanka-http-replay" },
     { name = "sanka-ts-capture", editable = "packages/sanka-ts-capture" },
 ]
 
@@ -1359,6 +1362,11 @@ dev = [
     { name = "types-pyyaml", specifier = ">=6" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30,<1" },
 ]
+
+[[package]]
+name = "sanka-http-replay"
+version = "0.1.0a1"
+source = { editable = "packages/sanka-http-replay" }
 
 [[package]]
 name = "sanka-ts-capture"
