@@ -171,6 +171,8 @@ public enum Intent: Equatable {
     case back
     case set(String, JSONValue)
     case bind(String)
+    case run(String)
+    case store(String, String)
 
     public var json: JSONValue {
         switch self {
@@ -184,6 +186,10 @@ public enum Intent: Equatable {
             return .object(["set": .string(name), "value": value])
         case .bind(let name):
             return .object(["bind": .string(name)])
+        case .run(let effect):
+            return .object(["run": .string(effect)])
+        case .store(let key, let value):
+            return .object(["store": .string(key), "value": .string(value)])
         }
     }
 }
@@ -267,54 +273,177 @@ public func decodeArray<Element>(
     return result
 }
 
+/// Decodes `null` to `.some(nil)`; a value that fails to decode yields `nil`.
+public func decodeOptional<Element>(
+    _ json: JSONValue?, _ decode: (JSONValue) -> Element?
+) -> Element?? {
+    guard let json = json else { return nil }
+    if json == .null { return .some(nil) }
+    guard let value = decode(json) else { return nil }
+    return .some(.some(value))
+}
+
 public let sankaProbeText = @PROBE@
 
-/// A generated screen: state, reducer and the normalized tree of any state.
+/// A generated screen: state, reducer, effects and the normalized tree of any state.
 public protocol SankaScreen {
     associatedtype ScreenState
     associatedtype ScreenParams
     static var screenName: String { get }
+    static var module: String { get }
     static var initialState: ScreenState { get }
     static var sampleParams: ScreenParams { get }
     static var sampleParamsJSON: JSONValue { get }
+    /// Effect ids run when the screen appears, in declaration order.
+    static var appearEffects: [String] { get }
+    /// Effect ids that submit a form (POST requests).
+    static var submitEffects: [String] { get }
     static func tree(state: ScreenState, params: ScreenParams) -> Node
     static func apply(intent: Intent, to state: inout ScreenState) -> Bool
+    /// Runs one effect against the state and returns every intent it raised, in order.
+    @MainActor
+    static func run(
+        effect: String,
+        state: inout ScreenState,
+        params: ScreenParams,
+        transport: SankaTransport,
+        storage: SankaStorage
+    ) async -> [Intent]
 }
 
 extension SankaScreen {
-    /// The replay scenarios: the initial tree, then the tree after activating each
-    /// state-changing button, switch and text field of the initial tree.
-    public static func replay() -> [JSONValue] {
-        let initial = tree(state: initialState, params: sampleParams)
-        var documents = [document("initial", initial)]
-        for (path, node) in initial.interactive() {
+    /// The replay scenarios: the initial tree with requests in flight, the trees after the
+    /// appear effects succeed and fail, and the tree after activating each state-changing
+    /// button, switch and text field and each submitting button (success and failure).
+    @MainActor
+    public static func replay(fixtures: SankaFixtures) async -> [JSONValue] {
+        let entries = fixtures.effects[module] ?? [:]
+        var documents: [JSONValue] = []
+        var initial = initialState
+        let pendingTransport = SankaFixtureTransport(fixtures: entries, defaultMode: .pending)
+        let pendingStorage = SankaMemoryStorage(values: fixtures.storage, pending: true)
+        let initialRaised = await appear(
+            &initial, transport: pendingTransport, storage: pendingStorage
+        )
+        documents.append(
+            document("initial", initial, raised: initialRaised, requests: pendingTransport.requests)
+        )
+        var base = initial
+        if !appearEffects.isEmpty {
+            var loaded = initialState
+            let okTransport = SankaFixtureTransport(fixtures: entries, defaultMode: .success)
+            let okStorage = SankaMemoryStorage(values: fixtures.storage, pending: false)
+            let loadedRaised = await appear(&loaded, transport: okTransport, storage: okStorage)
+            documents.append(
+                document("loaded", loaded, raised: loadedRaised, requests: okTransport.requests)
+            )
+            var failed = initialState
+            let failTransport = SankaFixtureTransport(fixtures: entries, defaultMode: .failure)
+            let failStorage = SankaMemoryStorage(values: fixtures.storage, pending: false)
+            let failedRaised = await appear(&failed, transport: failTransport, storage: failStorage)
+            let failedDocument = document(
+                "load-failed", failed, raised: failedRaised, requests: failTransport.requests
+            )
+            documents.append(failedDocument)
+            base = loaded
+        }
+        for (path, node) in tree(state: base, params: sampleParams).interactive() {
             guard let intents = node.action else { continue }
-            var state = initialState
-            var applied = false
-            for intent in intents {
-                switch intent {
-                case .bind(let name):
-                    let value: JSONValue
-                    if node.role == "switch" {
-                        value = .bool(!(node.checked ?? false))
-                    } else if node.role == "textfield" {
-                        value = .string(sankaProbeText)
-                    } else {
-                        continue
-                    }
-                    applied = apply(intent: .set(name, value), to: &state) || applied
-                case .set:
-                    applied = apply(intent: intent, to: &state) || applied
-                default:
-                    continue
-                }
+            let submits = intents.compactMap { intent -> String? in
+                if case .run(let effect) = intent, submitEffects.contains(effect) { return effect }
+                return nil
             }
-            guard applied else { continue }
-            let kind = scenarioKind(node.role)
-            let after = tree(state: state, params: sampleParams)
-            documents.append(document(kind + ":" + path, after))
+            if !submits.isEmpty {
+                for mode in [SankaFixtureMode.success, .failure] {
+                    var state = base
+                    let transport = SankaFixtureTransport(fixtures: entries, defaultMode: .success)
+                    for effect in submits { transport.modes[effect] = mode }
+                    let storage = SankaMemoryStorage(values: fixtures.storage, pending: false)
+                    let outcome = await activate(
+                        node, intents, &state, transport: transport, storage: storage
+                    )
+                    let name = (mode == .success ? "submit:" : "submit-failed:") + path
+                    documents.append(
+                        document(name, state, raised: outcome.raised, requests: transport.requests)
+                    )
+                }
+                continue
+            }
+            var state = base
+            let transport = SankaFixtureTransport(fixtures: entries, defaultMode: .success)
+            let storage = SankaMemoryStorage(values: fixtures.storage, pending: false)
+            let outcome = await activate(
+                node, intents, &state, transport: transport, storage: storage
+            )
+            guard outcome.applied else { continue }
+            let name = scenarioKind(node.role) + ":" + path
+            documents.append(
+                document(name, state, raised: outcome.raised, requests: transport.requests)
+            )
         }
         return documents
+    }
+
+    @MainActor
+    private static func appear(
+        _ state: inout ScreenState, transport: SankaTransport, storage: SankaStorage
+    ) async -> [Intent] {
+        var raised: [Intent] = []
+        for effect in appearEffects {
+            raised += await run(
+                effect: effect, state: &state, params: sampleParams, transport: transport,
+                storage: storage
+            )
+        }
+        return raised
+    }
+
+    /// Performs a node's intents the way the view would: state changes through the
+    /// reducer, effects through `run`, everything else recorded only.
+    @MainActor
+    private static func activate(
+        _ node: Node,
+        _ intents: [Intent],
+        _ state: inout ScreenState,
+        transport: SankaTransport,
+        storage: SankaStorage
+    ) async -> (raised: [Intent], applied: Bool) {
+        var raised: [Intent] = []
+        var applied = false
+        for intent in intents {
+            switch intent {
+            case .bind(let name):
+                let value: JSONValue
+                if node.role == "switch" {
+                    value = .bool(!(node.checked ?? false))
+                } else if node.role == "textfield" {
+                    value = .string(sankaProbeText)
+                } else {
+                    continue
+                }
+                let concrete = Intent.set(name, value)
+                if apply(intent: concrete, to: &state) {
+                    applied = true
+                    raised.append(concrete)
+                }
+            case .set:
+                if apply(intent: intent, to: &state) {
+                    applied = true
+                    raised.append(intent)
+                }
+            case .run(let effect):
+                raised += await run(
+                    effect: effect, state: &state, params: sampleParams, transport: transport,
+                    storage: storage
+                )
+            case .store(let key, let value):
+                await storage.set(key, value)
+                raised.append(intent)
+            default:
+                raised.append(intent)
+            }
+        }
+        return (raised, applied)
     }
 
     private static func scenarioKind(_ role: String) -> String {
@@ -322,12 +451,16 @@ extension SankaScreen {
         return role == "textfield" ? "type" : "press"
     }
 
-    private static func document(_ scenario: String, _ tree: Node) -> JSONValue {
+    private static func document(
+        _ scenario: String, _ state: ScreenState, raised: [Intent], requests: [SankaRequest]
+    ) -> JSONValue {
         .object([
             "screen": .string(screenName),
             "scenario": .string(scenario),
             "params": sampleParamsJSON,
-            "tree": tree.json,
+            "tree": tree(state: state, params: sampleParams).json,
+            "raised": .array(raised.map { $0.json }),
+            "requests": .array(requests.map { $0.json }),
         ])
     }
 }
@@ -592,3 +725,247 @@ extension View {
     }
 }
 """
+
+
+API_CLIENT_SWIFT = (
+    HEADER
+    + """// Network and storage behind injectable protocols: URLSession and UserDefaults in the
+// app, fixtures in the tree dump and previews. JSON is parsed once into JSONValue and
+// decoded by the generated value types, so the app and the replay share one code path.
+import Foundation
+import SwiftUI
+
+public struct SankaRequest: Equatable {
+    public var effect: String
+    public var method: String
+    public var url: String
+    public var headers: [String: String]
+    public var body: JSONValue?
+
+    public init(
+        effect: String, method: String, url: String, headers: [String: String], body: JSONValue?
+    ) {
+        self.effect = effect
+        self.method = method
+        self.url = url
+        self.headers = headers
+        self.body = body
+    }
+
+    public var json: JSONValue {
+        .object([
+            "effect": .string(effect),
+            "method": .string(method),
+            "url": .string(url),
+            "headers": .object(headers.mapValues { JSONValue.string($0) }),
+            "body": body ?? .null,
+        ])
+    }
+}
+
+public struct SankaResponse {
+    public var status: Int
+    public var body: Data
+
+    public init(status: Int, body: Data) {
+        self.status = status
+        self.body = body
+    }
+
+    public func json() throws -> JSONValue {
+        try JSONValue.parse(body)
+    }
+}
+
+public enum SankaAPIError: Error {
+    case transport(String)
+    case status(Int)
+    case decoding
+    case fixture(String)
+    /// The request is still in flight (only the replay's `initial` scenario raises it).
+    case pending
+}
+
+public protocol SankaTransport {
+    func send(_ request: SankaRequest) async throws -> SankaResponse
+}
+
+public protocol SankaStorage {
+    func get(_ key: String) async throws -> String?
+    func set(_ key: String, _ value: String) async
+}
+
+public func decodeResponse<Value>(
+    _ response: SankaResponse, _ decode: (JSONValue) -> Value?
+) throws -> Value {
+    guard let value = decode(try response.json()) else { throw SankaAPIError.decoding }
+    return value
+}
+
+public struct URLSessionTransport: SankaTransport {
+    public init() {}
+
+    public func send(_ request: SankaRequest) async throws -> SankaResponse {
+        guard let url = URL(string: request.url) else {
+            throw SankaAPIError.transport("invalid url " + request.url)
+        }
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = request.method
+        for (name, value) in request.headers {
+            urlRequest.setValue(value, forHTTPHeaderField: name)
+        }
+        if let body = request.body {
+            urlRequest.httpBody = Data(body.encoded.utf8)
+        }
+        let (data, response) = try await URLSession.shared.data(for: urlRequest)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        return SankaResponse(status: status, body: data)
+    }
+}
+
+public struct UserDefaultsStorage: SankaStorage {
+    public init() {}
+
+    public func get(_ key: String) async throws -> String? {
+        UserDefaults.standard.string(forKey: key)
+    }
+
+    public func set(_ key: String, _ value: String) async {
+        UserDefaults.standard.set(value, forKey: key)
+    }
+}
+
+public enum SankaFixtureMode {
+    case pending
+    case success
+    case failure
+}
+
+/// Fixture responses keyed by effect id, as `verify-cases.json` declares them.
+public final class SankaFixtureTransport: SankaTransport {
+    public let fixtures: [String: JSONValue]
+    public var defaultMode: SankaFixtureMode
+    public var modes: [String: SankaFixtureMode] = [:]
+    public private(set) var requests: [SankaRequest] = []
+
+    public init(fixtures: [String: JSONValue], defaultMode: SankaFixtureMode) {
+        self.fixtures = fixtures
+        self.defaultMode = defaultMode
+    }
+
+    public func send(_ request: SankaRequest) async throws -> SankaResponse {
+        requests.append(request)
+        let mode = modes[request.effect] ?? defaultMode
+        if mode == .pending { throw SankaAPIError.pending }
+        guard let entry = fixtures[request.effect]?.objectValue else {
+            throw SankaAPIError.fixture("no fixture for effect " + request.effect)
+        }
+        let key = mode == .success ? "response" : "failure"
+        guard let fixture = entry[key]?.objectValue else {
+            throw SankaAPIError.fixture("no " + key + " fixture for effect " + request.effect)
+        }
+        if fixture["error"] != nil { throw SankaAPIError.transport("fixture network failure") }
+        guard let status = fixture["status"]?.numberValue, let body = fixture["body"] else {
+            throw SankaAPIError.fixture("fixture for " + request.effect + " needs status and body")
+        }
+        return SankaResponse(status: Int(status), body: Data(body.encoded.utf8))
+    }
+}
+
+public final class SankaMemoryStorage: SankaStorage {
+    public var values: [String: String]
+    public var pending: Bool
+
+    public init(values: [String: String], pending: Bool) {
+        self.values = values
+        self.pending = pending
+    }
+
+    public func get(_ key: String) async throws -> String? {
+        if pending { throw SankaAPIError.pending }
+        return values[key]
+    }
+
+    public func set(_ key: String, _ value: String) async {
+        values[key] = value
+    }
+}
+
+public struct SankaFixtures {
+    public var storage: [String: String]
+    public var effects: [String: [String: JSONValue]]
+
+    public static let empty = SankaFixtures(storage: [:], effects: [:])
+
+    public init(storage: [String: String], effects: [String: [String: JSONValue]]) {
+        self.storage = storage
+        self.effects = effects
+    }
+
+    /// Reads `verify-cases.json`: `storage` and `screens.<module>.effects.<id>`.
+    public static func load(path: String) throws -> SankaFixtures {
+        let document = try JSONValue.parse(Data(contentsOf: URL(fileURLWithPath: path)))
+        guard let root = document.objectValue else { throw SankaAPIError.fixture("not an object") }
+        var storage: [String: String] = [:]
+        for (key, value) in root["storage"]?.objectValue ?? [:] {
+            guard let text = value.stringValue else {
+                throw SankaAPIError.fixture("storage values must be strings")
+            }
+            storage[key] = text
+        }
+        var effects: [String: [String: JSONValue]] = [:]
+        for (module, screen) in root["screens"]?.objectValue ?? [:] {
+            effects[module] = screen.objectValue?["effects"]?.objectValue ?? [:]
+        }
+        return SankaFixtures(storage: storage, effects: effects)
+    }
+}
+
+extension JSONValue {
+    public static func parse(_ data: Data) throws -> JSONValue {
+        let object = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        return try JSONValue(any: object)
+    }
+
+    public init(any value: Any) throws {
+        if value is NSNull {
+            self = .null
+        } else if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                self = .bool(number.boolValue)
+            } else {
+                self = .number(number.doubleValue)
+            }
+        } else if let text = value as? String {
+            self = .string(text)
+        } else if let items = value as? [Any] {
+            self = .array(try items.map { try JSONValue(any: $0) })
+        } else if let fields = value as? [String: Any] {
+            self = .object(try fields.mapValues { try JSONValue(any: $0) })
+        } else {
+            throw SankaAPIError.decoding
+        }
+    }
+}
+
+private struct SankaTransportKey: EnvironmentKey {
+    static let defaultValue: SankaTransport = URLSessionTransport()
+}
+
+private struct SankaStorageKey: EnvironmentKey {
+    static let defaultValue: SankaStorage = UserDefaultsStorage()
+}
+
+extension EnvironmentValues {
+    public var sankaTransport: SankaTransport {
+        get { self[SankaTransportKey.self] }
+        set { self[SankaTransportKey.self] = newValue }
+    }
+
+    public var sankaStorage: SankaStorage {
+        get { self[SankaStorageKey.self] }
+        set { self[SankaStorageKey.self] = newValue }
+    }
+}
+"""
+)
