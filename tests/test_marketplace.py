@@ -2,18 +2,21 @@
 """Public marketplace contract for runtime extension discovery."""
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import yaml
 
-RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a26/"
+RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/"
+NEW_RELEASE_PREFIX = RELEASE_PREFIX + "extensions-v0.1.0a31/"
 EXPECTED = {
     "sanka/drf-to-flask": {
         "kind": "migration",
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-flask",
-            "version": "0.1.0a7",
+            "version": "0.1.0a12",
             "executable": "sanka-extension-drf-to-flask",
         },
     },
@@ -22,7 +25,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-fastapi",
-            "version": "0.1.0a13",
+            "version": "0.1.0a17",
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },
@@ -96,7 +99,8 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
         if "providers" in expected:
             assert manifest["providers"] == expected["providers"]
         assert manifest["wheels"]
-        assert all(wheel["url"].startswith(RELEASE_PREFIX) for wheel in manifest["wheels"])
+        expected_prefix = NEW_RELEASE_PREFIX if expected["kind"] == "migration" else RELEASE_PREFIX
+        assert all(wheel["url"].startswith(expected_prefix) for wheel in manifest["wheels"])
         assert all(len(wheel["sha256"]) == 64 for wheel in manifest["wheels"])
 
 
@@ -120,3 +124,25 @@ def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> No
         "release-assets/sanka-connector-clickhouse.json",
     ]
     assert len(destinations) == len(set(destinations))
+
+
+def test_release_workflow_only_accepts_current_candidate_tag() -> None:
+    workflow = yaml.safe_load(Path(".github/workflows/publish.yml").read_text())
+    guard = next(
+        step["run"]
+        for step in workflow["jobs"]["build"]["steps"]
+        if "GITHUB_REF_TYPE" in step.get("run", "")
+    )
+    tag = NEW_RELEASE_PREFIX.removeprefix(RELEASE_PREFIX).rstrip("/")
+    for ref_type, ref_name, allowed in [
+        ("tag", tag, True),
+        ("branch", tag, False),
+        ("tag", "extensions-v0.1.0a27", False),
+        ("branch", "main", False),
+    ]:
+        result = subprocess.run(
+            ["sh", "-c", guard],
+            env={**os.environ, "GITHUB_REF_TYPE": ref_type, "GITHUB_REF_NAME": ref_name},
+            check=False,
+        )
+        assert (result.returncode == 0) is allowed

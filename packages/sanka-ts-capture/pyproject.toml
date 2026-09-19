@@ -1,0 +1,26 @@
+[project]
+name = "sanka-ts-capture"
+version = "0.1.0a1"
+description = "Bounded, network-free TypeScript syntax capture shared by Sanka code extensions"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "src/sanka_ts_capture/node/LICENSE.typescript.txt"]
+authors = [{ name = "Sanka, Inc." }]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/sankaHQ/extensions"
+Issues = "https://github.com/sankaHQ/extensions/issues"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+# The compiler bundle is git-ignored (fetched by scripts/fetch_typescript_bundle.py)
+# but must ship inside the wheel so installed extensions never touch the network.
+artifacts = ["src/sanka_ts_capture/node/typescript.js"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sanka_ts_capture"]

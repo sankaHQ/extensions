@@ -1,0 +1,436 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Legacy DRF scan artifacts. Native verdicts retain FastAPI v1 semantics.
+
+Other targets must qualify these source facts under their own policies.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field, replace
+from typing import Any
+
+from sanka_code_migration.hashing import content_hash
+
+
+@dataclass(frozen=True, slots=True)
+class FrameworkRisk:
+    severity: str
+    code: str
+    message: str
+    file: str | None = None
+    line: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RouteAdaptationReason:
+    """One machine-readable reason a route is outside the native envelope."""
+
+    code: str
+    feature: str
+    message: str
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> RouteAdaptationReason:
+        return cls(
+            code=str(payload["code"]),
+            feature=str(payload["feature"]),
+            message=str(payload["message"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ParityNote:
+    """One source-derived fact about exact behavior a port must reproduce.
+
+    Notes are facts about the scanned application (auth ordering, exact error
+    strings, pagination envelopes, file rules, unique-conflict wording), derived from
+    the live installation. They accompany every route so a migration can be checked
+    against them; they never widen or narrow the native envelope.
+    """
+
+    family: str
+    code: str
+    message: str
+    source: str | None = None
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ParityNote:
+        source = payload.get("source")
+        return cls(
+            family=str(payload["family"]),
+            code=str(payload["code"]),
+            message=str(payload["message"]),
+            source=str(source) if source is not None else None,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RouteIR:
+    method: str
+    path: str
+    operation: str
+    view: str
+    serializer: str | None = None
+    model: str | None = None
+    authentication: tuple[str, ...] = ()
+    permissions: tuple[str, ...] = ()
+    transactional: bool = False
+    source_file: str | None = None
+    source_line: int | None = None
+    supported: bool = True
+    native: bool = False
+    adaptation_reasons: tuple[RouteAdaptationReason, ...] = ()
+    parity_notes: tuple[ParityNote, ...] = ()
+    options: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def key(self) -> str:
+        return f"{self.method} {self.path}"
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> RouteIR:
+        data = dict(payload)
+        data["authentication"] = tuple(payload.get("authentication", ()))
+        data["permissions"] = tuple(payload.get("permissions", ()))
+        data["adaptation_reasons"] = tuple(
+            RouteAdaptationReason.from_dict(item) for item in payload.get("adaptation_reasons", ())
+        )
+        data["parity_notes"] = tuple(
+            ParityNote.from_dict(item) for item in payload.get("parity_notes", ())
+        )
+        data["options"] = dict(payload.get("options") or {})
+        return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class SkippedRoute:
+    """A URL pattern the scanner saw but did not scan.
+
+    Non-DRF callbacks (plain Django views, redirects, admin) are outside the
+    scan's vocabulary, but silently omitting them hides real routes from every
+    downstream disclosure — a migration can look complete while an entire
+    route family was never even counted. Recording them keeps the gap visible."""
+
+    pattern: str
+    view: str
+    reason: str = "non-drf-view"
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> SkippedRoute:
+        return cls(
+            pattern=str(payload["pattern"]),
+            view=str(payload["view"]),
+            reason=str(payload.get("reason", "non-drf-view")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseIR:
+    """Connection identity captured at scan time. Passwords are never stored."""
+
+    vendor: str
+    name: str
+    host: str = ""
+    port: str = ""
+    user: str = ""
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> DatabaseIR:
+        data = payload or {}
+        return cls(
+            vendor=str(data.get("vendor") or "other"),
+            name=str(data.get("name") or ""),
+            host=str(data.get("host") or ""),
+            port=str(data.get("port") or ""),
+            user=str(data.get("user") or ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SerializerFieldIR:
+    """One serializer field with enough captured semantics to regenerate its
+    validation natively, including the exact rendered DRF error strings."""
+
+    name: str
+    kind: str
+    required: bool = False
+    read_only: bool = False
+    allow_null: bool = False
+    allow_blank: bool = False
+    trim_whitespace: bool = True
+    max_length: int | None = None
+    min_length: int | None = None
+    min_value: int | None = None
+    max_value: int | None = None
+    has_default: bool = False
+    default: Any = None
+    attname: str | None = None
+    max_digits: int | None = None
+    decimal_places: int | None = None
+    choices: tuple[Any, ...] = ()
+    unique: bool = False
+    unique_message: str | None = None
+    child: SerializerIR | None = None
+    messages: tuple[tuple[str, str], ...] = ()
+    supported: bool = True
+    timezone: str | None = None
+    coerce_to_string: bool = False
+    uuid_default: bool = False
+    default_on_create_only: bool = False
+    relation: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> SerializerFieldIR:
+        data = dict(payload)
+        data["messages"] = tuple(
+            (str(key), str(value)) for key, value in payload.get("messages", ())
+        )
+        data["choices"] = tuple(payload.get("choices", ()))
+        child = payload.get("child")
+        data["child"] = SerializerIR.from_dict(child) if isinstance(child, dict) else None
+        return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class SerializerIR:
+    name: str
+    model: str
+    model_module: str
+    model_class: str
+    object_name: str
+    db_table: str = ""
+    pk_attname: str = "id"
+    ordering: tuple[str, ...] = ()
+    lookup: str = "pk"
+    fields: tuple[SerializerFieldIR, ...] = ()
+    storage: tuple[dict[str, Any], ...] = ()
+    create_style: str = "default"
+    create_source: str | None = None
+    create_contract: dict[str, Any] | None = None
+    create_imports: tuple[tuple[str, str, str | None], ...] = ()
+    update_drops: tuple[str, ...] | None = None
+    supported: bool = True
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> SerializerIR:
+        data = dict(payload)
+        data.setdefault("db_table", "")
+        data.setdefault("pk_attname", "id")
+        data["ordering"] = tuple(payload.get("ordering", ()))
+        data["fields"] = tuple(
+            SerializerFieldIR.from_dict(item) for item in payload.get("fields", ())
+        )
+        data["storage"] = tuple(payload.get("storage", ()))
+        data["create_imports"] = tuple(
+            (str(alias), str(module), None if attr is None else str(attr))
+            for alias, module, attr in payload.get("create_imports", ())
+        )
+        drops = payload.get("update_drops")
+        data["update_drops"] = None if drops is None else tuple(str(item) for item in drops)
+        return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class ViewAuthIR:
+    """Authentication and permission semantics captured for one view.
+
+    Only exactly-recognized configurations are captured: DRF
+    TokenAuthentication, IsAuthenticated, the owner-or-read-only object
+    permission idiom, and the ``serializer.save(field=self.request.user)``
+    perform_create injection. Anything else keeps the view outside the
+    native envelope."""
+
+    require_authenticated: bool = False
+    user: dict[str, str] = field(default_factory=dict)
+    token_keyword: str | None = None
+    token_db_table: str | None = None
+    token_key_column: str = "key"
+    token_key_max_length: int = 40
+    token_user_column: str = "user_id"
+    owner_field: str | None = None
+    owner_attname: str | None = None
+    inject_owner: str | None = None
+    inject_owner_attname: str | None = None
+    messages: tuple[tuple[str, str], ...] = ()
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ViewAuthIR:
+        data = dict(payload)
+        data["messages"] = tuple(
+            (str(key), str(value)) for key, value in payload.get("messages", ())
+        )
+        return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class ViewIR:
+    name: str
+    auth: ViewAuthIR | None = None
+    lookup_regex: str | None = None
+    lookup_url_kwarg: str | None = None
+    listing: dict[str, Any] = field(default_factory=dict)
+    carryover: dict[str, Any] = field(default_factory=dict)
+    access: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ViewIR:
+        auth = payload.get("auth")
+        return cls(
+            name=str(payload["name"]),
+            auth=ViewAuthIR.from_dict(auth) if isinstance(auth, dict) else None,
+            lookup_regex=(
+                str(payload["lookup_regex"]) if payload.get("lookup_regex") is not None else None
+            ),
+            lookup_url_kwarg=payload.get("lookup_url_kwarg"),
+            listing=dict(payload.get("listing") or {}),
+            carryover=dict(payload.get("carryover") or {}),
+            access=dict(payload.get("access") or {}),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ApiRootIR:
+    path: str
+    links: tuple[tuple[str, str], ...] = ()
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ApiRootIR:
+        return cls(
+            path=str(payload["path"]),
+            links=tuple((str(key), str(value)) for key, value in payload.get("links", ())),
+        )
+
+
+def _strip_field_keys(fields: list[dict[str, Any]], keys: tuple[str, ...]) -> None:
+    """Drop keys older schemas never wrote so their stored hashes still verify."""
+    for item in fields:
+        for key in keys:
+            item.pop(key, None)
+        child = item.get("child")
+        if isinstance(child, dict):
+            if "relation" in keys:
+                child.pop("storage", None)
+            _strip_field_keys(child.get("fields", []), keys)
+
+
+def _strip_create_contract(serializer: dict[str, Any]) -> None:
+    serializer.pop("create_contract", None)
+    for item in serializer.get("fields", []):
+        if isinstance(item.get("child"), dict):
+            _strip_create_contract(item["child"])
+
+
+@dataclass(frozen=True, slots=True)
+class FrameworkScan:
+    schema_version: int
+    source: str
+    language: str
+    framework: str
+    python_version: str
+    django_version: str
+    drf_version: str
+    settings_module: str
+    root_urlconf: str
+    routes: tuple[RouteIR, ...]
+    serializers: tuple[str, ...] = ()
+    models: tuple[str, ...] = ()
+    permissions: tuple[str, ...] = ()
+    authentication: tuple[str, ...] = ()
+    test_files: int = 0
+    risks: tuple[FrameworkRisk, ...] = ()
+    serializer_details: tuple[SerializerIR, ...] = ()
+    api_roots: tuple[ApiRootIR, ...] = ()
+    view_details: tuple[ViewIR, ...] = ()
+    middleware: tuple[str, ...] = ()
+    http_security: dict[str, Any] = field(default_factory=dict)
+    generic_messages: tuple[tuple[str, str], ...] = ()
+    database: DatabaseIR = field(default_factory=lambda: DatabaseIR(vendor="other", name=""))
+    skipped_routes: tuple[SkippedRoute, ...] = ()
+    status_codes: dict[str, int] = field(default_factory=dict)
+    scan_hash: str = field(default="")
+
+    def hash_payload(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload.pop("scan_hash", None)
+        if self.schema_version < 3:
+            for route in payload["routes"]:
+                route.pop("adaptation_reasons", None)
+        if self.schema_version < 4:
+            payload.pop("skipped_routes", None)
+        if self.schema_version < 5:
+            for route in payload["routes"]:
+                route.pop("parity_notes", None)
+        if self.schema_version < 6:
+            for route in payload["routes"]:
+                route.pop("options", None)
+        if self.schema_version < 7:
+            payload.pop("status_codes", None)
+            for view in payload.get("view_details", []):
+                view.pop("listing", None)
+                view.pop("carryover", None)
+            for serializer in payload.get("serializer_details", []):
+                _strip_field_keys(serializer.get("fields", []), ("timezone",))
+        if self.schema_version < 8:
+            for serializer in payload.get("serializer_details", []):
+                _strip_create_contract(serializer)
+        if self.schema_version < 9:
+            for view in payload.get("view_details", []):
+                view.pop("lookup_url_kwarg", None)
+            for serializer in payload.get("serializer_details", []):
+                _strip_field_keys(
+                    serializer.get("fields", []), ("uuid_default", "default_on_create_only")
+                )
+        if self.schema_version < 10:
+            for serializer in payload.get("serializer_details", []):
+                serializer.pop("storage", None)
+                _strip_field_keys(serializer.get("fields", []), ("relation",))
+            for view in payload.get("view_details", []):
+                view.pop("access", None)
+                if view.get("auth"):
+                    view["auth"].pop("user", None)
+        return payload
+
+    def with_hash(self) -> FrameworkScan:
+        return replace(self, scan_hash=content_hash(self.hash_payload()))
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> FrameworkScan:
+        return cls(
+            schema_version=int(payload["schema_version"]),
+            source=str(payload["source"]),
+            language=str(payload["language"]),
+            framework=str(payload["framework"]),
+            python_version=str(payload["python_version"]),
+            django_version=str(payload["django_version"]),
+            drf_version=str(payload["drf_version"]),
+            settings_module=str(payload["settings_module"]),
+            root_urlconf=str(payload["root_urlconf"]),
+            routes=tuple(RouteIR.from_dict(item) for item in payload.get("routes", [])),
+            serializers=tuple(payload.get("serializers", [])),
+            models=tuple(payload.get("models", [])),
+            permissions=tuple(payload.get("permissions", [])),
+            authentication=tuple(payload.get("authentication", [])),
+            test_files=int(payload.get("test_files", 0)),
+            risks=tuple(FrameworkRisk(**item) for item in payload.get("risks", [])),
+            serializer_details=tuple(
+                SerializerIR.from_dict(item) for item in payload.get("serializer_details", [])
+            ),
+            api_roots=tuple(ApiRootIR.from_dict(item) for item in payload.get("api_roots", [])),
+            view_details=tuple(ViewIR.from_dict(item) for item in payload.get("view_details", [])),
+            middleware=tuple(payload.get("middleware", [])),
+            http_security=dict(payload.get("http_security", {})),
+            generic_messages=tuple(
+                (str(key), str(value)) for key, value in payload.get("generic_messages", ())
+            ),
+            database=DatabaseIR.from_dict(payload.get("database")),
+            skipped_routes=tuple(
+                SkippedRoute.from_dict(item) for item in payload.get("skipped_routes", [])
+            ),
+            status_codes={
+                str(key): int(value) for key, value in (payload.get("status_codes") or {}).items()
+            },
+            scan_hash=str(payload.get("scan_hash", "")),
+        )

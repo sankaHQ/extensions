@@ -47,9 +47,47 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --frozen --all-packages
+      - name: Validate native Flask database setup and Django schema adoption
+        run: uv run python -m pytest packages/sanka-extension-drf-to-flask/tests/test_database_postgres.py -q
+      - name: Compare native Flask HTTP and database effects on PostgreSQL
+        run: >-
+          uv run python -m pytest
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_records.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_nested.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py
+          -k postgresql -q
+      - name: Verify PostgreSQL replay isolation and generated backend qualification
+        run: >-
+          uv run python -m pytest
+          packages/sanka-drf-replay/tests/test_postgres.py
+          packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
+          -q
       - run: make check
       - run: make build-release
       - run: make build-business-flows
+      - name: Install the actual Flask candidate and its published SDK dependencies
+        run: uv --no-config pip install --reinstall --no-index --find-links dist dist/sanka_extension_drf_to_flask-*.whl
+      - name: Verify installed Flask wheels with native lifecycle and database parity
+        run: |
+          uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_drf_to_flask, sanka_code_migration; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; root = pathlib.Path(sys.prefix).resolve(); assert all(pathlib.Path(m.__file__).resolve().is_relative_to(root) for m in (sanka_extension_drf_to_flask, sanka_code_migration))"
+          uv run --no-sync python -m pytest \
+            packages/sanka-extension-drf-to-flask/tests/test_native_plan.py \
+            packages/sanka-drf-replay/tests/test_postgres.py \
+            packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_nested.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py \
+            packages/sanka-extension-drf-to-flask/tests/test_behavior_inventory_plan.py \
+            packages/sanka-extension-drf-to-flask/tests/test_session_lifecycle.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_csrf.py \
+            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py
 
   modern-drf:
     name: Django 6 DRF conversion parity
@@ -66,3 +104,146 @@ jobs:
         run: uv pip install 'django==6.0.6' 'djangorestframework==3.17.1'
       - name: Compare real source and generated HTTP responses and database effects
         run: uv run --no-sync python -m pytest packages/sanka-extension-drf-to-fastapi/tests/test_big_integer.py packages/sanka-extension-drf-to-fastapi/tests/test_generic_views.py packages/sanka-extension-drf-to-fastapi/tests/test_uuid_boolean.py packages/sanka-extension-drf-to-fastapi/tests/test_access_contracts.py
+      - name: Compare standalone Flask contracts against the modern DRF source
+        run: >-
+          uv run --no-sync python -m pytest
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_nested.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_middleware.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_deletion.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_access.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_records.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_datetime.py
+          packages/sanka-extension-drf-to-flask/tests/test_validator_qualification.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py
+          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_csrf.py
+          packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
+
+  python-to-golang:
+    name: Python to Golang endpoint qualification
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sanka
+          POSTGRES_PASSWORD: sanka
+          POSTGRES_DB: sanka_go_schema_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sanka"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SANKA_MIGRATE_TEST_POSTGRES_DSN: postgresql://sanka:sanka@localhost:5432/sanka_go_schema_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26.5"
+          cache: false
+      - run: uv sync --frozen --all-packages
+      - run: uv build --wheel --package sanka-extension-python-to-golang --out-dir release/python-to-golang
+      - name: Install the actual candidate wheel
+        run: |
+          uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/python-to-golang"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}]'
+          uv --no-config pip install --reinstall --no-index --find-links release/python-to-golang release/python-to-golang/sanka_extension_python_to_golang-*.whl
+          uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_python_to_golang as m; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve())"
+      - name: Qualify shared input presence with native Go
+        env:
+          SANKA_GO_TESTS: "1"
+        run: uv run --no-sync python -m pytest packages/sanka-code-migration/tests/test_input_values.py -q
+      - name: Compare all three Python sources with all four Go targets
+        env:
+          SANKA_GO_TESTS: "1"
+          GOTOOLCHAIN: local
+          GOWORK: "off"
+          GOMAXPROCS: "2"
+        run: uv run --no-sync python -m pytest packages/sanka-extension-python-to-golang/tests -q
+
+  typescript-to-rust:
+    name: TypeScript to Rust endpoint qualification
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sanka
+          POSTGRES_PASSWORD: sanka
+          POSTGRES_DB: sanka_rust_schema_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sanka"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.2"
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-17
+        with:
+          toolchain: "1.93.1"
+          components: rustfmt
+      - run: uv sync --frozen --all-packages
+      - name: Fetch the pinned TypeScript compiler bundle (digest-checked, not committed)
+        run: uv run python scripts/fetch_typescript_bundle.py
+      - run: uv build --wheel --package sanka-ts-capture --out-dir release/typescript-to-rust
+      - run: uv build --wheel --package sanka-extension-typescript-to-rust --out-dir release/typescript-to-rust
+      - name: Install the actual candidate wheels
+        run: |
+          uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/typescript-to-rust"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}]'
+          uv --no-config pip install --reinstall --no-index --find-links release/typescript-to-rust release/typescript-to-rust/sanka_extension_typescript_to_rust-*.whl
+          uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_typescript_to_rust as m, sanka_ts_capture as c; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; root = pathlib.Path(sys.prefix).resolve(); assert all(pathlib.Path(x.__file__).resolve().is_relative_to(root) for x in (m, c))"
+      - name: Install the pinned Express and pg source toolset
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix packages/sanka-extension-typescript-to-rust/tests/node-tools
+      - name: Compare the Express source with the axum target
+        env:
+          SANKA_RUST_TESTS: "1"
+          SANKA_NODE_TESTS: "1"
+          SANKA_MIGRATE_TEST_POSTGRES_DSN: postgresql://sanka:sanka@localhost:5432/sanka_rust_schema_test
+          CARGO_TERM_COLOR: never
+        run: uv run --no-sync python -m pytest packages/sanka-ts-capture/tests packages/sanka-extension-typescript-to-rust/tests -q
+
+  react-native-to-native:
+    name: React Native to SwiftUI structural parity
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.2"
+      - run: uv sync --frozen --all-packages
+      - name: Fetch the pinned TypeScript compiler bundle (digest-checked, not committed)
+        run: uv run python scripts/fetch_typescript_bundle.py
+      - name: Install the pinned React renderer toolset
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix packages/sanka-extension-react-native-to-native/tests/node-tools
+      - name: Build the SwiftUI candidates and compare their trees with the React Native source
+        env:
+          SANKA_SWIFT_TESTS: "1"
+          SANKA_NODE_TESTS: "1"
+        run: uv run python -m pytest packages/sanka-extension-react-native-to-native/tests -q
