@@ -115,6 +115,25 @@ Only manifest-listed wheels are installed, with `pip --isolated --no-index --no-
 
 Missing trust, artifacts, compatibility, or matching hashes stops execution. The runtime does not silently substitute another version or implementation.
 
+## Run an experimental extension
+
+Extensions that are not in the catalog yet (`sanka/python-to-golang`,
+`sanka/typescript-to-rust`, `sanka/react-native-to-native`) cannot be installed
+with `sanka extension add`. Run them from this checkout through the same
+`sanka-extension/v1` protocol the CLI uses:
+
+```bash
+uv sync --frozen --all-packages
+uv run python scripts/fetch_typescript_bundle.py   # TypeScript-based extensions
+uv run python scripts/run_extension.py sanka/typescript-to-rust scan --project ~/app --config database_layer=sqlx
+uv run python scripts/run_extension.py sanka/typescript-to-rust plan --project ~/app --config database_layer=sqlx
+uv run python scripts/run_extension.py sanka/typescript-to-rust apply --project ~/app --config database_layer=sqlx --plan-hash sha256:...
+```
+
+`apply` requires the exact hash that `plan` printed, artifacts live under
+`<project>/.sanka/<extension name>/`, and `test` and `verify` need the toolchains
+and fixture databases documented in each package README.
+
 ## Development and release validation
 
 ```bash
