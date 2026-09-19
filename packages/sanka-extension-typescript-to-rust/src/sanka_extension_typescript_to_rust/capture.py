@@ -18,10 +18,23 @@ from typing import Any
 from sanka_ts_capture import TYPESCRIPT_SHA256, TYPESCRIPT_VERSION, ParsedFile, parse_sources
 from sanka_ts_capture import tree as t
 
+from .queries import capture_read
+from .schema import capture_interfaces, capture_tables, match_models
+
 SOURCES = ("express",)
 TARGETS = ("axum",)
 VERSION = "0.1.0a1"
 DEFAULT_SOURCE_FILE = "src/app.ts"
+DEFAULT_SCHEMA_FILE = "schema.sql"
+DEFAULT_MODELS_FILE = "src/models.ts"
+DATABASE_LAYERS = ("none", "sqlx")
+DATABASE_OPTIONS = (
+    "database_dialect",
+    "migration_tool",
+    "schema_mode",
+    "schema_file",
+    "models_file",
+)
 LAUNCHER_NAMES = ("server.ts", "index.ts")
 PATH = re.compile(r"/[A-Za-z0-9_./-]*\Z")
 SOURCE_SUFFIXES = frozenset({".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"})
@@ -51,6 +64,8 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
         "target_framework",
         "target",
         "source_file",
+        "database_layer",
+        *DATABASE_OPTIONS,
         "extension_plan_hash",
     }
     if set(raw) - allowed:
@@ -62,27 +77,52 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
         "source_framework": raw.get("source_framework", "express"),
         "target_framework": target,
         "source_file": raw.get("source_file", DEFAULT_SOURCE_FILE),
+        "database_layer": raw.get("database_layer", "none"),
     }
+    if result["database_layer"] == "sqlx":
+        result.update(
+            database_dialect=raw.get("database_dialect", "postgresql"),
+            migration_tool=raw.get("migration_tool", "sqlx"),
+            schema_mode=raw.get("schema_mode", "empty"),
+            schema_file=raw.get("schema_file", DEFAULT_SCHEMA_FILE),
+            models_file=raw.get("models_file", DEFAULT_MODELS_FILE),
+        )
     if any(type(value) is not str for value in result.values()):
         raise ValueError("configuration values must be strings")
     if result["source_framework"] not in SOURCES:
         raise ValueError("source_framework must be express")
     if result["target_framework"] not in TARGETS:
         raise ValueError("target_framework must be axum")
-    result["source_file"] = _source_file(result["source_file"])
+    if result["database_layer"] not in DATABASE_LAYERS:
+        raise ValueError("database_layer must be none or sqlx")
+    result["source_file"] = _relative_file(result["source_file"], ".ts", "source_file")
+    if result["database_layer"] == "none":
+        if any(key in raw for key in DATABASE_OPTIONS):
+            raise ValueError("database options require database_layer: sqlx")
+        return result
+    if result["database_dialect"] != "postgresql":
+        raise ValueError("database_dialect must be postgresql")
+    if result["migration_tool"] != "sqlx":
+        raise ValueError("migration_tool must be sqlx")
+    if result["schema_mode"] != "empty":
+        raise ValueError("schema_mode must be empty; existing schemas are not adopted")
+    result["schema_file"] = _relative_file(result["schema_file"], ".sql", "schema_file")
+    result["models_file"] = _relative_file(result["models_file"], ".ts", "models_file")
+    if result["models_file"] == result["source_file"]:
+        raise ValueError("models_file must differ from source_file")
     return result
 
 
-def _source_file(value: str) -> str:
+def _relative_file(value: str, suffix: str, what: str) -> str:
     pure = PurePosixPath(value)
     if (
         pure.is_absolute()
         or not pure.parts
         or any(part in {"", ".", ".."} for part in pure.parts)
-        or pure.suffix != ".ts"
+        or pure.suffix != suffix
         or value != pure.as_posix()
     ):
-        raise ValueError("source_file must be a relative .ts path inside the project")
+        raise ValueError(f"{what} must be a relative {suffix} path inside the project")
     return value
 
 
@@ -116,8 +156,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             if source.suffix.lower() in SOURCE_SUFFIXES:
                 modules.append(rel)
     launcher: str | None = None
+    models_file = config.get("models_file")
     for rel in sorted(modules):
-        if rel == relative:
+        if rel in (relative, models_file):
             continue
         if rel in launchers and launcher is None:
             launcher = rel
@@ -127,13 +168,23 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     texts = {relative: path.read_text(encoding="utf-8")}
     if launcher is not None:
         texts[launcher] = (root / launcher).read_text(encoding="utf-8")
+    if models_file is not None:
+        models_path = root / models_file
+        if models_path.is_file() and not models_path.is_symlink():
+            texts[models_file] = models_path.read_text(encoding="utf-8")
+        else:
+            gaps.append(f"{models_file}: models_file is required for database_layer sqlx")
     parsed = parse_sources(texts)
     for rel, item in sorted(parsed.items()):
         for diagnostic in item.diagnostics:
             gaps.append(f"{rel}: syntax error {diagnostic.code}: {diagnostic.message}")
     routes: list[dict[str, Any]] = []
+    models: list[dict[str, Any]] = []
+    database = config["database_layer"] == "sqlx"
     if not any(item.diagnostics for item in parsed.values()):
-        routes, module_gaps = _module(parsed[relative], texts[relative], relative)
+        if models_file in parsed:
+            models = _models(root, config, parsed[models_file], gaps)
+        routes, module_gaps = _module(parsed[relative], texts[relative], relative, models, database)
         gaps.extend(module_gaps)
         if launcher is not None:
             gaps.extend(
@@ -141,7 +192,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             )
     if not routes:
         gaps.append("no qualified endpoints")
-    return {
+    result = {
         "schema": "sanka.typescript-to-rust.capture/v1",
         "source_digest": digest(records),
         "configuration": config,
@@ -153,6 +204,22 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         "scope": "literal public JSON GET endpoints",
         "complete_backend": False,
     }
+    if database:
+        result["models"] = models
+        result["scope"] = "literal public JSON GET endpoints and bounded flat table reads"
+    return result
+
+
+def _models(
+    root: Path, config: dict[str, str], parsed: ParsedFile, gaps: list[str]
+) -> list[dict[str, Any]]:
+    try:
+        tables = capture_tables(root / config["schema_file"])
+        interfaces = capture_interfaces(parsed, config["models_file"])
+        return match_models(tables, interfaces)
+    except (ValueError, OSError, UnicodeDecodeError) as error:
+        gaps.append(f"database: {error}")
+        return []
 
 
 def _package(root: Path, gaps: list[str]) -> dict[str, Any]:
@@ -177,10 +244,18 @@ def _package(root: Path, gaps: list[str]) -> dict[str, Any]:
     return {"express": spec, "express_major": major}
 
 
-def _module(parsed: ParsedFile, source: str, rel: str) -> tuple[list[dict[str, Any]], list[str]]:
+def _module(
+    parsed: ParsedFile,
+    source: str,
+    rel: str,
+    models: list[dict[str, Any]],
+    database: bool,
+) -> tuple[list[dict[str, Any]], list[str]]:
     gaps: list[str] = []
     express_name: str | None = None
     app_name: str | None = None
+    pool_class: str | None = None
+    pool_name: str | None = None
     exported = False
     routes: list[dict[str, Any]] = []
 
@@ -190,12 +265,35 @@ def _module(parsed: ParsedFile, source: str, rel: str) -> tuple[list[dict[str, A
     for statement in t.field_list(parsed.tree, "statements"):
         kind = t.kind(statement)
         if kind == "ImportDeclaration":
+            clause = t.field(statement, "importClause")
+            if clause is not None and clause.get("typeOnly"):
+                continue
+            if t.string_value(t.field(statement, "moduleSpecifier")) == "pg":
+                if not database:
+                    gap(statement, "pg requires database_layer: sqlx")
+                elif pool_class is not None:
+                    gap(statement, "duplicate pg import")
+                else:
+                    pool_class = _pg_import(statement, gap)
+                continue
             name = _express_import(statement, gap)
             if name is not None:
                 if express_name is not None:
                     gap(statement, "duplicate express import")
                 express_name = name
         elif kind == "VariableStatement":
+            if pool_class is not None and _declares_new(statement, pool_class):
+                if pool_name is not None:
+                    gap(statement, "duplicate pg Pool declaration")
+                    continue
+                pool_name = _pool_declaration(statement, pool_class)
+                if pool_name is None:
+                    gap(
+                        statement,
+                        "only const pool = new Pool({ connectionString: "
+                        "process.env.DATABASE_URL }) is qualified",
+                    )
+                continue
             declared = _app_declaration(statement, express_name) if app_name is None else None
             if declared is None:
                 gap(statement, "only one const app = express() declaration is qualified")
@@ -205,7 +303,7 @@ def _module(parsed: ParsedFile, source: str, rel: str) -> tuple[list[dict[str, A
             if app_name is None or express_name is None:
                 gap(statement, "statements before the app declaration require additional capture")
                 continue
-            route = _registration(statement, app_name, express_name, gap)
+            route = _registration(statement, app_name, express_name, gap, models, pool_name)
             if route is not None:
                 routes.append(route)
         elif kind == "ExportAssignment":
@@ -264,6 +362,78 @@ def _express_import(statement: t.Node, gap: Gap) -> str | None:
     return name
 
 
+def _pg_import(statement: t.Node, gap: Gap) -> str | None:
+    clause = t.field(statement, "importClause")
+    bindings = t.field(clause, "namedBindings") if clause is not None else None
+    elements = t.field_list(bindings, "elements") if bindings is not None else []
+    element = elements[0] if len(elements) == 1 else None
+    local = t.identifier_name(t.field(element, "name")) if element is not None else None
+    imported = t.identifier_name(t.field(element, "propertyName")) if element is not None else None
+    if (
+        clause is None
+        or t.field(clause, "name") is not None
+        or bindings is None
+        or t.kind(bindings) != "NamedImports"
+        or element is None
+        or element.get("typeOnly")
+        or local is None
+        or (imported or local) != "Pool"
+    ):
+        gap(statement, 'only import { Pool } from "pg" is qualified')
+        return None
+    return local
+
+
+def _declares_new(statement: t.Node, class_name: str) -> bool:
+    declarations = t.field(statement, "declarationList")
+    items = t.field_list(declarations, "declarations") if declarations is not None else []
+    for item in items:
+        initializer = t.field(item, "initializer")
+        if initializer is None:
+            continue
+        initializer = t.unparenthesize(initializer)
+        if t.kind(initializer) == "NewExpression" and (
+            t.identifier_name(t.field(initializer, "expression")) == class_name
+        ):
+            return True
+    return False
+
+
+def _pool_declaration(statement: t.Node, class_name: str) -> str | None:
+    """Name of ``const pool = new Pool({ connectionString: process.env.DATABASE_URL })``."""
+    declarations = t.field(statement, "declarationList")
+    items = t.field_list(declarations, "declarations") if declarations is not None else []
+    if (
+        t.modifier_kinds(statement)
+        or declarations is None
+        or declarations.get("decl") != "const"
+        or len(items) != 1
+    ):
+        return None
+    name = t.identifier_name(t.field(items[0], "name"))
+    initializer = t.field(items[0], "initializer")
+    if name is None or initializer is None or t.field(items[0], "type") is not None:
+        return None
+    initializer = t.unparenthesize(initializer)
+    arguments = t.field_list(initializer, "arguments")
+    if t.field_list(initializer, "typeArguments") or len(arguments) != 1:
+        return None
+    options = t.unparenthesize(arguments[0])
+    properties = t.field_list(options, "properties")
+    if t.kind(options) != "ObjectLiteralExpression" or len(properties) != 1:
+        return None
+    entry = properties[0]
+    value = t.field(entry, "initializer")
+    if (
+        t.kind(entry) != "PropertyAssignment"
+        or t.identifier_name(t.field(entry, "name")) != "connectionString"
+        or value is None
+        or t.property_chain(value) != ("process", "env", "DATABASE_URL")
+    ):
+        return None
+    return name
+
+
 def _app_declaration(statement: t.Node, express_name: str | None) -> tuple[str, bool] | None:
     modifiers = t.modifier_kinds(statement)
     if modifiers - {"ExportKeyword"} or express_name is None:
@@ -297,7 +467,12 @@ def _is_call(node: t.Node, chain: tuple[str, ...], argument_count: int) -> bool:
 
 
 def _registration(
-    statement: t.Node, app_name: str, express_name: str, gap: Gap
+    statement: t.Node,
+    app_name: str,
+    express_name: str,
+    gap: Gap,
+    models: list[dict[str, Any]],
+    pool_name: str | None,
 ) -> dict[str, Any] | None:
     expression = t.field(statement, "expression")
     parts = t.call_parts(expression) if expression is not None else None
@@ -321,7 +496,7 @@ def _registration(
         gap(arguments[0], "dynamic route parameters or nonliteral paths are not qualified")
         return None
     try:
-        payload = _handler(arguments[1])
+        payload = _handler(arguments[1], models, pool_name)
     except ValueError as error:
         gap(arguments[1], str(error))
         return None
@@ -347,7 +522,7 @@ def _exports_app(statement: t.Node, app_name: str | None) -> bool:
     return exported == app_name and local == app_name
 
 
-def _handler(node: t.Node) -> dict[str, Any]:
+def _handler(node: t.Node, models: list[dict[str, Any]], pool_name: str | None) -> dict[str, Any]:
     node = t.unparenthesize(node)
     if t.kind(node) not in {"ArrowFunction", "FunctionExpression"}:
         raise ValueError("only inline handler functions are qualified")
@@ -377,6 +552,10 @@ def _handler(node: t.Node) -> dict[str, Any]:
         raise ValueError("handler body is required")
     if t.kind(body) == "Block":
         statements = t.field_list(body, "statements")
+        if len(statements) == 2 and t.kind(statements[0]) == "VariableStatement":
+            if not models:
+                raise ValueError("database reads require database_layer: sqlx with captured models")
+            return {"status": 200, "read": capture_read(statements, response, pool_name, models)}
         if len(statements) != 1 or t.kind(statements[0]) not in {
             "ExpressionStatement",
             "ReturnStatement",

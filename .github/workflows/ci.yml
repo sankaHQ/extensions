@@ -161,6 +161,10 @@ jobs:
           uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/python-to-golang"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}]'
           uv --no-config pip install --reinstall --no-index --find-links release/python-to-golang release/python-to-golang/sanka_extension_python_to_golang-*.whl
           uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_python_to_golang as m; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve())"
+      - name: Qualify shared input presence with native Go
+        env:
+          SANKA_GO_TESTS: "1"
+        run: uv run --no-sync python -m pytest packages/sanka-code-migration/tests/test_input_values.py -q
       - name: Compare all three Python sources with all four Go targets
         env:
           SANKA_GO_TESTS: "1"
@@ -172,6 +176,20 @@ jobs:
   typescript-to-rust:
     name: TypeScript to Rust endpoint qualification
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sanka
+          POSTGRES_PASSWORD: sanka
+          POSTGRES_DB: sanka_rust_schema_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sanka"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -196,11 +214,12 @@ jobs:
           uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/typescript-to-rust"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}]'
           uv --no-config pip install --reinstall --no-index --find-links release/typescript-to-rust release/typescript-to-rust/sanka_extension_typescript_to_rust-*.whl
           uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_typescript_to_rust as m, sanka_ts_capture as c; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; root = pathlib.Path(sys.prefix).resolve(); assert all(pathlib.Path(x.__file__).resolve().is_relative_to(root) for x in (m, c))"
-      - name: Install the pinned Express source toolset
+      - name: Install the pinned Express and pg source toolset
         run: npm ci --ignore-scripts --no-audit --no-fund --prefix packages/sanka-extension-typescript-to-rust/tests/node-tools
       - name: Compare the Express source with the axum target
         env:
           SANKA_RUST_TESTS: "1"
           SANKA_NODE_TESTS: "1"
+          SANKA_MIGRATE_TEST_POSTGRES_DSN: postgresql://sanka:sanka@localhost:5432/sanka_rust_schema_test
           CARGO_TERM_COLOR: never
         run: uv run --no-sync python -m pytest packages/sanka-ts-capture/tests packages/sanka-extension-typescript-to-rust/tests -q

@@ -4,11 +4,12 @@ Extension ID: `sanka/typescript-to-rust`. Sources: Express (TypeScript).
 Targets: axum.
 
 The current implementation produces a Rust crate exposing `migrated_backend::app()`
-for literal public JSON GET endpoints. It is **not a complete backend migration**,
-not published in the extension catalog, and not qualified for production cutover.
-It copies the shape of `sanka/python-to-golang`; the full backend implementation
-(schema baseline, bounded reads, typed parameters and writes, Fastify and Hono
-sources) follows the workspace plan.
+for literal public JSON GET endpoints and, with the optional `sqlx` database layer,
+a flat PostgreSQL schema baseline with bounded table reads. It is **not a complete
+backend migration**, not published in the extension catalog, and not qualified for
+production cutover. It copies the shape of `sanka/python-to-golang`; the remaining
+backend slices (typed parameters and writes, Fastify and Hono sources) follow the
+workspace plan.
 
 Use the existing extension JSON subprocess protocol via
 `sanka-extension-typescript-to-rust`, with configuration:
@@ -52,6 +53,46 @@ above 2^53 is rounded exactly as Express would round it), keys keep JavaScript's
 property order, and the generated handler returns the exact `JSON.stringify`
 bytes that `res.json` would send.
 
+## Database layer
+
+`"database_layer": "sqlx"` adds the flat-schema slice. The optional keys
+`database_dialect` (`postgresql`), `migration_tool` (`sqlx`), `schema_mode`
+(`empty`), `schema_file` (`schema.sql`) and `models_file` (`src/models.ts`) accept
+only those values; other dialects, migration tools and existing-schema adoption
+are gaps. The capture then accepts, in addition to the literal endpoints:
+
+- `schema.sql` containing only `CREATE TABLE` statements with column definitions:
+  `integer`, `bigint`, `serial`, `bigserial`, `boolean`, `text` and `varchar(n)`
+  columns, `NOT NULL`, `UNIQUE`, `PRIMARY KEY` (exactly one integer key per table)
+  and `GENERATED { BY DEFAULT | ALWAYS } AS IDENTITY` on that key. Defaults,
+  foreign keys, checks, table-level constraints, indexes and other statements are
+  gaps. Identifiers must already be lowercase.
+- `src/models.ts` containing only exported interfaces or object type aliases whose
+  members are `number`, `string`, `boolean` or one of them `| null`. Every table
+  must match exactly one row type by column names, types and nullability, and
+  every row type must match a table.
+- `import { Pool } from "pg"` and
+  `const pool = new Pool({ connectionString: process.env.DATABASE_URL })`.
+- Read handlers of exactly this shape, where the SQL selects every column of one
+  table in declaration order, orders by its primary key and binds one literal
+  limit between 1 and 1000:
+
+  ```ts
+  app.get("/widgets", async (_req, res) => {
+    const { rows } = await pool.query("SELECT id, name FROM widgets ORDER BY id LIMIT $1", [100]);
+    res.json(rows);
+  });
+  ```
+
+The generated crate gains `src/models.rs` (`serde::Serialize` + `sqlx::FromRow`
+structs), a reversible `sqlx` baseline under `migrations/` that refuses to run
+where a captured table already exists, `src/bin/migrate.rs` (`migrate up` /
+`migrate down`), `.env.example`, `pub fn app(pool: PgPool) -> Router` and a
+`Cargo.lock` pinned under `locks/axum-postgresql` (sqlx 0.8 without TLS). Read
+handlers answer `500 {"error":"database read failed"}` when the query fails.
+`bigint` columns are serialized as decimal strings because node-postgres returns
+them that way; the captured contract is the source's observable output.
+
 ## Generated crate
 
 `Cargo.toml`, `Cargo.lock` (pinned in this package under `locks/axum`),
@@ -82,7 +123,15 @@ captured route. Set `SANKA_NODE` when the default `node` is not 22.x. Both
 commands require an unchanged saved plan and generated output; each rerun
 invalidates its previous report first.
 
+With the database layer, `test` needs `SANKA_RUST_TARGET_TEST_DATABASE_URL` and
+`verify` also needs `SANKA_RUST_SOURCE_TEST_DATABASE_URL`: two distinct dedicated
+PostgreSQL databases (or schemas selected through `options=-csearch_path=...`)
+that already hold the schema and the fixture rows. An ambient `DATABASE_URL` is
+never adopted. The Rust candidate receives the target URL as `DATABASE_URL`; the
+transpiled source receives the source URL and needs `pg` next to `express` in
+`node_modules` or `SANKA_NODE_TOOLS`.
+
 Replay executes source and candidate code; the temporary directory is not a
 security sandbox. It does not start TCP listeners or alter candidate files.
 Manual edits to `src/lib.rs` are tested; changes to `Cargo.toml`, `Cargo.lock`,
-`rust-toolchain.toml` or `contract.json` are rejected.
+`rust-toolchain.toml`, `contract.json` or the generated migrations are rejected.
