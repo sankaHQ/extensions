@@ -43,8 +43,15 @@ content negotiation, deployment, or whole-backend parity.
 its generated package. `verify` additionally executes the captured Python module
 with its framework test client and compares status, parsed JSON body, and media
 type. Both require an unchanged saved plan, generated output, and Go 1.26.5 on
-PATH. The extension interpreter needs the source framework and its test-client
-dependencies installed. Go may download the checksum-pinned dependencies.
+PATH. By default the extension interpreter needs the source framework and its test-client
+dependencies installed. For a CLI-installed converter, install those dependencies
+in a separate source virtual environment, set `SANKA_GO_SOURCE_PYTHON` to its
+absolute `bin/python` path, and pass `--extension-env SANKA_GO_SOURCE_PYTHON`
+to `sanka verify`. The interpreter path is explicit and must be executable; it is
+not discovered from the working directory. Replay retains Python `-I` isolation,
+so `PYTHONPATH` does not inject source dependencies. The report records the source
+interpreter path and version. This leaves the locked converter wheel environment
+unchanged. Go may download the checksum-pinned dependencies.
 
 Replay executes source and candidate code; the temporary directory is not a
 security sandbox. It does not start listening servers or alter candidate files.
