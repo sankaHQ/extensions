@@ -88,15 +88,15 @@ def summarize(command: str, response: dict[str, object]) -> list[str]:
                 lines.append(f"  {key}: {len(capture[key])}")
         if "readiness" in capture:
             lines.append(f"  readiness: {capture['readiness']}")
-        for gap in capture.get("gaps", []) if isinstance(capture.get("gaps"), list) else []:
+        gaps = capture.get("gaps")
+        for gap in gaps if isinstance(gaps, list) else []:
             lines.append(f"  gap: {gap}")
     if command == "plan":
         lines.append(f"  plan_hash: {data.get('plan_hash')}")
         files = data.get("files")
         lines.append(f"  generated files: {len(files) if isinstance(files, dict) else 0}")
-        for item in (
-            data.get("dispositions", []) if isinstance(data.get("dispositions"), list) else []
-        ):
+        dispositions = data.get("dispositions")
+        for item in dispositions if isinstance(dispositions, list) else []:
             if isinstance(item, dict) and item.get("disposition") != "native-screen":
                 reasons = item.get("adaptation_reasons")
                 lines.append(f"  {item.get('module')}: {item.get('disposition')} {reasons}")
@@ -110,9 +110,8 @@ def summarize(command: str, response: dict[str, object]) -> list[str]:
             if isinstance(step, dict):
                 for problem in step.get("problems", []):
                     lines.append(f"  {step.get('id')}: {problem}")
-    for artifact in (
-        response.get("artifacts", []) if isinstance(response.get("artifacts"), list) else []
-    ):
+    artifacts = response.get("artifacts")
+    for artifact in artifacts if isinstance(artifacts, list) else []:
         lines.append(f"  artifact: {artifact}")
     return lines
 
