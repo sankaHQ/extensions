@@ -40,3 +40,4 @@ Supported scopes and limitations are documented in each extension's package READ
 | --- | --- |
 | `sanka/drf-to-fastapi` | fastapi |
 | `sanka/drf-to-flask` | flask |
+| `sanka/llm-to-jev` | jev-classifier |

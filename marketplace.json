@@ -2,6 +2,10 @@
   "schema_version": "sanka-marketplace/v1",
   "extensions": [
     {
+      "id": "sanka/llm-to-jev",
+      "manifest": "packages/sanka-extension-llm-to-jev/extension.json"
+    },
+    {
       "id": "sanka/drf-to-fastapi",
       "manifest": "packages/sanka-extension-drf-to-fastapi/extension.json"
     },

@@ -39,3 +39,8 @@ BENCH_DIR ?= ../bench
 converter-bench:
 	@test -n "$(CONVERTER_BENCH_OUTPUT)" || { echo 'Set CONVERTER_BENCH_OUTPUT to a private artifact path outside this repository.' >&2; exit 2; }
 	uv run python scripts/run_converter_bench.py --bench-dir "$(BENCH_DIR)" --output "$(CONVERTER_BENCH_OUTPUT)"
+
+.PHONY: build-jev-release
+
+build-jev-release:
+	uv run python scripts/build_jev_release.py

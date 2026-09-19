@@ -60,6 +60,7 @@ jobs:
         run: |
           mkdir release-assets
           cp marketplace.json release-assets/marketplace.json
+          cp packages/sanka-extension-llm-to-jev/extension.json release-assets/sanka-extension-llm-to-jev.json
           cp packages/sanka-extension-drf-to-fastapi/extension.json release-assets/sanka-extension-drf-to-fastapi.json
           cp packages/sanka-extension-drf-to-flask/extension.json release-assets/sanka-extension-drf-to-flask.json
           cp packages/sanka-connector-markdown/extension.json release-assets/sanka-connector-markdown.json
