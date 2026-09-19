@@ -108,6 +108,22 @@ def _run(
     return result.stdout
 
 
+def _source_python() -> str:
+    """Select an explicit source environment without resolving venv interpreter symlinks."""
+    configured = os.environ.get("SANKA_GO_SOURCE_PYTHON")
+    if configured is None:
+        return sys.executable
+    executable = Path(configured)
+    if (
+        not executable.is_absolute()
+        or not executable.is_file()
+        or not os.access(executable, os.X_OK)
+    ):
+        raise ValueError("SANKA_GO_SOURCE_PYTHON must name an absolute executable Python path")
+    # Resolving a .venv/bin/python symlink would lose that environment's site-packages.
+    return str(executable)
+
+
 def _probe(target: str, paths: list[str], database: bool = False) -> str:
     request = (
         """response, err := app.Test(request)
@@ -221,6 +237,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
         )
     if not output.is_dir():
         raise ValueError("apply the reviewed plan before testing")
+    source_python = _source_python() if command == "verify" else None
     snapshot = _snapshot(output)
     # Bind evidence to the exact bytes tested, including manually repaired handlers.
     candidate_hash = digest(
@@ -347,7 +364,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             observed = workspace / "source-observed.json"
             _run(
                 [
-                    sys.executable,
+                    str(source_python),
                     "-I",
                     "-c",
                     SOURCE_PROBE,
@@ -362,6 +379,10 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
                 timeout=30,
                 environment=source_environment,
             )
+            result["source_python"] = {
+                "executable": source_python,
+                "version": _run([str(source_python), "-I", "--version"], workspace).strip(),
+            }
             expected = json.loads(observed.read_text())
             result.update(
                 source=expected, ok=result["ok"] and canonical(actual) == canonical(expected)
