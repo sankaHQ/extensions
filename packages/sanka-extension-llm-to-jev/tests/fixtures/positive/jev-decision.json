@@ -1,0 +1,83 @@
+{
+  "schema_version": "sanka-jev-decision/v1",
+  "decision_id": "support_department",
+  "review": {
+    "status": "reviewed",
+    "reviewer": "Synthetic cookbook author"
+  },
+  "source": {
+    "file": "classifier.py",
+    "function": "classify",
+    "call_site": "classifier.py:classify:11",
+    "sha256": "92ffaa0ae3abf8e06a6ecdd028597723684593f4e58c0ace88f7f1868879ee22",
+    "adapter": "openai-responses-enum/v1"
+  },
+  "contract": {
+    "input": {
+      "name": "text",
+      "type": "str"
+    },
+    "return": {
+      "type": "str",
+      "labels": [
+        "billing",
+        "technical",
+        "sales",
+        "unknown"
+      ]
+    }
+  },
+  "state": {
+    "projection": "text",
+    "input_name": "text"
+  },
+  "question": {
+    "id": "department",
+    "text": "Which department should handle this support request?",
+    "options": [
+      {
+        "id": "billing",
+        "description": "Invoices, payments, refunds and billing questions."
+      },
+      {
+        "id": "technical",
+        "description": "Application errors and technical troubleshooting."
+      },
+      {
+        "id": "sales",
+        "description": "Pricing, purchases and commercial inquiries."
+      },
+      {
+        "id": "unknown",
+        "description": "Unclear, unrelated or adversarial requests; insufficient evidence."
+      }
+    ]
+  },
+  "abstention": {
+    "policy": "return_unknown",
+    "label": "unknown"
+  },
+  "fallback": {
+    "policy": "return_unknown",
+    "label": "unknown",
+    "on": [
+      "provider_error",
+      "timeout",
+      "malformed_output",
+      "low_confidence"
+    ]
+  },
+  "confidence": {
+    "threshold": 0.9,
+    "status": "uncalibrated",
+    "owner": "application"
+  },
+  "target": {
+    "provider": "typesafe",
+    "model": "jev-1.13.0",
+    "sdk": "typesafe-sdk==0.7.0",
+    "credential_env": "TYPESAFE_API_KEY",
+    "timeout_seconds": 10,
+    "max_attempts": 1
+  }
+}

@@ -19,6 +19,7 @@ RUST_EXTENSION_NAME = "sanka-extension-typescript-to-rust"
 RN_EXTENSION_NAME = "sanka-extension-react-native-to-native"
 TS_CAPTURE_NAME = "sanka-ts-capture"
 HTTP_REPLAY_NAME = "sanka-http-replay"
+JEV_EXTENSION_NAME = "sanka-extension-llm-to-jev"
 FLOW_EXTENSION_NAME = "sanka-extension-business-flows"
 HOSTED_SYSTEM_PROVIDERS = frozenset({"hubspot", "salesforce", "sendgrid"})
 
@@ -35,7 +36,7 @@ def _imports(path: Path) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             imported.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             imported.add(node.module)
     return imported
 
@@ -109,6 +110,7 @@ def main() -> int:
         extension_sdk,
         *(PACKAGES / name for name in EXTENSION_NAMES),
         PACKAGES / FLOW_EXTENSION_NAME,
+        PACKAGES / JEV_EXTENSION_NAME,
         PACKAGES / GO_EXTENSION_NAME,
         PACKAGES / RUST_EXTENSION_NAME,
         PACKAGES / RN_EXTENSION_NAME,
@@ -116,6 +118,12 @@ def main() -> int:
         own_module = package.name.replace("-", "_")
         allowed_modules: tuple[str, ...] = (own_module,)
         project = _project(package)
+        if package.name == JEV_EXTENSION_NAME:
+            allowed_modules += ("sanka_extensions",)
+            if project.get("dependencies") != ["sanka-extension-sdk==0.1.0a4"]:
+                errors.append("Jev converter depends only on the published SDK a4")
+            if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
+                errors.append("Jev converter requires its isolated executable")
         if package.name == GO_EXTENSION_NAME:
             allowed_modules += ("sanka_extension_sdk", "sanka_extensions")
             if project.get("dependencies") != ["sanka-extension-sdk==0.1.0a4"]:
@@ -174,6 +182,12 @@ def main() -> int:
             ):
                 errors.append(f"missing Apache-2.0 SPDX header: {source.relative_to(ROOT)}")
             for module in _imports(source):
+                if (
+                    package.name == JEV_EXTENSION_NAME
+                    and module.split(".")[0] not in sys.stdlib_module_names
+                    and not _is_module_or_submodule(module, (own_module, "sanka_extensions"))
+                ):
+                    errors.append(f"Jev converter imports non-SDK execution code: {module}")
                 if (
                     package.name == FLOW_EXTENSION_NAME
                     and module.split(".")[0] not in sys.stdlib_module_names

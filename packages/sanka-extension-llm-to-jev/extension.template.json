@@ -1,0 +1,40 @@
+{
+  "commands": [
+    "scan",
+    "plan",
+    "apply",
+    "test",
+    "verify"
+  ],
+  "distribution": {
+    "executable": "sanka-extension-llm-to-jev",
+    "name": "sanka-extension-llm-to-jev",
+    "version": "0.1.0a1"
+  },
+  "id": "sanka/llm-to-jev",
+  "kind": "migration",
+  "match": {
+    "all": [
+      {
+        "kind": "language",
+        "value": "python"
+      }
+    ],
+    "any": [
+      {
+        "kind": "static_import",
+        "value": "openai"
+      }
+    ]
+  },
+  "protocol_version": "sanka-extension/v1",
+  "runtime": {
+    "sanka_cli": "==0.2.12"
+  },
+  "schema_version": "sanka-extension-manifest/v2",
+  "targets": [
+    "jev-classifier"
+  ],
+  "version": "0.1.0a1",
+  "wheels": []
+}
