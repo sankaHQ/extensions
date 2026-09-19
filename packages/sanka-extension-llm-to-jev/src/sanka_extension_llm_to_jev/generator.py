@@ -14,6 +14,8 @@ def render_candidate(root: Path, spec: dict[str, Any], inventory: dict[str, Any]
     site = next(
         item for item in inventory["call_sites"] if item["id"] == spec["source"]["call_site"]
     )
+    if site["status"] != "supported":
+        raise ValueError("; ".join(site["reasons"]))
     decision_id = spec["decision_id"]
     module = f"jev_adapter_{decision_id}"
     config = f"jev_decision_{decision_id}.json"
