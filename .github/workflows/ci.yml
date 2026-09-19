@@ -208,6 +208,7 @@ jobs:
       - name: Fetch the pinned TypeScript compiler bundle (digest-checked, not committed)
         run: uv run python scripts/fetch_typescript_bundle.py
       - run: uv build --wheel --package sanka-ts-capture --out-dir release/typescript-to-rust
+      - run: uv build --wheel --package sanka-http-replay --out-dir release/typescript-to-rust
       - run: uv build --wheel --package sanka-extension-typescript-to-rust --out-dir release/typescript-to-rust
       - name: Install the actual candidate wheels
         run: |

@@ -440,12 +440,14 @@ def test_migration_and_read_lifecycle(
             assert failed.outcome == "error"
             report = json.loads((tmp_path / ".sanka/rust/test.json").read_text())
             assert report["ok"] is False
-            assert report["candidate"][1] == {
-                "path": "/orders",
-                "status": 500,
-                "media_type": "application/json",
-                "body": {"error": "database read failed"},
-            }
+            failed_read = report["candidate"][1]
+            assert (failed_read["path"], failed_read["status"], failed_read["media_type"]) == (
+                "/orders",
+                500,
+                "application/json",
+            )
+            assert failed_read["body"] == {"error": "database read failed"}
+            assert failed_read["tables"] == {"orders": None, "widgets": None}
             fmt = subprocess.run(
                 ["cargo", "fmt", "--check"], cwd=output, capture_output=True, text=True, check=False
             )
