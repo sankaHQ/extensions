@@ -69,6 +69,12 @@ class Compatibility(unittest.TestCase):
         self.client.system_one.return_value.model = "wrong-model"
         self.assertEqual(adapter.classify("hello"), self.unknown)
 
+    def test_missing_answer_does_not_retry(self):
+        self.client.system_one.return_value = SimpleNamespace(answers={})
+        with patch.dict(adapter.CONFIG["target"], {"max_attempts": 3}):
+            self.assertEqual(adapter.classify("hello"), self.unknown)
+        self.client.system_one.assert_called_once()
+
     def test_low_confidence(self):
         threshold = adapter.CONFIG["confidence"]["threshold"]
         if threshold > 0:

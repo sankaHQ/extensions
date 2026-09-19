@@ -36,6 +36,10 @@ def classify(text: str) -> str:
                     model=target["model"],
                     questions={question["id"]: choice},
                 )
+            except Exception:
+                # Retry only request failures, with no second provider fallback.
+                continue
+            try:
                 answer = response.answers[question["id"]]
                 confidence = answer.confidence
                 probabilities = answer.probabilities
@@ -58,8 +62,8 @@ def classify(text: str) -> str:
                     return CONFIG["abstention"]["label"]
                 return answer.choice
             except Exception:
-                # At most the reviewed number of calls; no second provider fallback.
-                continue
+                # A received malformed answer is a decision, not a retry trigger.
+                return fallback
         return fallback
     finally:
         try:
