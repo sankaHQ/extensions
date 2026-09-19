@@ -27,8 +27,11 @@ Jev release once published.
    environments before publishing. CI on pull requests never publishes.
 4. Download the actual release catalog, manifest and three wheels. Verify their
    hashes against the landed manifest and run the isolated cookbook acceptance
-   again. Also install from the actual release catalog URL with explicit marketplace
-   trust and confirm the installed extension ID/version.
+   again. Also register the official Git marketplace at the full release commit
+   (`--revision`), install Jev from its published wheel URLs, and confirm the installed
+   extension ID/version. The scoped downloaded catalog can alternatively be registered
+   as a local snapshot with explicit marketplace trust; CLI 0.2.12 does not accept a
+   remote JSON catalog as a Git marketplace source.
 5. Record the tag/commit, release URL, artifact hashes, tested versions and reports.
    Only then replace the cookbook's unpublished-candidate instructions with verified
    public install instructions in a reviewed follow-up change.
