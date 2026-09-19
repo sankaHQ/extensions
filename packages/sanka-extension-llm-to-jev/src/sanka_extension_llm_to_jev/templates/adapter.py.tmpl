@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Application-owned Jev adapter. Confidence is uncalibrated, not quality proof."""
+
+import json
+import math
+import os
+from pathlib import Path
+
+CONFIG = json.loads(Path(__file__).with_name(__CONFIG_FILE__).read_text(encoding="utf-8"))
+
+
+def classify(text: str) -> str:
+    """Preserve the reviewed str -> enum / unknown error contract."""
+    fallback = CONFIG["fallback"]["label"]
+    target = CONFIG["target"]
+    try:
+        from typesafe_sdk import Choice, RetryPolicy, TypeSafeClient
+
+        question = CONFIG["question"]
+        labels = {option["id"]: option["description"] for option in question["options"]}
+        choice = Choice(instructions=question["text"], criteria=labels)
+        client = TypeSafeClient(
+            api_key=os.environ[target["credential_env"]],
+            base_url="https://api.typesafe.ai",
+            model=target["model"],
+            timeout=target["timeout_seconds"],
+            retry=RetryPolicy(max_retries=0),
+        )
+    except Exception:
+        return fallback
+    try:
+        for _attempt in range(target["max_attempts"]):
+            try:
+                response = client.system_one(
+                    state=text,
+                    model=target["model"],
+                    questions={question["id"]: choice},
+                )
+                answer = response.answers[question["id"]]
+                confidence = answer.confidence
+                probabilities = answer.probabilities
+                if (
+                    response.model != target["model"]
+                    or answer.type != "choice"
+                    or answer.choice not in labels
+                    or set(probabilities) != set(labels)
+                    or any(isinstance(p, bool) or not isinstance(p, (int, float))
+                           or not math.isfinite(p) or not 0 <= p <= 1
+                           for p in probabilities.values())
+                    or abs(sum(probabilities.values()) - 1) > 0.000001
+                    or isinstance(confidence, bool)
+                    or not isinstance(confidence, (int, float))
+                    or not math.isfinite(confidence)
+                    or not 0 <= confidence <= 1
+                ):
+                    return fallback
+                if confidence < CONFIG["confidence"]["threshold"]:
+                    return CONFIG["abstention"]["label"]
+                return answer.choice
+            except Exception:
+                # At most the reviewed number of calls; no second provider fallback.
+                continue
+        return fallback
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass

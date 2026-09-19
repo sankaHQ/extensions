@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Mock contract checks only: these do not measure model quality or latency."""
+
+import importlib.util
+from contextlib import ExitStack
+import os
+from pathlib import Path
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+import __ADAPTER_MODULE__ as adapter
+from typesafe_sdk import TypeSafeClient
+
+
+class Compatibility(unittest.TestCase):
+    def setUp(self):
+        self.key = patch.dict(os.environ, {adapter.CONFIG["target"]["credential_env"]: "offline-test"})
+        self.key.start()
+        self.addCleanup(self.key.stop)
+        self.factory = patch("typesafe_sdk.TypeSafeClient", autospec=TypeSafeClient)
+        self.client = self.factory.start().return_value
+        self.addCleanup(self.factory.stop)
+        self.unknown = adapter.CONFIG["fallback"]["label"]
+
+    def answer(self, label, confidence=1.0):
+        self.client.system_one.return_value = SimpleNamespace(model=adapter.CONFIG["target"]["model"], answers={
+            adapter.CONFIG["question"]["id"]: SimpleNamespace(type="choice", choice=label, confidence=confidence,
+                probabilities={value: 1.0 if value == label else 0.0
+                               for value in adapter.CONFIG["contract"]["return"]["labels"]})
+        })
+
+    def test_labels_and_text_projection(self):
+        for label in adapter.CONFIG["contract"]["return"]["labels"]:
+            self.answer(label)
+            self.assertEqual(adapter.classify("請求書について / invoice"), label)
+            self.assertEqual(self.client.system_one.call_args.kwargs["state"], "請求書について / invoice")
+
+    def test_original_function_contract(self):
+        # Source is executed only in this explicit destination test command.
+        source = Path(__file__).parent / __SOURCE_FILE__
+        spec = importlib.util.spec_from_file_location("candidate_source", source)
+        module = importlib.util.module_from_spec(spec)
+        with ExitStack() as stack:
+            if importlib.util.find_spec("openai") is not None:
+                stack.enter_context(patch("openai.OpenAI", autospec=True))
+            spec.loader.exec_module(module)
+        label = adapter.CONFIG["contract"]["return"]["labels"][0]
+        self.answer(label)
+        self.assertEqual(getattr(module, __SOURCE_FUNCTION__)("hello"), label)
+
+    def test_unknown_and_malformed(self):
+        for label, confidence in [("not-an-option", 1), (self.unknown, float("nan")),
+                                  (self.unknown, -1), (self.unknown, 2), (self.unknown, True)]:
+            self.answer(label, confidence)
+            self.assertEqual(adapter.classify("hello"), self.unknown)
+        self.client.system_one.return_value = SimpleNamespace(model=adapter.CONFIG["target"]["model"], answers={})
+        self.assertEqual(adapter.classify("hello"), self.unknown)
+
+    def test_model_type_and_probabilities(self):
+        label = adapter.CONFIG["contract"]["return"]["labels"][0]
+        for field, value in [("type", "score"), ("probabilities", {}),
+                             ("probabilities", {label: float("nan")})]:
+            self.answer(label)
+            answer = self.client.system_one.return_value.answers[adapter.CONFIG["question"]["id"]]
+            setattr(answer, field, value)
+            self.assertEqual(adapter.classify("hello"), self.unknown)
+        self.answer(label)
+        self.client.system_one.return_value.model = "wrong-model"
+        self.assertEqual(adapter.classify("hello"), self.unknown)
+
+    def test_low_confidence(self):
+        threshold = adapter.CONFIG["confidence"]["threshold"]
+        if threshold > 0:
+            self.answer(adapter.CONFIG["contract"]["return"]["labels"][0], threshold / 2)
+            self.assertEqual(adapter.classify("hello"), self.unknown)
+
+    def test_failure_and_timeout_are_bounded(self):
+        for error in [RuntimeError("mock provider failure"), TimeoutError("mock timeout")]:
+            self.client.system_one.reset_mock()
+            self.client.system_one.side_effect = error
+            self.assertEqual(adapter.classify("hello"), self.unknown)
+            self.assertEqual(self.client.system_one.call_count, adapter.CONFIG["target"]["max_attempts"])
+        self.assertTrue(self.client.close.called)
+
+    def test_missing_credentials(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(adapter.classify("hello"), self.unknown)
+        self.client.system_one.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()
