@@ -11,6 +11,24 @@ import yaml
 RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/"
 NEW_RELEASE_PREFIX = RELEASE_PREFIX + "extensions-v0.1.0a31/"
 EXPECTED = {
+    "sanka/python-to-golang": {
+        "kind": "migration",
+        "protocol_version": "sanka-extension/v1",
+        "distribution": {
+            "name": "sanka-extension-python-to-golang",
+            "version": "0.1.0a1",
+            "executable": "sanka-extension-python-to-golang",
+        },
+    },
+    "sanka/typescript-to-rust": {
+        "kind": "migration",
+        "protocol_version": "sanka-extension/v1",
+        "distribution": {
+            "name": "sanka-extension-typescript-to-rust",
+            "version": "0.1.0a1",
+            "executable": "sanka-extension-typescript-to-rust",
+        },
+    },
     "sanka/drf-to-flask": {
         "kind": "migration",
         "protocol_version": "sanka-extension/v1",
@@ -92,7 +110,11 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
         expected = EXPECTED[item["id"]]
         assert manifest["schema_version"] == "sanka-extension-manifest/v2"
         assert manifest["id"] == item["id"]
-        assert manifest["runtime"] == {"sanka_cli": ">=0.2.0,<0.3"}
+        assert manifest["runtime"] == {
+            "sanka_cli": ">=0.2.12,<0.3"
+            if item["id"] in {"sanka/python-to-golang", "sanka/typescript-to-rust"}
+            else ">=0.2.0,<0.3"
+        }
         assert manifest["kind"] == expected["kind"]
         assert manifest["protocol_version"] == expected["protocol_version"]
         assert manifest["distribution"] == expected["distribution"]
@@ -100,6 +122,8 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
             assert manifest["providers"] == expected["providers"]
         assert manifest["wheels"]
         expected_prefix = NEW_RELEASE_PREFIX if expected["kind"] == "migration" else RELEASE_PREFIX
+        if item["id"] in {"sanka/python-to-golang", "sanka/typescript-to-rust"}:
+            expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a1/"
         assert all(wheel["url"].startswith(expected_prefix) for wheel in manifest["wheels"])
         assert all(len(wheel["sha256"]) == 64 for wheel in manifest["wheels"])
 

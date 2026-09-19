@@ -1,0 +1,114 @@
+name: API converter release qualification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a landed immutable release tag for publication
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a1
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen --all-packages
+      - run: uv run python scripts/build_api_release.py
+      - run: uv run python -m pytest tests/test_api_release.py -q
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: api-release-${{ github.sha }}
+          path: release/api-converters/*
+          if-no-files-found: error
+
+  qualify:
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [go, rust]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: api-release-${{ github.sha }}
+          path: release/api-converters
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        if: matrix.target == 'go'
+        with:
+          go-version: "1.26.5"
+          cache: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        if: matrix.target == 'rust'
+        with:
+          node-version: "22.14.0"
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        if: matrix.target == 'rust'
+        with:
+          toolchain: "1.93.1"
+      - name: Check out the independently reviewed examples
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: sankaHQ/sanka-examples
+          ref: e4b9990ccc21ec3d1e775b0955f021f2083fc524
+          path: release/examples
+          persist-credentials: false
+      - name: Verify public CLI lifecycle, compilation and actual HTTP parity
+        run: >-
+          uv run --no-project --python 3.12 python scripts/qualify_api_release.py
+          --examples release/examples --release release/api-converters
+          --target ${{ matrix.target }} --report release/${{ matrix.target }}-acceptance.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: api-acceptance-${{ matrix.target }}-${{ github.sha }}
+          path: release/${{ matrix.target }}-acceptance.json
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
+    needs: [build, qualify]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: api-release-${{ github.sha }}
+          path: release-assets
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: api-acceptance-*-${{ github.sha }}
+          merge-multiple: true
+          path: release-assets
+      - name: Publish the qualified immutable experimental converters
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
+            --title "Go and Rust API converters 0.1.0a1" \
+            --notes "Experimental Sanka Code converters. Published CLI 0.2.12 qualification covers the bounded Flask/Fiber and Express/axum literal public JSON GET examples: scan, plan, reviewed apply, test, verify, source preservation, native builds and actual HTTP comparison. Includes exact wheel manifests and acceptance receipts. No arbitrary-application or production-cutover claim. React Native/Compose and Jev are not published by this release."
+        env:
+          GH_TOKEN: ${{ github.token }}

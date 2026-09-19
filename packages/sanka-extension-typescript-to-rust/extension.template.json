@@ -1,0 +1,35 @@
+{
+  "schema_version": "sanka-extension-manifest/v2",
+  "kind": "migration",
+  "id": "sanka/typescript-to-rust",
+  "version": "0.1.0a1",
+  "protocol_version": "sanka-extension/v1",
+  "distribution": {
+    "name": "sanka-extension-typescript-to-rust",
+    "version": "0.1.0a1",
+    "executable": "sanka-extension-typescript-to-rust"
+  },
+  "commands": [
+    "scan",
+    "plan",
+    "apply",
+    "test",
+    "verify"
+  ],
+  "targets": [
+    "axum"
+  ],
+  "runtime": {
+    "sanka_cli": ">=0.2.12,<0.3"
+  },
+  "match": {
+    "all": [
+      {
+        "kind": "file",
+        "value": "src/app.ts"
+      }
+    ],
+    "any": []
+  },
+  "wheels": []
+}

@@ -36,6 +36,14 @@ CATALOG: dict[str, Any] = {
     "schema_version": "sanka-marketplace/v1",
     "extensions": [
         {
+            "id": "sanka/python-to-golang",
+            "manifest": "packages/sanka-extension-python-to-golang/extension.json",
+        },
+        {
+            "id": "sanka/typescript-to-rust",
+            "manifest": "packages/sanka-extension-typescript-to-rust/extension.json",
+        },
+        {
             "id": "sanka/drf-to-fastapi",
             "manifest": "packages/sanka-extension-drf-to-fastapi/extension.json",
         },
@@ -242,6 +250,14 @@ def _catalog_errors(root: Path, release: Path) -> list[str]:
     if catalog != CATALOG:
         return ["marketplace.json does not match the official sanka-marketplace/v1 catalog"]
     errors: list[str] = []
+    from scripts.build_api_release import PACKAGES as API_PACKAGES
+    from scripts.build_api_release import manifest as api_manifest
+
+    for package in API_PACKAGES[:2]:
+        try:
+            api_manifest(package, root)
+        except (ValueError, OSError) as error:
+            errors.append(f"API converter catalog manifest is invalid: {error}")
     for package, expected in MANIFESTS.items():
         manifest_path = root / "packages" / package / "extension.json"
         try:

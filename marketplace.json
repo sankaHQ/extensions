@@ -2,6 +2,14 @@
   "schema_version": "sanka-marketplace/v1",
   "extensions": [
     {
+      "id": "sanka/python-to-golang",
+      "manifest": "packages/sanka-extension-python-to-golang/extension.json"
+    },
+    {
+      "id": "sanka/typescript-to-rust",
+      "manifest": "packages/sanka-extension-typescript-to-rust/extension.json"
+    },
+    {
       "id": "sanka/drf-to-fastapi",
       "manifest": "packages/sanka-extension-drf-to-fastapi/extension.json"
     },

@@ -1,0 +1,61 @@
+{
+  "schema_version": "sanka-extension-manifest/v2",
+  "kind": "migration",
+  "id": "sanka/typescript-to-rust",
+  "version": "0.1.0a1",
+  "protocol_version": "sanka-extension/v1",
+  "distribution": {
+    "name": "sanka-extension-typescript-to-rust",
+    "version": "0.1.0a1",
+    "executable": "sanka-extension-typescript-to-rust"
+  },
+  "commands": [
+    "scan",
+    "plan",
+    "apply",
+    "test",
+    "verify"
+  ],
+  "targets": [
+    "axum"
+  ],
+  "runtime": {
+    "sanka_cli": ">=0.2.12,<0.3"
+  },
+  "match": {
+    "all": [
+      {
+        "kind": "file",
+        "value": "src/app.ts"
+      }
+    ],
+    "any": []
+  },
+  "wheels": [
+    {
+      "name": "sanka_extension_typescript_to_rust-0.1.0a1-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a1/sanka_extension_typescript_to_rust-0.1.0a1-py3-none-any.whl",
+      "sha256": "c305e5da8f10c0af6f8eb28732074f4e995403cd158d1179485b491df0e7bd23"
+    },
+    {
+      "name": "sanka_ts_capture-0.1.0a1-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a1/sanka_ts_capture-0.1.0a1-py3-none-any.whl",
+      "sha256": "a1f348b45bf3fc7f335599e4f976d077c5e97815e49536ad988aa10e39ba6c68"
+    },
+    {
+      "name": "sanka_http_replay-0.1.0a1-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a1/sanka_http_replay-0.1.0a1-py3-none-any.whl",
+      "sha256": "ec9902f150e14fd7d508b506ac6f60de50e764de1205a482337c2a6f35611604"
+    },
+    {
+      "name": "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a1/sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
+      "sha256": "f1a6655095ab81e549137e1d9604492bda2a31677d674c6359b0a39a2da96307"
+    },
+    {
+      "name": "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a1/sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
+      "sha256": "34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e"
+    }
+  ]
+}
