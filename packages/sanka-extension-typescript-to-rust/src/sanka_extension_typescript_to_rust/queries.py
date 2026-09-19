@@ -12,7 +12,13 @@ _WHITESPACE = re.compile(r"\s+")
 
 
 def normalize_sql(text: str) -> str:
-    return _WHITESPACE.sub(" ", text.replace('"', "").strip().rstrip(";").strip()).lower()
+    """Canonical spelling of a statement: no quotes, single spaces, one token layout."""
+    text = _WHITESPACE.sub(" ", text.replace('"', "").strip().rstrip(";").strip())
+    text = re.sub(r"\s*,\s*", ", ", text)
+    text = re.sub(r"\s*=\s*", " = ", text)
+    text = re.sub(r"\s*\(\s*", " (", text)
+    text = re.sub(r"\s*\)", ")", text)
+    return text.lower()
 
 
 def expected_sql(model: dict[str, Any]) -> str:
