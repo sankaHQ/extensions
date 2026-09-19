@@ -8,7 +8,6 @@ import json
 import os
 import shutil
 import subprocess
-import tempfile
 import uuid
 from pathlib import Path
 
@@ -18,245 +17,12 @@ from test_typescript_to_rust import needs_node, needs_rust
 
 from sanka_extension_typescript_to_rust.adapter import handle
 from sanka_extension_typescript_to_rust.capture import canonical, capture, configuration
+from sanka_extension_typescript_to_rust.replay import operations, scenario_models
 from sanka_extension_typescript_to_rust.writes import handler_source
-from sanka_ts_capture import node_executable, transpile_sources
+from sanka_http_replay import default_scenarios
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "pg-writes"
 TOOLS = Path(__file__).resolve().parent / "node-tools"
-WIDGET_COLUMNS = "id, name, count, enabled, note"
-SEQUENCE_SQL = "SELECT last_value::integer AS value, is_called FROM widgets_id_seq"
-SCENARIOS: list[dict[str, object]] = [
-    {"method": "POST", "path": "/widgets", "body": {"name": "missing"}, "status": 400},
-    {
-        "method": "POST",
-        "path": "/widgets",
-        "body": {"name": "wrong", "count": True, "enabled": False},
-        "status": 400,
-    },
-    {
-        "method": "POST",
-        "path": "/widgets",
-        "body": {"name": "alpha", "count": 7, "enabled": True, "note": None},
-        "status": 201,
-    },
-    {
-        "method": "POST",
-        "path": "/widgets",
-        "body": {"name": "alpha", "count": 1, "enabled": True},
-        "status": 409,
-    },
-    {"method": "GET", "path": "/widgets/1", "status": 200},
-    {"method": "GET", "path": "/widgets/abc", "status": 404},
-    {"method": "GET", "path": "/widgets/999", "status": 404},
-    {
-        "method": "PATCH",
-        "path": "/widgets/1",
-        "body": {"count": 0, "enabled": False, "note": ""},
-        "status": 200,
-    },
-    {"method": "PATCH", "path": "/widgets/1", "body": {}, "status": 200},
-    {"method": "PATCH", "path": "/widgets/1", "body": {"note": None}, "status": 200},
-    {"method": "PATCH", "path": "/widgets/1", "body": {"name": None}, "status": 400},
-    {"method": "PATCH", "path": "/widgets/1", "body": {"extra": 1}, "status": 400},
-    {"method": "PATCH", "path": "/widgets/999", "body": {"count": 1}, "status": 404},
-    {"method": "PUT", "path": "/widgets/1", "body": {"name": "missing"}, "status": 400},
-    {
-        "method": "PUT",
-        "path": "/widgets/1",
-        "body": {"name": "beta", "count": 9, "enabled": False},
-        "status": 200,
-    },
-    {
-        "method": "PUT",
-        "path": "/widgets/999",
-        "body": {"name": "missing", "count": 1, "enabled": True},
-        "status": 404,
-    },
-    {"method": "DELETE", "path": "/widgets/1", "status": 204},
-    {"method": "DELETE", "path": "/widgets/1", "status": 404},
-    {
-        "method": "POST",
-        "path": "/widgets",
-        "body": {"name": "next", "count": -2147483648, "enabled": False},
-        "status": 201,
-    },
-    {
-        "method": "POST",
-        "path": "/widgets",
-        "body": {"name": "overflow", "count": 2147483648, "enabled": True},
-        "status": 400,
-    },
-    {
-        "method": "POST",
-        "path": "/widgets",
-        "body": {"name": "float", "count": 7.0, "enabled": True, "note": "日本語 <tag>&"},
-        "status": 201,
-    },
-    {"method": "PATCH", "path": "/widgets/3", "body": {"name": "float"}, "status": 409},
-    {"method": "GET", "path": "/widgets", "status": 200},
-]
-
-# Test-owned Express runner: serves the transpiled source on a Unix socket and records
-# every response together with the table rows and identity sequence afterwards.
-SOURCE_RUNNER = """// SPDX-License-Identifier: Apache-2.0
-"use strict";
-const fs = require("node:fs");
-const http = require("node:http");
-const path = require("node:path");
-const { Pool } = require("pg");
-
-const [appPath, casesPath, destination] = process.argv.slice(2);
-const loaded = require(path.resolve(appPath));
-const app = loaded && loaded.__esModule && loaded.default ? loaded.default : loaded;
-const cases = JSON.parse(fs.readFileSync(casesPath, "utf8"));
-const socketPath = path.join(process.cwd(), "s.sock");
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-
-function exchange(scenario) {
-  return new Promise((resolve, reject) => {
-    const payload = "body" in scenario ? JSON.stringify(scenario.body) : null;
-    const headers = payload === null
-      ? {}
-      : { "content-type": "application/json", "content-length": Buffer.byteLength(payload) };
-    const request = http.request(
-      { socketPath, path: scenario.path, method: scenario.method, headers },
-      (response) => {
-        const chunks = [];
-        response.on("data", (chunk) => chunks.push(chunk));
-        response.on("end", () => {
-          const text = Buffer.concat(chunks).toString("utf8");
-          let body = null;
-          if (text.length) {
-            try {
-              body = JSON.parse(text);
-            } catch {
-              reject(new Error(`non-JSON response for ${scenario.method} ${scenario.path}`));
-              return;
-            }
-          }
-          resolve({
-            status: response.statusCode,
-            media_type: String(response.headers["content-type"] || "").split(";")[0],
-            body,
-          });
-        });
-      }
-    );
-    request.on("error", reject);
-    if (payload !== null) request.write(payload);
-    request.end();
-  });
-}
-
-const server = http.createServer(app);
-server.listen(socketPath, async () => {
-  let code = 0;
-  try {
-    const observed = [];
-    for (const scenario of cases) {
-      const result = await exchange(scenario);
-      const rows = (await pool.query("SELECT @COLUMNS@ FROM widgets ORDER BY id")).rows;
-      const sequence = (await pool.query("@SEQUENCE@")).rows[0];
-      observed.push({
-        method: scenario.method,
-        path: scenario.path,
-        ...result,
-        rows,
-        sequence: [sequence.value, sequence.is_called],
-      });
-    }
-    fs.writeFileSync(destination, JSON.stringify(observed));
-  } catch (error) {
-    console.error(String((error && error.message) || error));
-    code = 1;
-  } finally {
-    await pool.end();
-    server.close(() => process.exit(code));
-  }
-});
-""".replace("@COLUMNS@", WIDGET_COLUMNS).replace("@SEQUENCE@", SEQUENCE_SQL)
-
-# Test-owned axum probe: the same scenarios through tower::ServiceExt::oneshot.
-TARGET_PROBE = """// SPDX-License-Identifier: Apache-2.0
-use axum::body::{Body, to_bytes};
-use axum::http::Request;
-use serde_json::{Value, json};
-use sqlx::Row;
-use tower::ServiceExt;
-
-#[tokio::test]
-async fn sanka_write_parity() {
-    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&url)
-        .await
-        .expect("connect to DATABASE_URL");
-    let raw = std::fs::read_to_string("write-cases.json").expect("cases");
-    let cases: Vec<Value> = serde_json::from_str(&raw).expect("cases json");
-    let mut observed = Vec::new();
-    for case in cases {
-        let method = case["method"].as_str().expect("method").to_string();
-        let path = case["path"].as_str().expect("path").to_string();
-        let builder = Request::builder().method(method.as_str()).uri(&path);
-        let request = match case.get("body") {
-            Some(value) => builder
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_vec(value).expect("encode body"))),
-            None => builder.body(Body::empty()),
-        }
-        .expect("request");
-        let response = migrated_backend::app(pool.clone())
-            .oneshot(request)
-            .await
-            .expect("response");
-        let status = response.status().as_u16();
-        let media_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
-            .split(';')
-            .next()
-            .unwrap_or("")
-            .to_string();
-        let bytes = to_bytes(response.into_body(), 1_048_576).await.expect("body");
-        let body: Value = if bytes.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(&bytes).expect("JSON body")
-        };
-        @TAMPER@
-        let rows = sqlx::query_as::<_, migrated_backend::models::Widget>(
-            "SELECT @COLUMNS@ FROM widgets ORDER BY id",
-        )
-        .fetch_all(&pool)
-        .await
-        .expect("rows");
-        let sequence = sqlx::query("@SEQUENCE@")
-            .fetch_one(&pool)
-            .await
-            .expect("sequence");
-        let value: i32 = sequence.get("value");
-        let called: bool = sequence.get("is_called");
-        observed.push(json!({
-            "method": method,
-            "path": path,
-            "status": status,
-            "media_type": media_type,
-            "body": body,
-            "rows": rows,
-            "sequence": [value, called],
-        }));
-    }
-    let encoded = serde_json::to_vec(&observed).expect("encode");
-    std::fs::write("write-observed.json", encoded).expect("write");
-}
-""".replace("@COLUMNS@", WIDGET_COLUMNS).replace("@SEQUENCE@", SEQUENCE_SQL)
-TAMPER = (
-    "if status == 201 { sqlx::query(\"UPDATE widgets SET note = 'tampered'\")"
-    '.execute(&pool).await.expect("tamper"); }'
-)
 
 
 def project(root: Path, app: str | None = None) -> Path:
@@ -329,13 +95,29 @@ def test_lookup_and_write_capture(tmp_path: Path) -> None:
     assert 'Some("23505")' in library
     assert "StatusCode::NO_CONTENT.into_response()" in library
     assert '"note" = CASE WHEN $8 THEN $9 ELSE "note" END' in library
-    # Public replay stays refused for write contracts, exactly like the Go extension.
+    # Replay follows the shared scenario contract; it needs explicit fixture databases.
     apply(tmp_path)
-    for command in ("test", "verify"):
-        response = handle(database_request(tmp_path, command))
-        assert response.outcome == "error"
-        assert response.error is not None
-        assert "shared HTTP scenario adapter" in response.error.message
+    for name in ("SANKA_RUST_TARGET_TEST_DATABASE_URL", "SANKA_RUST_SOURCE_TEST_DATABASE_URL"):
+        os.environ.pop(name, None)
+    response = handle(database_request(tmp_path, "test"))
+    assert response.outcome == "error"
+    assert response.error is not None
+    assert "SANKA_RUST_TARGET_TEST_DATABASE_URL" in response.error.message
+    scenarios = default_scenarios(operations(captured), scenario_models(captured))
+    assert [scenario["id"] for scenario in scenarios][:5] == [
+        "Widget.create.missing",
+        "Widget.create.wrong-type",
+        "Widget.create.unknown-key",
+        "Widget.create.first",
+        "Widget.create.duplicate",
+    ]
+    assert scenarios[-1] == {
+        "id": "get.widgets",
+        "method": "GET",
+        "path": "/widgets",
+        "headers": {},
+        "expected_status": 200,
+    }
 
 
 @needs_node
@@ -459,115 +241,105 @@ def test_write_lifecycle(tmp_path: Path, node_tools: Path, monkeypatch: pytest.M
     dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
     schemas = ["rust_write_" + uuid.uuid4().hex for _ in range(2)]
     source_url, target_url = (schema_dsn(dsn, schema) for schema in schemas)
-    environment = os.environ | {"CARGO_TERM_COLOR": "never"}
-    environment.setdefault("CARGO_TARGET_DIR", str(output.parent / "rust-target"))
-    cases = [{key: value for key, value in case.items() if key != "status"} for case in SCENARIOS]
-    node = node_executable()
-
-    def cargo(arguments: list[str], cwd: Path, url: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["cargo", *arguments],
-            cwd=cwd,
-            env=environment | {"DATABASE_URL": url},
-            capture_output=True,
-            text=True,
-            timeout=1200,
-            check=False,
-        )
-
-    def target_run(*, tamper: bool) -> list[dict[str, object]]:
-        with tempfile.TemporaryDirectory(prefix="sanka-write-probe-") as temporary:
-            candidate = Path(temporary) / "candidate"
-            shutil.copytree(output, candidate)
-            (candidate / "tests").mkdir(exist_ok=True)
-            (candidate / "tests" / "sanka_write_probe.rs").write_text(
-                TARGET_PROBE.replace("@TAMPER@", TAMPER if tamper else "")
-            )
-            (candidate / "write-cases.json").write_text(json.dumps(cases))
-            run = cargo(
-                ["test", "--locked", "--quiet", "--test", "sanka_write_probe"],
-                candidate,
-                target_url,
-            )
-            assert run.returncode == 0, run.stdout + run.stderr
-            observed: list[dict[str, object]] = json.loads(
-                (candidate / "write-observed.json").read_text()
-            )
-            return observed
-
-    def source_run() -> list[dict[str, object]]:
-        with tempfile.TemporaryDirectory(prefix="sanka-write-source-") as temporary:
-            directory = Path(temporary)
-            transpiled = transpile_sources({"src/app.ts": source_text()}, node=node)
-            (directory / "app.js").write_text(transpiled["src/app.ts"])
-            (directory / "run.js").write_text(SOURCE_RUNNER)
-            (directory / "cases.json").write_text(json.dumps(cases))
-            run = subprocess.run(
-                [node, "run.js", "app.js", "cases.json", "observed.json"],
-                cwd=directory,
-                env={
-                    "PATH": os.environ.get("PATH", ""),
-                    "NODE_PATH": str(node_tools),
-                    "DATABASE_URL": source_url,
-                },
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=False,
-            )
-            assert run.returncode == 0, run.stdout + run.stderr
-            observed: list[dict[str, object]] = json.loads(
-                (directory / "observed.json").read_text()
-            )
-            return observed
-
+    monkeypatch.setenv("SANKA_RUST_SOURCE_TEST_DATABASE_URL", source_url)
+    monkeypatch.setenv("SANKA_RUST_TARGET_TEST_DATABASE_URL", target_url)
+    captured = handle(database_request(tmp_path)).data["capture"]
+    expected = default_scenarios(operations(captured), scenario_models(captured))
     with psycopg.connect(dsn, autocommit=True) as admin:
         try:
             for schema in schemas:
                 admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+            # The source fixture database only needs to exist: write contracts reset the
+            # captured tables to the baseline on both sides before the sequence runs.
             with psycopg.connect(source_url, autocommit=True) as connection:
                 connection.execute((FIXTURE / "schema.sql").read_text())
-            applied = cargo(
-                ["run", "--locked", "--quiet", "--bin", "migrate", "--", "up"], output, target_url
-            )
-            assert applied.returncode == 0, applied.stdout + applied.stderr
-            source = source_run()
-            candidate = target_run(tamper=False)
-            assert [item["status"] for item in source] == [case["status"] for case in SCENARIOS]
-            assert [item["status"] for item in candidate] == [case["status"] for case in SCENARIOS]
-            assert canonical(candidate) == canonical(source)
-            created = source[2]
-            assert created["body"] == {
+                connection.execute(
+                    "INSERT INTO widgets (name, count, enabled) VALUES ('stale', 1, true)"
+                )
+            verified = handle(database_request(tmp_path, "verify"))
+            assert verified.outcome == "success", verified.error
+            report = verified.data
+            assert report["scenario_origin"] == "default"
+            assert report["scenarios"] == expected
+            assert [item["status"] for item in report["candidate"]] == [
+                scenario["expected_status"] for scenario in expected
+            ]
+            assert canonical(report["candidate"]) == canonical(report["source"])
+            by_id = {item["id"]: item for item in report["source"]}
+            assert by_id["Widget.create.first"]["body"] == {
                 "id": 1,
                 "name": "alpha",
                 "count": 7,
                 "enabled": True,
                 "note": None,
             }
-            assert source[3]["body"] == {"error": "conflict"}
-            assert source[16]["body"] is None and source[16]["media_type"] == ""
-            assert source[-1]["rows"] == source[-1]["body"]
-            assert [row["name"] for row in source[-1]["rows"]] == ["next", "float"]
-            # The same responses cannot hide a different database state.
-            reverted = cargo(
-                ["run", "--locked", "--quiet", "--bin", "migrate", "--", "down"], output, target_url
-            )
-            assert reverted.returncode == 0, reverted.stdout + reverted.stderr
-            assert (
-                cargo(
-                    ["run", "--locked", "--quiet", "--bin", "migrate", "--", "up"],
-                    output,
-                    target_url,
-                ).returncode
-                == 0
-            )
-            tampered = target_run(tamper=True)
-            assert [item["status"] for item in tampered] == [case["status"] for case in SCENARIOS]
-            assert canonical(tampered) != canonical(source)
+            assert by_id["Widget.create.duplicate"]["body"] == {"error": "conflict"}
+            assert by_id["Widget.update.clear"]["body"]["note"] is None
+            assert by_id["Widget.delete.first"]["body"] is None
+            assert by_id["Widget.delete.first"]["media_type"] == ""
+            assert by_id["Widget.delete.first"]["tables"] == {"widgets": []}
+            assert by_id["Widget.create.after"]["body"]["id"] == 3
+            assert by_id["Widget.create.after"]["sequences"] == {"widgets": ["3", True]}
+            assert by_id["get.widgets"]["body"] == by_id["get.widgets"]["tables"]["widgets"]
+            tested = handle(database_request(tmp_path, "test"))
+            assert tested.outcome == "success", tested.error
+            assert tested.data["comparison"]["ok"] is True
             fmt = subprocess.run(
                 ["cargo", "fmt", "--check"], cwd=output, capture_output=True, text=True, check=False
             )
             assert fmt.returncode == 0, fmt.stdout + fmt.stderr
+            # Declared scenarios in the hosted spelling replace the defaults.
+            (tmp_path / "sanka-verify.json").write_text(
+                json.dumps(
+                    {
+                        "scenarios": [
+                            {
+                                "id": "seed",
+                                "method": "POST",
+                                "path": "/widgets",
+                                "body": {"name": "declared", "count": 1, "enabled": True},
+                                "expected_source_status": 201,
+                            },
+                            {
+                                "id": "list",
+                                "method": "GET",
+                                "path": "/widgets",
+                                "expected_source_status": 200,
+                            },
+                        ]
+                    }
+                )
+            )
+            declared = handle(database_request(tmp_path, "verify"))
+            assert declared.outcome == "success", declared.error
+            assert declared.data["scenario_origin"] == "declared"
+            assert [item["id"] for item in declared.data["source"]] == ["seed", "list"]
+            assert declared.data["source"][1]["body"] == [
+                {"id": 1, "name": "declared", "count": 1, "enabled": True, "note": None}
+            ]
+            (tmp_path / "sanka-verify.json").unlink()
+            # Matching responses cannot hide a different database: the candidate keeps
+            # answering the same JSON while an extra statement changes the stored rows.
+            library = output / "src" / "lib.rs"
+            text = library.read_text()
+            marker = "    match inserted {\n"
+            assert text.count(marker) == 1
+            library.write_text(
+                text.replace(
+                    marker,
+                    "    let _ = sqlx::query("
+                    '"UPDATE \\"widgets\\" SET \\"note\\" = \'tampered\'")\n'
+                    "        .execute(&pool)\n        .await;\n" + marker,
+                )
+            )
+            tampered = handle(database_request(tmp_path, "verify"))
+            assert tampered.outcome == "error"
+            assert tampered.error is not None
+            assert tampered.error.code == "SANKA_EXTENSION_PARITY_FAILED"
+            report = json.loads((tmp_path / ".sanka/rust/verify.json").read_text())
+            assert report["ok"] is False
+            problems = [step for step in report["comparison"]["steps"] if step["problems"]]
+            assert problems and "$.tables.widgets" in problems[0]["problems"][0]
         finally:
             for schema in schemas:
                 admin.execute(

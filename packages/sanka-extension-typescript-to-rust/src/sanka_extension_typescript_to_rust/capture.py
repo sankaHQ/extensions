@@ -42,6 +42,9 @@ PARAM_PATH = re.compile(r"/[A-Za-z0-9_./-]*/:([A-Za-z_][A-Za-z0-9_]*)\Z")
 BODY_OPERATIONS = frozenset({"create", "update", "replace"})
 SOURCE_SUFFIXES = frozenset({".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"})
 IGNORED = frozenset({".git", ".sanka", "node_modules", "dist"})
+# Declared replay scenarios describe verification, not the application, so adding or
+# editing them after apply must not invalidate the reviewed plan.
+SCENARIO_FILE = "sanka-verify.json"
 MAX_SOURCE_BYTES = 10_000_000
 MAX_SOURCE_FILES = 1000
 EXPRESS_MAJORS = (4, 5)
@@ -152,6 +155,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             if source.is_symlink() or not source.is_file():
                 raise ValueError("only regular source files are supported")
             rel = source.relative_to(root).as_posix()
+            if rel == SCENARIO_FILE:
+                continue
             total += source.stat().st_size
             if total > MAX_SOURCE_BYTES or len(records) >= MAX_SOURCE_FILES:
                 raise ValueError("source exceeds experimental capture limits")

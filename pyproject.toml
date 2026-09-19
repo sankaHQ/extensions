@@ -17,6 +17,7 @@ members = ["packages/*"]
 sanka-code-migration = { workspace = true }
 sanka-drf-replay = { workspace = true }
 sanka-ts-capture = { workspace = true }
+sanka-http-replay = { workspace = true }
 sanka-connector-sdk = { workspace = true }
 sanka-extension-sdk = { workspace = true }
 
@@ -74,6 +75,7 @@ known-first-party = [
   "sanka_extension_react_native_to_native",
   "sanka_extension_typescript_to_rust",
   "sanka_ts_capture",
+  "sanka_http_replay",
 ]
 
 [tool.mypy]
