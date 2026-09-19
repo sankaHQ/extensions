@@ -120,7 +120,24 @@ function createStubs(React, recorder) {
     useNavigation: () => navigation,
     NavigationContainer: host("NavigationContainer"),
   };
-  for (const module of [reactNative, expoRouter, expoStatusBar, reactNavigation]) {
+  // In-memory AsyncStorage fed by the fixture storage map; reads stay pending in the
+  // `initial` scenario, writes record `store` intents and update the map.
+  const asyncStorage = {
+    getItem(key) {
+      if (typeof key !== "string") throw new Error("AsyncStorage keys must be strings");
+      if (recorder.storagePending) return new Promise(() => {});
+      const value = recorder.storage[key];
+      return Promise.resolve(value === undefined ? null : value);
+    },
+    setItem(key, value) {
+      if (typeof key !== "string") throw new Error("AsyncStorage keys must be strings");
+      recorder.record({ store: key, value: String(value) });
+      recorder.storage[key] = String(value);
+      return Promise.resolve();
+    },
+  };
+  asyncStorage.default = asyncStorage;
+  for (const module of [reactNative, expoRouter, expoStatusBar, reactNavigation, asyncStorage]) {
     module.__esModule = true;
   }
   return {
@@ -129,6 +146,7 @@ function createStubs(React, recorder) {
       "expo-router": expoRouter,
       "expo-status-bar": expoStatusBar,
       "@react-navigation/native": reactNavigation,
+      "@react-native-async-storage/async-storage": asyncStorage,
     },
     navigation,
     IMAGE_EXTENSIONS,

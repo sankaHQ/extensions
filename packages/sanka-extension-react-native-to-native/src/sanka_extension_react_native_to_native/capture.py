@@ -20,8 +20,9 @@ from sanka_ts_capture import TYPESCRIPT_SHA256, TYPESCRIPT_VERSION, ParsedFile, 
 from .expo_router import capture_routes, href_matches, route_files, route_patterns
 from .expressions import Unsupported
 from .inventory import inventory
+from .models import capture_model
 from .navigation import capture_navigation
-from .screens import capture_screen, imports
+from .screens import capture_screen, imports, type_imports
 
 SOURCES = ("react-native",)
 TARGETS = ("swiftui", "compose")
@@ -151,6 +152,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         "navigators": [],
         "screens": [],
         "inventory": inventory(root, package),
+        "models": [],
         "gaps": [],
         "readiness": 0.0,
         "scope": "navigation graph, screen trees, literal styles and local state (slice 1)",
@@ -346,7 +348,8 @@ def _load(
             gaps.append(f"{rel}: syntax error {first.code}: {first.message}")
             continue
         names, _ = imports(parsed_now, rel)
-        for specifier in sorted(set(names.values())):
+        specifiers = set(names.values()) | set(type_imports(parsed_now).values())
+        for specifier in sorted(specifiers):
             if not specifier.startswith("."):
                 continue
             resolved = _resolve(rel, specifier, modules)
@@ -391,7 +394,9 @@ def _react_navigation(
             screen["module"] = resolved
             modules_by_component[screen["component"]] = resolved
     result["navigators"] = captured["navigators"]
-    result["screens"] = _screens(result["navigators"], graph, texts, "react-navigation", files)
+    result["screens"], result["models"] = _screens(
+        result["navigators"], graph, texts, "react-navigation", files
+    )
 
 
 def _expo_router(
@@ -409,7 +414,7 @@ def _expo_router(
     navigators, route_gaps = capture_routes(files, layouts)
     gaps.extend(route_gaps)
     result["navigators"] = navigators
-    result["screens"] = _screens(navigators, graph, texts, "expo-router", files)
+    result["screens"], result["models"] = _screens(navigators, graph, texts, "expo-router", files)
     patterns = route_patterns(navigators)
     for screen in result["screens"]:
         for target in _push_targets(screen.get("tree")):
@@ -444,8 +449,9 @@ def _screens(
     texts: dict[str, str],
     navigation_kind: str,
     files: frozenset[str],
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     screens: list[dict[str, Any]] = []
+    models: dict[str, dict[str, Any]] = {}
     seen: set[str] = set()
     for navigator in navigators:
         for screen in navigator["screens"]:
@@ -482,7 +488,9 @@ def _screens(
                 except Unsupported as error:
                     reasons.append({"code": error.code, "message": error.message})
                 else:
+                    type_refs: dict[str, str] = captured.pop("type_refs")
                     entry.update(captured)
+                    reasons.extend(_models(module, type_refs, graph, models))
                     undeclared = set(captured["params"]) - set(declared)
                     if undeclared and navigation_kind == "expo-router":
                         message = (
@@ -492,4 +500,43 @@ def _screens(
             entry["disposition"] = "native-screen" if not reasons else "needs-manual-adaptation"
             entry["adaptation_reasons"] = reasons
             screens.append(entry)
-    return sorted(screens, key=lambda item: str(item["module"]))
+    return (
+        sorted(screens, key=lambda item: str(item["module"])),
+        [models[name] for name in sorted(models)],
+    )
+
+
+def _models(
+    module: str,
+    type_refs: dict[str, str],
+    graph: dict[str, tuple[ParsedFile, dict[str, str]]],
+    models: dict[str, dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Capture the interfaces a screen references; conflicts and bad shapes are reasons."""
+    reasons: list[dict[str, str]] = []
+    for name in sorted(type_refs):
+        resolved = _resolve(module, type_refs[name], sorted(graph))
+        if resolved is None or resolved not in graph:
+            reasons.append(
+                {
+                    "code": "SANKA_RN_MODEL",
+                    "message": f"{module}: type {name} imports an unresolved module",
+                }
+            )
+            continue
+        try:
+            model = capture_model(graph[resolved][0], resolved, name)
+        except Unsupported as error:
+            reasons.append({"code": error.code, "message": error.message})
+            continue
+        existing = models.get(name)
+        if existing is not None and existing != model:
+            reasons.append(
+                {
+                    "code": "SANKA_RN_MODEL",
+                    "message": f"{module}: model {name} differs from another screen's {name}",
+                }
+            )
+            continue
+        models[name] = model
+    return reasons
