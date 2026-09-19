@@ -224,3 +224,27 @@ jobs:
           SANKA_MIGRATE_TEST_POSTGRES_DSN: postgresql://sanka:sanka@localhost:5432/sanka_rust_schema_test
           CARGO_TERM_COLOR: never
         run: uv run --no-sync python -m pytest packages/sanka-ts-capture/tests packages/sanka-extension-typescript-to-rust/tests -q
+
+  react-native-to-native:
+    name: React Native to SwiftUI structural parity
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.2"
+      - run: uv sync --frozen --all-packages
+      - name: Fetch the pinned TypeScript compiler bundle (digest-checked, not committed)
+        run: uv run python scripts/fetch_typescript_bundle.py
+      - name: Install the pinned React renderer toolset
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix packages/sanka-extension-react-native-to-native/tests/node-tools
+      - name: Build the SwiftUI candidates and compare their trees with the React Native source
+        env:
+          SANKA_SWIFT_TESTS: "1"
+          SANKA_NODE_TESTS: "1"
+        run: uv run python -m pytest packages/sanka-extension-react-native-to-native/tests -q

@@ -105,3 +105,22 @@ def test_transpile_to_commonjs() -> None:
         transpile_sources({"broken.ts": "const = ;"})
     with pytest.raises(TypeScriptDriverError):
         parse_sources({"notes.txt": "hello"})
+
+
+@needs_node
+def test_transpile_tsx_uses_the_classic_react_runtime() -> None:
+    # Screen replays rely on this: JSX lowers to React.createElement, so a React binding
+    # (import or global) must be in scope, and type-only imports disappear.
+    text = (
+        'import type { Props } from "./types";\n'
+        'import { useState } from "react";\n'
+        "export default function Screen(_props: Props) {\n"
+        '  const [value] = useState("x");\n'
+        "  return <View style={{ flex: 1 }}>{value}</View>;\n"
+        "}\n"
+    )
+    output = transpile_sources({"app/Screen.tsx": text})["app/Screen.tsx"]
+    assert "React.createElement" in output
+    assert 'require("react")' in output
+    assert "./types" not in output
+    assert "exports.default = Screen" in output
