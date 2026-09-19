@@ -42,6 +42,17 @@ def test_route_floor_rejects_downgrades_and_fixture_drift() -> None:
     assert gate.readiness_error("new-task", {}, envelope)
 
 
+def test_route_inventory_drift_reports_expected_and_observed_counts() -> None:
+    assert (
+        gate.readiness_error(
+            "task",
+            {"native_routes": 1, "native_eligible_routes": 11, "readiness": 1 / 11},
+            {"task": [1, 9]},
+        )
+        == "eligible route count changed from 9 to 11 (native routes: 1)"
+    )
+
+
 def test_full_readiness_cannot_override_failed_native_gate() -> None:
     result = {
         "status": "passed",
