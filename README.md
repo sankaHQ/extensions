@@ -117,9 +117,14 @@ Missing trust, artifacts, compatibility, or matching hashes stops execution. The
 
 ## Run an experimental extension
 
-Extensions that are not in the catalog yet (`sanka/python-to-golang`,
-`sanka/typescript-to-rust`, `sanka/react-native-to-native`) cannot be installed
-with `sanka extension add`. Run them from this checkout through the same
+The experimental converters are published as scoped prereleases outside the CLI's
+default marketplace snapshot: `sanka/python-to-golang` and `sanka/typescript-to-rust`
+in [`api-converters-v0.1.0a1`](docs/api-converter-release.md) and
+`sanka/react-native-to-native` in
+[`mobile-converters-v0.1.0a1`](docs/mobile-converter-release.md). Install them by
+adding this repository as a marketplace pinned to the release commit, as each
+package README documents. An extension that is not catalogued yet, or a working
+copy you are developing, can still run from this checkout through the same
 `sanka-extension/v1` protocol the CLI uses:
 
 ```bash

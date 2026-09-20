@@ -1,0 +1,45 @@
+{
+  "schema_version": "sanka-extension-manifest/v2",
+  "kind": "migration",
+  "id": "sanka/react-native-to-native",
+  "version": "0.1.0a1",
+  "protocol_version": "sanka-extension/v1",
+  "distribution": {
+    "name": "sanka-extension-react-native-to-native",
+    "version": "0.1.0a1",
+    "executable": "sanka-extension-react-native-to-native"
+  },
+  "commands": [
+    "scan",
+    "plan",
+    "apply",
+    "test",
+    "verify"
+  ],
+  "targets": [
+    "swiftui",
+    "compose"
+  ],
+  "runtime": {
+    "sanka_cli": ">=0.2.12,<0.3"
+  },
+  "match": {
+    "all": [
+      {
+        "kind": "file",
+        "value": "package.json"
+      }
+    ],
+    "any": [
+      {
+        "kind": "file",
+        "value": "App.tsx"
+      },
+      {
+        "kind": "file",
+        "value": "app/_layout.tsx"
+      }
+    ]
+  },
+  "wheels": []
+}

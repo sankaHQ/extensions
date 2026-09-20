@@ -11,6 +11,15 @@ import yaml
 RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/"
 NEW_RELEASE_PREFIX = RELEASE_PREFIX + "extensions-v0.1.0a31/"
 EXPECTED = {
+    "sanka/react-native-to-native": {
+        "kind": "migration",
+        "protocol_version": "sanka-extension/v1",
+        "distribution": {
+            "name": "sanka-extension-react-native-to-native",
+            "version": "0.1.0a1",
+            "executable": "sanka-extension-react-native-to-native",
+        },
+    },
     "sanka/python-to-golang": {
         "kind": "migration",
         "protocol_version": "sanka-extension/v1",
@@ -120,7 +129,11 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
         assert manifest["schema_version"] == "sanka-extension-manifest/v2"
         assert manifest["id"] == item["id"]
         cli = "==0.2.12" if item["id"] == "sanka/llm-to-jev" else ">=0.2.0,<0.3"
-        if item["id"] in {"sanka/python-to-golang", "sanka/typescript-to-rust"}:
+        if item["id"] in {
+            "sanka/react-native-to-native",
+            "sanka/python-to-golang",
+            "sanka/typescript-to-rust",
+        }:
             cli = ">=0.2.12,<0.3"
         assert manifest["runtime"] == {"sanka_cli": cli}
         assert manifest["kind"] == expected["kind"]
@@ -134,6 +147,8 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
             expected_prefix = RELEASE_PREFIX + "llm-to-jev-v0.1.0a1/"
         if item["id"] in {"sanka/python-to-golang", "sanka/typescript-to-rust"}:
             expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a1/"
+        if item["id"] == "sanka/react-native-to-native":
+            expected_prefix = RELEASE_PREFIX + "mobile-converters-v0.1.0a1/"
         assert all(wheel["url"].startswith(expected_prefix) for wheel in manifest["wheels"])
         assert all(len(wheel["sha256"]) == 64 for wheel in manifest["wheels"])
 
@@ -149,6 +164,7 @@ def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> No
         if line.startswith("cp packages/") and line.endswith(".json")
     ]
     assert destinations == [
+        "release-assets/sanka-extension-react-native-to-native.json",
         "release-assets/sanka-extension-python-to-golang.json",
         "release-assets/sanka-extension-typescript-to-rust.json",
         "release-assets/sanka-extension-llm-to-jev.json",
