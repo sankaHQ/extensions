@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 EXAMPLES_REVISION = "e4b9990ccc21ec3d1e775b0955f021f2083fc524"
+TAG = "api-converters-v0.1.0a1"
 
 
 def load(path: Path, name: str) -> Any:
@@ -34,7 +35,7 @@ def load(path: Path, name: str) -> Any:
     return module
 
 
-def installer(examples: Path, release: Path, revision: str | None) -> Any:
+def installer(examples: Path, release: Path, revision: str | None, tag: str = TAG) -> Any:
     sys.path.insert(0, str(examples / "scripts"))
     candidate = load(examples / "scripts/candidate.py", "release_candidate_base")
 
@@ -77,7 +78,7 @@ def installer(examples: Path, release: Path, revision: str | None) -> Any:
             ).splitlines()
             data = json.loads((release / f"sanka-extension-{self.extension}.json").read_text())
             self.report.update(
-                release_tag="api-converters-v0.1.0a1",
+                release_tag=tag,
                 release_status="experimental-published" if revision else "release-candidate",
                 extension_revision=revision,
                 manifest_sha256=hashlib.sha256(

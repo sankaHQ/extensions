@@ -36,6 +36,10 @@ CATALOG: dict[str, Any] = {
     "schema_version": "sanka-marketplace/v1",
     "extensions": [
         {
+            "id": "sanka/react-native-to-native",
+            "manifest": "packages/sanka-extension-react-native-to-native/extension.json",
+        },
+        {
             "id": "sanka/python-to-golang",
             "manifest": "packages/sanka-extension-python-to-golang/extension.json",
         },
@@ -270,6 +274,14 @@ def _catalog_errors(root: Path, release: Path) -> list[str]:
             api_manifest(package, root)
         except (ValueError, OSError) as error:
             errors.append(f"API converter catalog manifest is invalid: {error}")
+    from scripts.build_mobile_release import PACKAGES as MOBILE_PACKAGES
+    from scripts.build_mobile_release import manifest as mobile_manifest
+
+    for package in MOBILE_PACKAGES[:1]:
+        try:
+            mobile_manifest(package, root)
+        except (ValueError, OSError) as error:
+            errors.append(f"Mobile converter catalog manifest is invalid: {error}")
     for package, expected in MANIFESTS.items():
         manifest_path = root / "packages" / package / "extension.json"
         try:

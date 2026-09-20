@@ -44,7 +44,7 @@ verify) and `compose` (scan and plan only until the Compose emitter lands).
     generated `pbxproj`.
 - 2026-09-17 (R0 + R1): scan and plan with per-screen dispositions.
 
-It is **not a complete app migration**, not published in the extension catalog, and not
+It is **not a complete app migration**, available as an experimental prerelease, and not
 qualified for production use.
 
 Use the extension JSON subprocess protocol via
@@ -335,3 +335,24 @@ params  deterministic samples per type: "sample-<name>", 1, true
 emitter reasons merged) and a `plan_hash`. Plans are byte-identical across checkout
 locations and `PYTHONHASHSEED` values for the same source and configuration. `apply`
 writes `native-swiftui/`; `test` and `verify` write `test.json` and `verify.json`.
+
+## Experimental public release
+
+The scoped `mobile-converters-v0.1.0a1` GitHub prerelease contains the reviewed
+wheel closure and SHA-256 manifest. Install with the published CLI 0.2.12:
+
+```bash
+RELEASE_COMMIT=$(git ls-remote https://github.com/sankaHQ/extensions.git refs/tags/mobile-converters-v0.1.0a1 | cut -f1)
+test "${#RELEASE_COMMIT}" -eq 40
+sanka extension marketplace add https://github.com/sankaHQ/extensions.git --revision "$RELEASE_COMMIT" --name mobile-converters --trust
+sanka extension add sanka/react-native-to-native --marketplace mobile-converters
+```
+
+This explicit marketplace pin does not change the CLI default catalog. The release
+gate reproduces the small public React Navigation task-list example: SwiftUI through
+all five CLI stages with a macOS package build and structural tree comparison, and
+Compose through scan and plan only. See the
+[examples](https://github.com/sankaHQ/sanka-examples) for source setup, reviewed-plan
+checks, toolchains and supported behavior. Pixels, layout, simulator or device
+execution and a Compose emitter remain outside that qualification; broader package
+fixtures are tested separately.

@@ -42,4 +42,5 @@ Supported scopes and limitations are documented in each extension's package READ
 | `sanka/drf-to-flask` | flask |
 | `sanka/llm-to-jev` | jev-classifier |
 | `sanka/python-to-golang` | fiber, chi, mux, gin |
+| `sanka/react-native-to-native` | swiftui, compose |
 | `sanka/typescript-to-rust` | axum |
