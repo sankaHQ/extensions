@@ -33,6 +33,7 @@ class WidgetCreate(BaseModel):
     note: str | None
     address: Address
     tags: list[str] = Field(default_factory=list)
+    code: str = Field(default=...)
 """,
     )
     _write(
@@ -178,6 +179,13 @@ async def create_widget(session: AsyncSession, widget: Widget):
             "nullable": False,
             "field": {"default_factory": "list"},
         },
+        {
+            "name": "code",
+            "annotation": "str",
+            "required": True,
+            "nullable": False,
+            "field": {},
+        },
     ]
     widget = next(model for model in captured["sqlalchemy_models"] if model["name"] == "Widget")
     assert widget["table"] == "widgets"
@@ -191,6 +199,11 @@ async def create_widget(session: AsyncSession, widget: Widget):
     assert widget["relationships"] == [
         {"name": "workspace", "annotation": "Workspace", "options": {"back_populates": "widgets"}}
     ]
+    assert {
+        "module": "sqlalchemy.dialects.postgresql",
+        "name": "UUID",
+        "local": "PGUUID",
+    } in captured["imports"]["app/models.py"]
     assert [(item["revision"], item["down_revision"]) for item in captured["migrations"]] == [
         ("0001", None),
         ("0002", "0001"),
@@ -215,6 +228,69 @@ async def create_widget(session: AsyncSession, widget: Widget):
         "refresh",
     ]
     assert captured["gaps"] == []
+
+
+def test_constructor_session_and_manual_commit_are_captured(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "repositories.py",
+        """from sqlalchemy.ext.asyncio import AsyncSession
+
+class WidgetRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def save(self, widget):
+        self.session.add(widget)
+        await self.session.flush()
+        await self.session.commit()
+        return widget
+""",
+    )
+
+    captured = capture_fastapi_persistence(tmp_path)
+
+    assert captured is not None
+    assert captured["repositories"] == [
+        {
+            "module": "repositories.py",
+            "owner": "WidgetRepository",
+            "name": "save",
+            "async": True,
+            "session": "self.session",
+            "transaction": "manual",
+            "operations": [
+                {"name": "add", "arguments": ["widget"], "options": {}},
+                {"name": "flush", "arguments": [], "options": {}},
+                {"name": "commit", "arguments": [], "options": {}},
+            ],
+        }
+    ]
+    assert captured["gaps"] == []
+
+
+def test_invalid_revision_identifier_is_a_gap(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "alembic/versions/0001_invalid.py",
+        """from alembic import op
+revision = 1
+down_revision = None
+branch_labels = None
+depends_on = None
+def upgrade():
+    op.create_table("widgets")
+def downgrade():
+    op.drop_table("widgets")
+""",
+    )
+
+    captured = capture_fastapi_persistence(tmp_path)
+
+    assert captured is not None
+    assert captured["gaps"] == [
+        "alembic/versions/0001_invalid.py: revision must be a non-empty string"
+    ]
 
 
 def test_source_capture_includes_persistence_without_generic_file_gaps(tmp_path: Path) -> None:

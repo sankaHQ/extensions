@@ -123,6 +123,10 @@ def _field_value(node: ast.expr | None) -> tuple[bool, dict[str, Any]]:
             if not isinstance(keyword.value, ast.Name):
                 raise ValueError("default_factory must be a direct callable name")
             options[keyword.arg] = keyword.value.id
+        elif keyword.arg == "default" and (
+            isinstance(keyword.value, ast.Constant) and keyword.value.value is Ellipsis
+        ):
+            continue
         else:
             options[keyword.arg] = _json_literal(keyword.value)
     required = "default" not in options and "default_factory" not in options
@@ -367,6 +371,8 @@ def _migration(path: Path, tree: ast.Module, gaps: list[str]) -> dict[str, Any] 
             functions[node.name] = node
     if "revision" not in metadata:
         return None
+    if type(metadata["revision"]) is not str or not metadata["revision"]:
+        gaps.append(f"{relative}: revision must be a non-empty string")
     missing = {"down_revision", "branch_labels", "depends_on"} - metadata.keys()
     if missing:
         gaps.append(f"{relative}: missing revision metadata: {', '.join(sorted(missing))}")
@@ -388,21 +394,67 @@ def _session_parameter(function: ast.FunctionDef | ast.AsyncFunctionDef) -> str 
     return None
 
 
+def _receiver_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+    ):
+        return f"self.{node.attr}"
+    return None
+
+
+def _constructor_session(node: ast.ClassDef) -> str | None:
+    constructor = next(
+        (
+            item
+            for item in node.body
+            if isinstance(item, ast.FunctionDef) and item.name == "__init__"
+        ),
+        None,
+    )
+    if constructor is None:
+        return None
+    parameter = _session_parameter(constructor)
+    if parameter is None:
+        return None
+    assignments = [
+        item
+        for item in constructor.body
+        if isinstance(item, ast.Assign)
+        and len(item.targets) == 1
+        and isinstance(item.targets[0], ast.Attribute)
+        and isinstance(item.targets[0].value, ast.Name)
+        and item.targets[0].value.id == "self"
+        and isinstance(item.value, ast.Name)
+        and item.value.id == parameter
+    ]
+    if len(assignments) != 1:
+        return None
+    target = assignments[0].targets[0]
+    assert isinstance(target, ast.Attribute)
+    return f"self.{target.attr}"
+
+
 def _repositories(path: Path, tree: ast.Module, gaps: list[str]) -> list[dict[str, Any]]:
     relative = path.as_posix()
     result = []
-    functions: list[tuple[str | None, ast.FunctionDef | ast.AsyncFunctionDef]] = []
+    functions: list[tuple[str | None, str | None, ast.FunctionDef | ast.AsyncFunctionDef]] = []
     for node in tree.body:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            functions.append((None, node))
+            functions.append((None, None, node))
         elif isinstance(node, ast.ClassDef):
+            constructor_session = _constructor_session(node)
             functions.extend(
-                (node.name, item)
+                (node.name, constructor_session, item)
                 for item in node.body
                 if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
+                and item.name != "__init__"
             )
-    for owner, function in functions:
-        session = _session_parameter(function)
+    for owner, constructor_session, function in functions:
+        session = _session_parameter(function) or constructor_session
         if session is None:
             continue
         if isinstance(function, ast.FunctionDef):
@@ -412,26 +464,18 @@ def _repositories(path: Path, tree: ast.Module, gaps: list[str]) -> list[dict[st
             for call in ast.walk(function)
             if isinstance(call, ast.Call)
             and isinstance(call.func, ast.Attribute)
-            and isinstance(call.func.value, ast.Name)
-            and call.func.value.id == session
+            and _receiver_name(call.func.value) == session
             and call.func.attr in {"begin", "begin_nested"}
         ]
         if len(transaction_calls) > 1:
             gaps.append(f"{relative}:{function.name}: multiple transaction scopes require capture")
-        transaction = (
-            _call_name(transaction_calls[0].func).rsplit(".", 1)[-1]
-            if transaction_calls
-            else "implicit"
-        )
         operations = []
         for call in sorted(
             (item for item in ast.walk(function) if isinstance(item, ast.Call)),
             key=lambda item: (item.lineno, item.col_offset),
         ):
             if not (
-                isinstance(call.func, ast.Attribute)
-                and isinstance(call.func.value, ast.Name)
-                and call.func.value.id == session
+                isinstance(call.func, ast.Attribute) and _receiver_name(call.func.value) == session
             ):
                 continue
             name = call.func.attr
@@ -458,6 +502,13 @@ def _repositories(path: Path, tree: ast.Module, gaps: list[str]) -> list[dict[st
                     ),
                 }
             )
+        transaction = (
+            _call_name(transaction_calls[0].func).rsplit(".", 1)[-1]
+            if transaction_calls
+            else "manual"
+            if any(operation["name"] in {"commit", "rollback"} for operation in operations)
+            else "implicit"
+        )
         for item in ast.walk(function):
             if isinstance(item, ast.If | ast.For | ast.AsyncFor | ast.While | ast.Try | ast.Match):
                 gaps.append(
@@ -485,6 +536,7 @@ def capture_fastapi_persistence(root: Path) -> dict[str, Any] | None:
     sqlalchemy_models = []
     migrations = []
     repositories = []
+    captured_imports: dict[str, list[dict[str, str | None]]] = {}
     gaps: list[str] = []
     for path in sorted(root.rglob("*.py"), key=lambda item: item.relative_to(root).as_posix()):
         relative_path = path.relative_to(root)
@@ -518,6 +570,30 @@ def capture_fastapi_persistence(root: Path) -> dict[str, Any] | None:
             recognized = True
         if recognized:
             files.append(relative)
+            module_imports: list[dict[str, str | None]] = []
+            for node in tree.body:
+                if isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                    module_imports.extend(
+                        {
+                            "module": node.module,
+                            "name": alias.name,
+                            "local": alias.asname or alias.name,
+                        }
+                        for alias in node.names
+                    )
+                elif isinstance(node, ast.Import):
+                    module_imports.extend(
+                        {
+                            "module": alias.name,
+                            "name": None,
+                            "local": alias.asname or alias.name.split(".", 1)[0],
+                        }
+                        for alias in node.names
+                    )
+            captured_imports[relative] = sorted(
+                module_imports,
+                key=lambda item: (item["module"] or "", item["name"] or "", item["local"] or ""),
+            )
     if not files:
         return None
     revisions = {item["revision"] for item in migrations}
@@ -532,6 +608,7 @@ def capture_fastapi_persistence(root: Path) -> dict[str, Any] | None:
     return {
         "schema": "sanka.python-to-golang.fastapi-persistence/v1",
         "files": sorted(files),
+        "imports": dict(sorted(captured_imports.items())),
         "pydantic_models": sorted(pydantic_models, key=lambda item: (item["module"], item["name"])),
         "sqlalchemy_models": sorted(
             sqlalchemy_models, key=lambda item: (item["module"], item["table"], item["name"])
