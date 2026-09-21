@@ -231,10 +231,9 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
     if captured["gaps"]:
         raise ValueError("cannot replay unsupported source behavior")
     if any("write" in route for route in captured["routes"]):
-        raise ValueError(
-            "write replay requires the versioned shared HTTP scenario adapter; "
-            "use the qualified PostgreSQL lifecycle test until it is adopted"
-        )
+        from .write_replay import replay_writes
+
+        return replay_writes(root, output, captured, command)
     if not output.is_dir():
         raise ValueError("apply the reviewed plan before testing")
     source_python = _source_python() if command == "verify" else None

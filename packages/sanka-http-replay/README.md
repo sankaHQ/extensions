@@ -1,8 +1,7 @@
 # sanka-http-replay
 
 Versioned HTTP scenario and observation contract shared by Sanka code extensions
-(`sanka/typescript-to-rust` today; `sanka/python-to-golang` can adopt it for its
-write replay). Standard library only. It owns:
+(`sanka/typescript-to-rust` and `sanka/python-to-golang`). Standard library only. It owns:
 
 - `sanka.http-scenarios/v1`: an **ordered** list of requests. `validate_scenarios`
   accepts `{"schema": "sanka.http-scenarios/v1", "scenarios": [...]}` or a bare
@@ -52,3 +51,12 @@ Resetting to the baseline is the extension's job: the generated target owns a
 migration tool (`migrate down` then `up`), and the source side recreates the
 captured tables from the captured `schema.sql` on a dedicated fixture database
 that the operator names explicitly (never an ambient `DATABASE_URL`).
+
+Bodyless response statuses must have no body. Framework-provided content types
+are preserved and compared to the source; a matching nonempty content type on an
+empty 204 is not itself a parity failure. Runners must reject actual response bytes
+on bodyless statuses before decoding an empty body to JSON null.
+
+The default generator does not model endpoint field constraints. An extension must
+require suitable explicit scenarios or implement a qualified constraint-aware sample
+generator; it must not label arbitrary samples as valid for constrained schemas.

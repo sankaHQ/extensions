@@ -58,7 +58,7 @@ def request(root: Path, target: str = "axum") -> ExtensionRequest:
         str(root),
         str(root / ".sanka" / "rust"),
         "sanka/typescript-to-rust",
-        "0.1.0a1",
+        "0.1.0a2",
         "0" * 64,
         {},
         {"source_framework": "express", "target_framework": target},

@@ -20,7 +20,7 @@ from .routing import normalize_routes, project_tree
 
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
-VERSION = "0.1.0a1"
+VERSION = "0.1.0a2"
 PATH = re.compile(r"/[A-Za-z0-9_/-]*\Z")
 FLASK_INT_PATH = re.compile(r"(?P<prefix>/[A-Za-z0-9_/-]*)<int:(?P<name>[a-z][a-z0-9_]*)>\Z")
 FASTAPI_INT_PATH = re.compile(r"(?P<prefix>/[A-Za-z0-9_/-]*)\{(?P<name>[a-z][a-z0-9_]*)\}\Z")

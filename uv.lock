@@ -1272,14 +1272,18 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 
 [[package]]
 name = "sanka-extension-python-to-golang"
-version = "0.1.0a1"
+version = "0.1.0a2"
 source = { editable = "packages/sanka-extension-python-to-golang" }
 dependencies = [
     { name = "sanka-extension-sdk" },
+    { name = "sanka-http-replay" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
+requires-dist = [
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+    { name = "sanka-http-replay", editable = "packages/sanka-http-replay" },
+]
 
 [[package]]
 name = "sanka-extension-react-native-to-native"
@@ -1309,7 +1313,7 @@ requires-dist = [{ name = "sanka-connector-sdk", editable = "packages/sanka-conn
 
 [[package]]
 name = "sanka-extension-typescript-to-rust"
-version = "0.1.0a1"
+version = "0.1.0a2"
 source = { editable = "packages/sanka-extension-typescript-to-rust" }
 dependencies = [
     { name = "sanka-extension-sdk" },
@@ -1377,7 +1381,7 @@ dev = [
 
 [[package]]
 name = "sanka-http-replay"
-version = "0.1.0a1"
+version = "0.1.0a2"
 source = { editable = "packages/sanka-http-replay" }
 
 [[package]]

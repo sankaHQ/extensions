@@ -21,7 +21,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a1
+          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a2
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
@@ -108,7 +108,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "Go and Rust API converters 0.1.0a1" \
+            --title "Go and Rust API converters 0.1.0a2" \
             --notes "Experimental Sanka Code converters. Published CLI 0.2.12 qualification covers the bounded Flask/Fiber and Express/axum literal public JSON GET examples: scan, plan, reviewed apply, test, verify, source preservation, native builds and actual HTTP comparison. Includes exact wheel manifests and acceptance receipts. No arbitrary-application or production-cutover claim. React Native/Compose and Jev are not published by this release."
         env:
           GH_TOKEN: ${{ github.token }}
