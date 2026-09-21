@@ -276,6 +276,18 @@ def capture_fastapi_topology(root: Path, source_file: str) -> dict[str, Any]:
     entrypoint = root / source_file
     tree = ast.parse(entrypoint.read_text(), filename=source_file)
     imports = _imports(root, tree)
+    application_file = source_file
+    local_app = any(
+        isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "app" for target in node.targets)
+        for node in tree.body
+    )
+    imported_app = imports.get("app")
+    if not local_app and imported_app is not None and imported_app[1] == "app":
+        entrypoint = imported_app[0]
+        application_file = entrypoint.relative_to(root).as_posix()
+        tree = ast.parse(entrypoint.read_text(), filename=application_file)
+        imports = _imports(root, tree)
     factory_name = None
     for node in tree.body:
         if (
@@ -301,7 +313,7 @@ def capture_fastapi_topology(root: Path, source_file: str) -> dict[str, Any]:
     constructor = next((call for call in calls if _call_name(call.func) == "FastAPI"), None)
     gaps: list[str] = []
     if constructor is None:
-        gaps.append(f"{source_file}: FastAPI application constructor not found")
+        gaps.append(f"{application_file}: FastAPI application constructor not found")
     lifespan = None
     if constructor is not None:
         value = next((item.value for item in constructor.keywords if item.arg == "lifespan"), None)
@@ -313,7 +325,7 @@ def capture_fastapi_topology(root: Path, source_file: str) -> dict[str, Any]:
     )
     application_dependencies = _dependency_list(application_dependency_node)
     if application_dependencies is None:
-        gaps.append(f"{source_file}: dynamic application dependencies")
+        gaps.append(f"{application_file}: dynamic application dependencies")
         application_dependencies = []
     middleware: list[dict[str, Any]] = []
     exception_handlers: list[dict[str, Any]] = []
@@ -340,7 +352,7 @@ def capture_fastapi_topology(root: Path, source_file: str) -> dict[str, Any]:
             and call.func.attr == "include_router"
         ):
             if len(call.args) != 1 or not isinstance(call.args[0], ast.Name):
-                gaps.append(f"{source_file}: dynamic included router")
+                gaps.append(f"{application_file}: dynamic included router")
                 continue
             imported = imports.get(call.args[0].id, (entrypoint, call.args[0].id))
             prefix_node = next(
@@ -348,7 +360,7 @@ def capture_fastapi_topology(root: Path, source_file: str) -> dict[str, Any]:
             )
             prefix = _literal_string(prefix_node)
             if imported is None or (prefix_node is not None and prefix is None):
-                gaps.append(f"{source_file}: dynamic included router")
+                gaps.append(f"{application_file}: dynamic included router")
             else:
                 include_dependency_node = next(
                     (keyword.value for keyword in call.keywords if keyword.arg == "dependencies"),
@@ -356,7 +368,7 @@ def capture_fastapi_topology(root: Path, source_file: str) -> dict[str, Any]:
                 )
                 include_dependencies = _dependency_list(include_dependency_node)
                 if include_dependencies is None:
-                    gaps.append(f"{source_file}: dynamic include dependencies")
+                    gaps.append(f"{application_file}: dynamic include dependencies")
                     include_dependencies = []
                 queue.append((imported[0], imported[1], prefix or "", include_dependencies))
         elif call.args and isinstance(call.args[0], ast.Name) and call.args[0].id == "app":

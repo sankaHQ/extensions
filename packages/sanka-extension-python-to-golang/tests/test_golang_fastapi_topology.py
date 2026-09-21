@@ -163,3 +163,18 @@ def test_dynamic_dependency_lists_are_gaps(tmp_path: Path) -> None:
         "app.py: dynamic application dependencies",
         "app.py:route: dynamic decorator dependencies",
     ]
+
+
+def test_imported_application_module_is_captured(tmp_path: Path) -> None:
+    (tmp_path / "routes.py").write_text(
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "@app.get('/widgets/{widget_id}')\n"
+        "def widget(widget_id: int): return {'id': widget_id}\n"
+    )
+    (tmp_path / "app.py").write_text("from routes import app\n")
+
+    topology = capture_fastapi_topology(tmp_path, "app.py")
+
+    assert topology["entrypoint"] == "app.py"
+    assert topology["gaps"] == []
