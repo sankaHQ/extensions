@@ -1180,16 +1180,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         requires_lowering = bool(
             persistence["migrations"]
             or persistence["repositories"]
-            or {
-                model["name"]
-                for model in persistence["pydantic_models"]
-            }
-            - lowered_schemas
-            or {
-                model["name"]
-                for model in persistence["sqlalchemy_models"]
-            }
-            - lowered_models
+            or {model["name"] for model in persistence["pydantic_models"]} - lowered_schemas
+            or {model["name"] for model in persistence["sqlalchemy_models"]} - lowered_models
         )
         if requires_lowering:
             gaps.append("persistence: captured contracts require Go lowering")

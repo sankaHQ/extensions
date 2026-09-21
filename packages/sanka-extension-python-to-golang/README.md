@@ -96,6 +96,21 @@ lists in their source order. Local and package imports are resolved without impo
 source. Dynamic router factories, prefixes, paths or dependency lists remain explicit
 topology gaps; topology capture alone does not enable lowering.
 
+FastAPI scans additionally inventory conventional persistence declarations throughout
+the project. The static capture records Pydantic v2 field annotations, required versus
+nullable state, literal defaults, aliases, constraints and model configuration;
+SQLAlchemy 2 mapped columns, exact type expressions, foreign keys and relationships;
+Alembic revision ancestry plus ordered upgrade/downgrade operations; and ordered
+`AsyncSession` calls with explicit `begin` or `begin_nested` scopes. Files recognized by
+this scanner no longer appear as generic unconsumed-module gaps.
+
+This persistence document is a lowering prerequisite. Migrations, async repositories,
+relationships, and domain/request/response models outside the existing flat write
+profile remain explicit gaps and block generation. Dynamic field options, migration
+operations, session methods, conditional repository flows and custom validators also
+remain gaps. Existing qualified flat schemas and SQLAlchemy models continue through
+their current Go generation path.
+
 A Flask factory may take no arguments, construct `app = Flask(__name__)`, register
 blueprints, and return the app, followed by `app = create_app()` at module scope.
 Factory configuration, hooks, nested router registration, custom dependencies,
