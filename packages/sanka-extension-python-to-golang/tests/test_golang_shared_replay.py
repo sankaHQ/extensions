@@ -19,6 +19,7 @@ from sanka_extension_python_to_golang.write_replay import (
     scenarios_for,
     write_probe,
 )
+from test_golang_async_persistence import async_source, injected_source
 from test_golang_drf_validation import drf_field_serializer_source, drf_serializer_source
 from test_golang_routing import group_backend
 from test_golang_schema import generate, schema_dsn
@@ -211,6 +212,11 @@ def test_public_write_verify(
     ("framework", "app_source", "invalid_status"),
     [
         ("fastapi", native_fastapi_schema_source, 422),
+        ("fastapi", async_source, 422),
+        ("fastapi", lambda: async_source(True), 422),
+        ("fastapi", lambda: injected_source("direct"), 422),
+        ("fastapi", injected_source, 422),
+        ("fastapi", lambda: injected_source("class"), 422),
         ("drf", drf_field_serializer_source, 400),
     ],
 )
@@ -256,7 +262,29 @@ def test_native_validation_public_write_verify(
             "body": {"name": "beta", "count": 2.0, "enabled": 1},
             "expected_status": 200,
         },
+        {
+            "id": "empty-patch",
+            "method": "PATCH",
+            "path": "/widgets/1",
+            "body": {},
+            "expected_status": 200,
+        },
+        {
+            "id": "null-and-false",
+            "method": "PATCH",
+            "path": "/widgets/1",
+            "body": {"note": None, "enabled": False, "count": 0},
+            "expected_status": 200,
+        },
+        {
+            "id": "invalid-null",
+            "method": "PATCH",
+            "path": "/widgets/1",
+            "body": {"name": None},
+            "expected_status": invalid_status,
+        },
         {"id": "delete", "method": "DELETE", "path": "/widgets/1", "expected_status": 204},
+        {"id": "delete-again", "method": "DELETE", "path": "/widgets/1", "expected_status": 404},
         {
             "id": "create-after",
             "method": "POST",
