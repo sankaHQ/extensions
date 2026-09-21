@@ -504,7 +504,21 @@ func writeResponse(w http.ResponseWriter, status int, payload any) {
     result.update(_runtime(target, database, captured["configuration"]["database_layer"] == "pgx"))
     if captured.get("security"):
         result["security.go"] = render_security(captured)
-        result[".env.example"] += "AUTH_READ_TOKEN=\nAUTH_WRITE_TOKEN=\n"
+        if captured["security"]["kind"] == "jwt-hs256-roles":
+            jwt_lock = files("sanka_extension_python_to_golang").joinpath("locks", "jwt")
+            result["go.mod"] += "\n" + jwt_lock.joinpath("go.mod").read_text()
+            result["go.sum"] = (
+                "\n".join(
+                    sorted(
+                        set(result["go.sum"].splitlines())
+                        | set(jwt_lock.joinpath("go.sum").read_text().splitlines())
+                    )
+                )
+                + "\n"
+            )
+            result[".env.example"] += "AUTH_JWT_SECRET=\nAUTH_JWT_ISSUER=\nAUTH_JWT_AUDIENCE=\n"
+        else:
+            result[".env.example"] += "AUTH_READ_TOKEN=\nAUTH_WRITE_TOKEN=\n"
     if has_pagination:
         result["pagination.go"] = PAGINATION_SOURCE
     if has_pagination or any("filter" in route.get("read", {}) for route in captured["routes"]):

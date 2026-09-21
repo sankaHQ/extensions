@@ -282,7 +282,9 @@ def replay_writes(
         else scenarios_for(root, captured)
     )
     if captured.get("security"):
-        scenarios = validate_scenarios(cases_document(security_cases(scenarios)))
+        scenarios = validate_scenarios(
+            cases_document(security_cases(scenarios, captured["security"]["kind"]))
+        )
     target_url = os.environ.get("SANKA_GO_TARGET_TEST_DATABASE_URL", "")
     source_url = os.environ.get("SANKA_GO_SOURCE_TEST_DATABASE_URL", "")
     urls = [target_url] + ([source_url] if command == "verify" else [])

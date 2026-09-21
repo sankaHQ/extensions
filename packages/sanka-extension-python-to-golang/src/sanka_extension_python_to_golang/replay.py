@@ -137,7 +137,11 @@ def _run(
         raise ValueError(f"replay process failed: {error}") from error
     if result.returncode:
         details = (result.stdout + result.stderr)[-4000:]
-        if environment and ("DATABASE_URL" in environment or "AUTH_READ_TOKEN" in environment):
+        if environment and (
+            "DATABASE_URL" in environment
+            or "AUTH_READ_TOKEN" in environment
+            or "AUTH_JWT_SECRET" in environment
+        ):
             # Database exceptions may quote credentials or connection parameters.
             details = "database replay failed (subprocess output withheld)"
         raise ValueError("replay process failed: " + details)
@@ -382,7 +386,8 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
     requests: list[dict[str, Any]] = [{"path": path} for path, _ in cases]
     if captured.get("security"):
         requests = security_cases(
-            [{"path": path, "method": "GET", "expected_status": status} for path, status in cases]
+            [{"path": path, "method": "GET", "expected_status": status} for path, status in cases],
+            captured["security"]["kind"],
         )
         cases = [(case["path"], case["expected_status"]) for case in requests]
     paths = [path for path, _ in cases]

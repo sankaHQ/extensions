@@ -283,10 +283,11 @@ def test_security_database_capture_and_scenarios(tmp_path: Path) -> None:
 
 
 @requires_database
+@pytest.mark.parametrize("policy", ["bearer", "jwt"])
 @pytest.mark.parametrize("framework", SOURCES)
 @pytest.mark.parametrize("target", TARGETS)
 def test_security_database_verify(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, framework: str, target: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, framework: str, target: str, policy: str
 ) -> None:
     import json
     import os
@@ -297,7 +298,7 @@ def test_security_database_verify(
     from sanka_extension_python_to_golang.replay import replay
     from test_golang_schema import schema_dsn
 
-    output, captured = prepare_security_fixture(tmp_path, framework, target)
+    output, captured = prepare_security_fixture(tmp_path, framework, target, policy)
     assert not captured["gaps"], captured["gaps"]
     dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
     created = []
@@ -333,7 +334,8 @@ def test_security_database_verify(
 
 
 @pytest.mark.parametrize("target", TARGETS)
-def test_security_write_probe_compiles(tmp_path: Path, target: str) -> None:
+@pytest.mark.parametrize("policy", ["bearer", "jwt"])
+def test_security_write_probe_compiles(tmp_path: Path, target: str, policy: str) -> None:
     import os
 
     from sanka_extension_python_to_golang.replay import _run
@@ -344,8 +346,11 @@ def test_security_write_probe_compiles(tmp_path: Path, target: str) -> None:
 
     if os.getenv("SANKA_GO_TESTS") != "1":
         pytest.skip("requires Go toolchain")
+    from test_golang_jwt import jwt_source
+
+    source_factory = jwt_source if policy == "jwt" else secured_source
     output = generate(
-        tmp_path, "fastapi", target, app_source=secured_source("fastapi", schema_source("fastapi"))
+        tmp_path, "fastapi", target, app_source=source_factory("fastapi", schema_source("fastapi"))
     )
     captured = capture(
         tmp_path,
@@ -359,7 +364,9 @@ def test_security_write_probe_compiles(tmp_path: Path, target: str) -> None:
     _run(["go", "test", "-p=2", "-run", "^$", "./..."], output)
 
 
-def prepare_security_fixture(root: Path, framework: str, target: str) -> tuple[Path, dict]:
+def prepare_security_fixture(
+    root: Path, framework: str, target: str, policy: str = "bearer"
+) -> tuple[Path, dict]:
     import tempfile
 
     from test_golang_schema import generate
@@ -369,14 +376,18 @@ def prepare_security_fixture(root: Path, framework: str, target: str) -> tuple[P
         base = Path(temporary).resolve()
         _, captured = prepare_write_fixture(base, framework, target)
         (root / "sanka-verify.json").write_bytes((base / "sanka-verify.json").read_bytes())
-        text = secured_source(framework, (base / "app.py").read_text())
+        from test_golang_jwt import jwt_source
+
+        source_factory = jwt_source if policy == "jwt" else secured_source
+        text = source_factory(framework, (base / "app.py").read_text())
     output = generate(root, framework, target, app_source=text)
     return output, capture(root, captured["configuration"])
 
 
 @pytest.mark.parametrize("framework", SOURCES)
-def test_security_database_fixture_capture(tmp_path: Path, framework: str) -> None:
-    _, captured = prepare_security_fixture(tmp_path, framework, "fiber")
+@pytest.mark.parametrize("policy", ["bearer", "jwt"])
+def test_security_database_fixture_capture(tmp_path: Path, framework: str, policy: str) -> None:
+    _, captured = prepare_security_fixture(tmp_path, framework, "fiber", policy)
     assert not captured["gaps"]
 
 
