@@ -136,6 +136,15 @@ def replay_roles(case: dict[str, Any], *, first: bool) -> tuple[tuple[str, str, 
         ),
         ("forbidden-role", replay_token(claims | {"role": "guest"}), 403),
     ]
+    if case["method"] in ("GET", "HEAD", "OPTIONS"):
+        roles.append(
+            (
+                "other-identity",
+                replay_token(claims | {"sub": "other-user", "tenant": "other-tenant"}),
+                case["expected_status"],
+            )
+        )
+        roles.append(("original-identity", replay_token(claims), case["expected_status"]))
     if first:
         token = replay_token(claims)
         alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"

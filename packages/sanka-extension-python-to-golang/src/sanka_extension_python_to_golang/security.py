@@ -92,6 +92,11 @@ def _headers(body: list[ast.stmt], framework: str) -> dict[str, str]:
 
 
 def normalize_security(tree: ast.Module, framework: str) -> tuple[ast.Module, dict[str, Any]]:
+    from .native_security import normalize_native_security
+
+    native = normalize_native_security(tree, framework)
+    if native is not None:
+        return native
     tree = copy.deepcopy(tree)
     consumed: list[ast.stmt] = []
     hooks: list[tuple[int, dict[str, str]]] = []
@@ -289,7 +294,10 @@ def render_security(captured: dict[str, Any]) -> str:
             + "}"
         )
 
-    key = "detail" if captured["configuration"]["source_framework"] == "fastapi" else "error"
+    key = policy.get(
+        "error_key",
+        "detail" if captured["configuration"]["source_framework"] == "fastapi" else "error",
+    )
     common = f'''// SPDX-License-Identifier: Apache-2.0
 package backend
 import ("crypto/subtle"; "os"; "strings"; {scope_import} ADAPTER_IMPORT)
@@ -389,6 +397,53 @@ func accessBody(status int) []byte {{
         )
         if not scope_import:
             common = common.replace('"os";', '"os"; "regexp";')
+    if policy.get("native"):
+        common = common.replace('"encoding/json";', '"encoding/json"; "context";')
+        start, end = common.index("func accessStatus("), common.index("func accessHeaders(")
+        authenticate = (
+            common[start:end]
+            .replace("func accessStatus(", "func accessPrincipal(")
+            .replace("path string) int {", "path string) (map[string]string, int) {")
+        )
+        authenticate = re.sub(r"return (\d+)", r"return nil, \1", authenticate)
+        authenticate = authenticate.replace(
+            "return nil, 0",
+            'return map[string]string{"sub":claims["sub"].(string), "tenant":claims["tenant"].(string), "role":claims["role"].(string)}, 0',
+        )
+        common = common[:start] + authenticate + common[end:]
+        common += """
+type principalContextKey struct{}
+func identityResponse(ctx context.Context, fields map[string]string) ([]byte, int) {
+    principal, ok := ctx.Value(principalContextKey{}).(map[string]string)
+    if !ok { return accessBody(503),503 }
+    values := map[string]string{}
+    for name, claim := range fields { values[name] = principal[claim] }
+    body, err := json.Marshal(values)
+    if err != nil { return accessBody(503),503 }
+    return body,200
+}
+"""
+        adapter = adapter.replace(
+            "status := accessStatus(", "principal, status := accessPrincipal("
+        )
+        adapter = (
+            adapter.replace(
+                "return c.Next()",
+                "c.SetContext(context.WithValue(c.Context(), principalContextKey{}, principal))\n    return c.Next()",
+            )
+            if target == "fiber"
+            else adapter
+        )
+        if target == "gin":
+            adapter = adapter.replace(
+                "    c.Next()",
+                "    c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), principalContextKey{}, principal))\n    c.Next()",
+            )
+        if target in {"chi", "mux"}:
+            adapter = adapter.replace(
+                "next.ServeHTTP(w,r)",
+                "next.ServeHTTP(w,r.WithContext(context.WithValue(r.Context(), principalContextKey{}, principal)))",
+            )
     return common.replace("ADAPTER_IMPORT", adapter_import) + adapter
 
 
