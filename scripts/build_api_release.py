@@ -125,7 +125,7 @@ def validate(output: Path, root: Path = ROOT) -> None:
         if package == PACKAGES[0]:
             required = {
                 f"{module}/locks/{target}/go.{suffix}"
-                for target in ("fiber", "chi", "mux", "gin")
+                for target in ("fiber", "chi", "mux", "gin", "jwt")
                 for suffix in ("mod", "sum")
             }
             if not required <= members:

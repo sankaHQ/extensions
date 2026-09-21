@@ -17,7 +17,7 @@ HEADER_NAMES = {
 }
 
 
-def _access_body(framework: str) -> list[ast.stmt]:
+def _access_body(framework: str, kind: str = "bearer-read-write") -> list[ast.stmt]:
     def denied(status: int, message: str) -> str:
         headers = ', headers={"WWW-Authenticate": "Bearer"}' if status == 401 else ""
         if framework == "fastapi":
@@ -27,6 +27,14 @@ def _access_body(framework: str) -> list[ast.stmt]:
         suffix = ', {"WWW-Authenticate": "Bearer"}' if status == 401 else ""
         return f'return jsonify({{"error": "{message}"}}), {status}{suffix}'
 
+    if kind == "jwt-hs256-roles":
+        from .jwt_security import ACCESS_BODY
+
+        return ast.parse(
+            ACCESS_BODY.replace("UNAVAILABLE", denied(503, "authentication unavailable"))
+            .replace("UNAUTHENTICATED", denied(401, "not authenticated"))
+            .replace("FORBIDDEN", denied(403, "permission denied"))
+        ).body
     return ast.parse(f"""token = request.headers.get("Authorization", "").strip(" \\t")
 reader = environ.get("AUTH_READ_TOKEN", "")
 writer = environ.get("AUTH_WRITE_TOKEN", "")
@@ -89,7 +97,15 @@ def normalize_security(tree: ast.Module, framework: str) -> tuple[ast.Module, di
     hooks: list[tuple[int, dict[str, str]]] = []
     guard_index = None
     guard_class = None
-    required = {("os", "environ"), ("hmac", "compare_digest")}
+    kind = "bearer-read-write"
+    required = {("os", "environ")}
+
+    def access_kind(body: list[ast.stmt]) -> str | None:
+        for candidate in ("bearer-read-write", "jwt-hs256-roles"):
+            if _same(body, _access_body(framework, candidate)):
+                return candidate
+        return None
+
     imports = {
         (node.module, alias.name): i
         for i, node in enumerate(tree.body)
@@ -124,12 +140,13 @@ def normalize_security(tree: ast.Module, framework: str) -> tuple[ast.Module, di
                 or not _signature(request, "self, request")
                 or not _signature(response, "self, request, response")
                 or not _same(init.body, ast.parse("self.get_response = get_response").body)
-                or not _same(request.body, _access_body(framework))
+                or not access_kind(request.body)
                 or ast.unparse(response.body[-1]) != "return response"
             ):
                 continue
             hooks.append((index, _headers(response.body[:-1], framework)))
             guard, guard_class = True, node.name
+            kind = access_kind(request.body) or kind
             required |= {
                 ("django.http", "JsonResponse"),
                 ("django.utils.decorators", "decorator_from_middleware"),
@@ -142,11 +159,11 @@ def normalize_security(tree: ast.Module, framework: str) -> tuple[ast.Module, di
             if framework == "fastapi" and decorator == "app.middleware('http')":
                 if not _signature(node, "request: Request, call_next", asynchronous=True):
                     raise ValueError("unsupported HTTP middleware signature")
-                if _same(
-                    node.body,
-                    _access_body(framework) + ast.parse("return await call_next(request)").body,
+                if ast.unparse(node.body[-1]) == "return await call_next(request)" and access_kind(
+                    node.body[:-1]
                 ):
                     guard = True
+                    kind = access_kind(node.body[:-1]) or kind
                     required |= {("fastapi", "Request"), ("fastapi.responses", "JSONResponse")}
                 elif (
                     ast.unparse(node.body[0]) == "response = await call_next(request)"
@@ -157,9 +174,10 @@ def normalize_security(tree: ast.Module, framework: str) -> tuple[ast.Module, di
                 else:
                     raise ValueError("HTTP middleware is outside the qualified security recipes")
             elif framework == "flask" and decorator == "app.before_request":
-                if not _signature(node, "") or not _same(node.body, _access_body(framework)):
+                if not _signature(node, "") or not access_kind(node.body):
                     raise ValueError("before_request is outside the qualified access recipe")
                 guard = True
+                kind = access_kind(node.body) or kind
                 required |= {("flask", "request"), ("flask", "jsonify")}
             elif framework == "flask" and decorator == "app.after_request":
                 if (
@@ -182,6 +200,24 @@ def normalize_security(tree: ast.Module, framework: str) -> tuple[ast.Module, di
             raise ValueError("Request must be imported before middleware definitions")
     if not consumed:
         return tree, {}
+    if kind == "jwt-hs256-roles":
+        from .application import _bindings
+
+        if {"len", "set", "type", "str", "int"}.intersection(
+            name for node in tree.body for name in _bindings(node)
+        ):
+            raise ValueError("JWT middleware builtin dependencies must not be shadowed")
+    required |= (
+        {
+            ("jwt", "decode"),
+            ("jwt", "get_unverified_header"),
+            ("jwt", "InvalidTokenError"),
+            ("re", "fullmatch"),
+            ("time", "time"),
+        }
+        if kind == "jwt-hs256-roles"
+        else {("hmac", "compare_digest")}
+    )
     if guard_index is None or not required <= imports.keys():
         raise ValueError("security hooks require the explicit bearer access policy and imports")
     # DRF decorators wrap the entire APIView, before its parsing and validation.
@@ -221,7 +257,7 @@ def normalize_security(tree: ast.Module, framework: str) -> tuple[ast.Module, di
             ]
     tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or node.names]
     return tree, {
-        "kind": "bearer-read-write",
+        "kind": kind,
         "scope": "views" if framework == "drf" else "application",
         "success_headers": success,
         "denied_headers": denied,
@@ -342,6 +378,17 @@ func accessBody(status int) []byte {{
                 'strings.Join(r.Header.Values("Authorization"), ", ")',
             )
         )
+    if policy["kind"] == "jwt-hs256-roles":
+        from .jwt_security import GO_ACCESS
+
+        start, end = common.index("func accessStatus("), common.index("func accessHeaders(")
+        common = common[:start] + GO_ACCESS.replace("SCOPE_CHECK", scope_check) + common[end:]
+        common = common.replace(
+            '"crypto/subtle";',
+            '\n"encoding/json"; "encoding/base64"; "unicode/utf8"; "strconv"; "time"; "github.com/golang-jwt/jwt/v5";',
+        )
+        if not scope_import:
+            common = common.replace('"os";', '"os"; "regexp";')
     return common.replace("ADAPTER_IMPORT", adapter_import) + adapter
 
 
@@ -349,7 +396,9 @@ func accessBody(status int) []byte {{
 REPLAY_ENV = {"AUTH_READ_TOKEN": "sanka-replay-reader", "AUTH_WRITE_TOKEN": "sanka-replay-writer"}
 
 
-def security_cases(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def security_cases(
+    cases: list[dict[str, Any]], kind: str = "bearer-read-write"
+) -> list[dict[str, Any]]:
     """Exercise every supplied request as writer, unauthenticated and reader."""
     result = []
     for index, case in enumerate(cases):
@@ -358,7 +407,7 @@ def security_cases(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
             raise ValueError(
                 "security replay supplies synthetic Authorization; omit it from scenarios"
             )
-        for role, token, status in (
+        roles: tuple[tuple[str, str, int], ...] = (
             ("writer", "Bearer " + REPLAY_ENV["AUTH_WRITE_TOKEN"], case["expected_status"]),
             ("missing", "", 401),
             ("invalid", "Bearer invalid-replay-token", 401),
@@ -367,7 +416,12 @@ def security_cases(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "Bearer " + REPLAY_ENV["AUTH_READ_TOKEN"],
                 case["expected_status"] if case["method"] in ("GET", "HEAD", "OPTIONS") else 403,
             ),
-        ):
+        )
+        if kind == "jwt-hs256-roles":
+            from .jwt_security import replay_roles
+
+            roles = replay_roles(case, first=index == 0)
+        for role, token, status in roles:
             result.append(
                 dict(
                     case,
@@ -391,8 +445,15 @@ def header_names(captured: dict[str, Any]) -> list[str]:
 def security_environment(captured: dict[str, Any]) -> dict[str, str]:
     import json
 
+    from .jwt_security import REPLAY_JWT_ENV
+
+    environment = (
+        REPLAY_JWT_ENV
+        if captured.get("security", {}).get("kind") == "jwt-hs256-roles"
+        else REPLAY_ENV
+    )
     return (
-        REPLAY_ENV | {"SANKA_GO_REPLAY_HEADERS": json.dumps(header_names(captured))}
+        environment | {"SANKA_GO_REPLAY_HEADERS": json.dumps(header_names(captured))}
         if captured.get("security")
         else {"SANKA_GO_REPLAY_HEADERS": "[]"}
     )

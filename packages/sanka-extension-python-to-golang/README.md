@@ -48,7 +48,7 @@ values are captured or embedded in application defaults.
 Literal Cache-Control, X-Content-Type-Options, X-Frame-Options, Referrer-Policy and
 Strict-Transport-Security response assignments preserve framework hook order,
 including early denial behavior. No extra service/repository layers are added.
-JWT/OAuth, sessions, user identity/ownership permissions, arbitrary `Depends` policies,
+OAuth, sessions, user identity/ownership permissions, arbitrary `Depends` policies,
 custom authentication code and unrecognized middleware still block generation.
 This profile does not qualify implicit HEAD/OPTIONS behavior or unmatched-path errors.
 
@@ -60,6 +60,37 @@ that header. It compares selected response headers through an extension-owned
 Write verification compares rows and sequences after every request and checks that
 each denial leaves them unchanged. Source and candidate code execution still requires
 trusted fixtures; replay is not a security sandbox or production authorization audit.
+
+### Signed bearer tokens
+
+The same middleware positions also accept the explicit HS256 PyJWT recipe in
+[test_golang_jwt.py](tests/test_golang_jwt.py). It uses `AUTH_JWT_SECRET` (32–256
+ASCII characters), `AUTH_JWT_ISSUER`, and `AUTH_JWT_AUDIENCE`; missing or invalid
+configuration returns 503. Operators must supply a randomly generated signing
+secret. Values are never embedded in plans or generated application defaults.
+The source replay environment needs PyJWT 2.14; it is not an extension dependency.
+Generated JWT applications alone receive checksum-pinned `golang-jwt/jwt/v5`.
+
+The qualified token has exactly the `HS256` algorithm and `JWT` type headers, a
+canonical unpadded base64url encoding, and required `exp`, `sub`, `tenant`, `role`,
+`iss`, and scalar `aud` claims. Optional `iat` and `nbf` must not be in the future.
+Dates are integer seconds, bounded to 0–9007199254740991, with no clock leeway;
+expiry is exclusive. Subject, tenant, and role use 1–128 ASCII letters, digits,
+underscores or hyphens. Additional headers/claims and different source policies
+are outside this profile. Token values are bounded to 8192 characters.
+
+Invalid tokens return 401 with a Bearer challenge. Signed `reader` tokens allow
+reads; `writer` allows reads and writes. Other signed roles and reader writes
+return 403. Claims are verified for this access decision only: this does **not**
+add row ownership, tenant isolation, identity propagation, login/token issuance,
+refresh/revocation, key rotation/JWKS, OAuth, or native dependency/permission-class
+lowering. Sources using those behaviors remain blocked.
+
+Public replay uses synthetic signed tokens and checks wrong signatures, algorithm
+confusion, expired/future dates, missing or malformed claims, issuer/audience
+mismatch, and denied roles. The database qualification checks rows and sequences
+after denied requests using independent fixture schemas. Runtime clock-boundary
+behavior still depends on the clocks of the two applications.
 
 Generated Go dependencies and checksums are pinned in this package; Go 1.26.5 is
 the qualification toolchain. No Go dependencies are installed into Sanka's Python
