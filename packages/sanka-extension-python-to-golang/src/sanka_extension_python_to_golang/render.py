@@ -384,6 +384,39 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         _, _ = w.Write(body)
     }}{suffix}""")
             continue
+        if "identity" in route:
+            fields = (
+                "map[string]string{"
+                + ",".join(
+                    canonical(k) + ":" + canonical(v) for k, v in sorted(route["identity"].items())
+                )
+                + "}"
+            )
+            if target == "fiber":
+                registrations.append(f"""app.Get({path}, func(c fiber.Ctx) error {{
+        body, status := identityResponse(c.Context(), {fields})
+        c.Set("Content-Type", "application/json")
+        return c.Status(status).Send(body)
+    }})""")
+            elif target == "gin":
+                registrations.append(f"""app.GET({path}, func(c *gin.Context) {{
+        body, status := identityResponse(c.Request.Context(), {fields})
+        c.Data(status, "application/json", body)
+    }})""")
+            else:
+                method = (
+                    f'app.MethodFunc("GET", {path},'
+                    if target == "chi"
+                    else f"app.HandleFunc({path},"
+                )
+                suffix = ")" if target == "chi" else ').Methods("GET")'
+                registrations.append(f"""{method} func(w http.ResponseWriter, r *http.Request) {{
+        body, status := identityResponse(r.Context(), {fields})
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(status)
+        _, _ = w.Write(body)
+    }}{suffix}""")
+            continue
         body = canonical(canonical(route["body"]))
         if target == "fiber":
             registrations.append(f"""app.Get({path}, func(c fiber.Ctx) error {{

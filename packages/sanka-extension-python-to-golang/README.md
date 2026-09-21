@@ -83,14 +83,43 @@ Invalid tokens return 401 with a Bearer challenge. Signed `reader` tokens allow
 reads; `writer` allows reads and writes. Other signed roles and reader writes
 return 403. Claims are verified for this access decision only: this does **not**
 add row ownership, tenant isolation, identity propagation, login/token issuance,
-refresh/revocation, key rotation/JWKS, OAuth, or native dependency/permission-class
-lowering. Sources using those behaviors remain blocked.
+refresh/revocation, key rotation/JWKS, or OAuth. Sources using those behaviors remain
+blocked. The native bindings below extend this same bounded policy.
 
 Public replay uses synthetic signed tokens and checks wrong signatures, algorithm
 confusion, expired/future dates, missing or malformed claims, issuer/audience
 mismatch, and denied roles. The database qualification checks rows and sequences
 after denied requests using independent fixture schemas. Runtime clock-boundary
 behavior still depends on the clocks of the two applications.
+
+### Native authentication and handler identity
+
+The same signed-token contract can be expressed through FastAPI's `Depends`,
+DRF's `BaseAuthentication`, or Flask's `before_request` with `g.principal`.
+[test_golang_identity.py](tests/test_golang_identity.py) contains executable source
+recipes. FastAPI routes inject `principal: dict = Depends(authenticate)`; DRF views
+explicitly select the captured authenticator and may use `IsAuthenticated` or
+`AllowAny`. The DRF authenticator returns a user with `is_authenticated=True` and
+`pk` from the verified subject, plus the verified claims as `request.auth`.
+
+Generated adapters put verified subject, tenant and role into the individual
+request's Go context. GET handlers can return explicit JSON projections from
+`principal["sub"|"tenant"|"role"]`, `request.auth[...]` / `request.user.pk`, or
+`g.principal[...]`. No service or repository layer is added for these reads.
+Replay alternates users and tenants, including denials and returning to the first
+user, and compares actual source and Go identity responses. The native policy
+also composes with the qualified database reads and CRUD recipes; isolated
+PostgreSQL replay verifies that denied writes leave rows and sequences unchanged.
+
+Native exceptions preserve the source error envelope: FastAPI/DRF use `detail`,
+Flask uses `error`; 401 includes the Bearer challenge. Every captured FastAPI/DRF
+route must select the same qualified authenticator. Mixed public/protected routes,
+other dependency graphs, custom permission classes, additional response hooks,
+and identity-dependent business/query expressions remain blockers. This does not
+implement tenant/owner filtering: the signed tenant claim is available to qualified
+handlers, but persistence isolation still requires its own captured predicates.
+As with the other profiles, malformed-body, unmatched-route and implicit
+HEAD/OPTIONS behavior are outside the qualification corpus.
 
 Generated Go dependencies and checksums are pinned in this package; Go 1.26.5 is
 the qualification toolchain. No Go dependencies are installed into Sanka's Python

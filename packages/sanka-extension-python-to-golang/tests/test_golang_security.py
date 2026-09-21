@@ -283,7 +283,7 @@ def test_security_database_capture_and_scenarios(tmp_path: Path) -> None:
 
 
 @requires_database
-@pytest.mark.parametrize("policy", ["bearer", "jwt"])
+@pytest.mark.parametrize("policy", ["bearer", "jwt", "native"])
 @pytest.mark.parametrize("framework", SOURCES)
 @pytest.mark.parametrize("target", TARGETS)
 def test_security_database_verify(
@@ -321,20 +321,25 @@ def test_security_database_verify(
             if framework == "fastapi" and target == "fiber":
                 path = output / "security.go"
                 original = path.read_text()
-                path.write_text(original.replace("return 403", "return 0"))
+                path.write_text(
+                    original.replace("return nil, 403", "return nil, 0")
+                    if policy == "native"
+                    else original.replace("return 403", "return 0")
+                )
                 tampered = replay(tmp_path, output, captured, "verify")
                 assert not tampered["ok"]
-                path.write_text(original.replace('"no-store"', '"public"'))
-                tampered = replay(tmp_path, output, captured, "verify")
-                assert not tampered["ok"]
-                assert not tampered["security_headers"]["ok"]
+                if policy != "native":
+                    path.write_text(original.replace('"no-store"', '"public"'))
+                    tampered = replay(tmp_path, output, captured, "verify")
+                    assert not tampered["ok"]
+                    assert not tampered["security_headers"]["ok"]
         finally:
             for name in created:
                 admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
 
 
 @pytest.mark.parametrize("target", TARGETS)
-@pytest.mark.parametrize("policy", ["bearer", "jwt"])
+@pytest.mark.parametrize("policy", ["bearer", "jwt", "native"])
 def test_security_write_probe_compiles(tmp_path: Path, target: str, policy: str) -> None:
     import os
 
@@ -346,9 +351,12 @@ def test_security_write_probe_compiles(tmp_path: Path, target: str, policy: str)
 
     if os.getenv("SANKA_GO_TESTS") != "1":
         pytest.skip("requires Go toolchain")
+    from test_golang_identity import identity_source
     from test_golang_jwt import jwt_source
 
-    source_factory = jwt_source if policy == "jwt" else secured_source
+    source_factory = {"jwt": jwt_source, "native": identity_source, "bearer": secured_source}[
+        policy
+    ]
     output = generate(
         tmp_path, "fastapi", target, app_source=source_factory("fastapi", schema_source("fastapi"))
     )
@@ -376,16 +384,19 @@ def prepare_security_fixture(
         base = Path(temporary).resolve()
         _, captured = prepare_write_fixture(base, framework, target)
         (root / "sanka-verify.json").write_bytes((base / "sanka-verify.json").read_bytes())
+        from test_golang_identity import identity_source
         from test_golang_jwt import jwt_source
 
-        source_factory = jwt_source if policy == "jwt" else secured_source
+        source_factory = {"jwt": jwt_source, "native": identity_source, "bearer": secured_source}[
+            policy
+        ]
         text = source_factory(framework, (base / "app.py").read_text())
     output = generate(root, framework, target, app_source=text)
     return output, capture(root, captured["configuration"])
 
 
 @pytest.mark.parametrize("framework", SOURCES)
-@pytest.mark.parametrize("policy", ["bearer", "jwt"])
+@pytest.mark.parametrize("policy", ["bearer", "jwt", "native"])
 def test_security_database_fixture_capture(tmp_path: Path, framework: str, policy: str) -> None:
     _, captured = prepare_security_fixture(tmp_path, framework, "fiber", policy)
     assert not captured["gaps"]

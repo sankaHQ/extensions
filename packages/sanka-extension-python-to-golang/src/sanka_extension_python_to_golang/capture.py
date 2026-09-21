@@ -1162,6 +1162,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     try:
         tree, application = normalize_application(tree, framework)
         tree, security = normalize_security(tree, framework)
+        if framework == "drf" and security.get("native"):
+            allowed_imports["rest_framework.permissions"].add("IsAuthenticated")
         if framework == "fastapi" and models:
             tree, lowered_repositories = normalize_async_persistence(tree)
         tree = normalize_routes(tree, framework)
@@ -1380,10 +1382,16 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             used.add(name)
             if framework == "drf":
                 decorators = [ast.unparse(item) for item in function.decorator_list]
+                permission = (
+                    "IsAuthenticated"
+                    if security.get("native")
+                    and "permission_classes([IsAuthenticated])" in decorators
+                    else "AllowAny"
+                )
                 required = [
                     f"api_view(['{method}'])",
                     "authentication_classes([])",
-                    "permission_classes([AllowAny])",
+                    f"permission_classes([{permission}])",
                     "renderer_classes([JSONRenderer])",
                 ]
                 if (
@@ -1393,7 +1401,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                         "authentication_classes",
                         "permission_classes",
                         "renderer_classes",
-                        "AllowAny",
+                        permission,
                         "JSONRenderer",
                         "Response",
                     }
@@ -1412,6 +1420,10 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 payload = _drf_write(function, method, models)
             else:
                 payload = _payload(function, framework, models)
+            if name in security.get("projections", {}):
+                if method != "GET" or "body" not in payload:
+                    raise ValueError("identity projections require a qualified GET response")
+                payload = {"identity": security["projections"][name]}
             if name in validations:
                 payload["write"].update(validations[name])
             lookup = payload.get("read", {}).get("lookup")
