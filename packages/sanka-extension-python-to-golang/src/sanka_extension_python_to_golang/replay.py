@@ -64,9 +64,9 @@ elif framework == "fastapi":
     client = TestClient(module.app)
 else:
     client = module.app.test_client()
-observed = []
 observed_headers = []
 header_names = json.loads(os.environ.get("SANKA_GO_REPLAY_HEADERS", "[]"))
+observed = []
 for case in json.loads(routes):
     path = case if isinstance(case, str) else case["path"]
     response = client.get(path,

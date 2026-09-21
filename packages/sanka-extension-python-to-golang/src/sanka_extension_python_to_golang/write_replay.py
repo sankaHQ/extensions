@@ -116,8 +116,6 @@ SOURCE_WRITES = (
 import psycopg
 from psycopg import sql
 observed = []
-observed_headers = []
-header_names = json.loads(os.environ.get("SANKA_GO_REPLAY_HEADERS", "[]"))
 observed_bytes = 0
 with psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://'), autocommit=True) as connection:
     for case in json.loads(Path(routes).read_text())['scenarios']:

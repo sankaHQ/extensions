@@ -417,3 +417,27 @@ def test_source_duplicate_authorization(tmp_path: Path, framework: str, status: 
         },
     )
     assert json.loads(observed.read_text())[0]["status"] == status
+
+
+def test_composed_probe_cleanup_without_header_capture(tmp_path: Path) -> None:
+    import json
+    import sys
+
+    from sanka_extension_python_to_golang.replay import SOURCE_PROBE, _run
+
+    # Existing database qualification replaces the request loop while reusing
+    # setup/cleanup. Its cleanup must work without enabling header capture.
+    probe = (
+        SOURCE_PROBE[: SOURCE_PROBE.index("observed = []")]
+        + "observed = []\n"
+        + SOURCE_PROBE[SOURCE_PROBE.index("Path(destination).write_text") :]
+    )
+    path = tmp_path / "app.py"
+    path.write_text(source("flask"))
+    observed = tmp_path / "observed.json"
+    _run(
+        [sys.executable, "-I", "-c", probe, "flask", str(path), "[]", str(observed), "", "0"],
+        tmp_path,
+        environment={"SANKA_GO_REPLAY_HEADERS": "[]"},
+    )
+    assert json.loads(observed.read_text()) == []
