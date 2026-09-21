@@ -655,8 +655,23 @@ and the local package suites are separate from PostgreSQL CI qualification. The 
 public lifecycle matrix covers three sources by four targets, reset repeatability,
 and a database-only mutation negative control.
 
-The a1 scoped API converter release was already published. This change prepares a2
-Go/Rust/shared-replay wheels and manifests without publishing or changing a1 assets;
-the unchanged TypeScript capture helper stays a1. Full backend readiness, standard
-serializer coverage, native error parity, authentication/permissions, middleware,
-relationships and hosted integration remain open. PR88 needs review on its new head.
+The shared replay batch merged through PR99 as `9063910` after exact-head approval
+and the full PostgreSQL 3-source by 4-target matrix passed. The a1 scoped API
+converter release was already published; a2 remains prepared but unpublished.
+Full backend readiness, standard serializer coverage, default native error parity,
+authentication/permissions, middleware, relationships and hosted integration remain
+open.
+
+
+## Native FastAPI request-model slice (2026-09-21)
+
+G1 now recognizes one bounded conventional FastAPI body-injection form: flat
+`BaseModel` schemas matching the captured SQLAlchemy model, database-width integer
+bounds, immediate `model_dump(exclude_unset=True)`, and a registered stable 422
+`RequestValidationError` handler. Generated Fiber, chi, mux and Gin decoders preserve
+ordinary Pydantic integer/boolean coercion, ignored extras and PATCH field presence.
+Changed bounds, handler behavior, imports or dump semantics block capture.
+
+Default detailed FastAPI validation arrays, custom validators, aliases and nested
+models remain open, as do conventional DRF and Flask validation. This slice advances
+G1 but does not close its conventional three-source CRUD exit gate.

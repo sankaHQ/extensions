@@ -32,8 +32,11 @@ def scenarios_for(root: Path, captured: dict[str, Any]) -> list[dict[str, Any]]:
     path = root / "sanka-verify.json"
     if path.exists():
         return load_scenarios(path)
-    if any(route.get("write", {}).get("constraints") for route in captured["routes"]):
-        raise ValueError("constrained write replay requires explicit sanka-verify.json scenarios")
+    if any(
+        route.get("write", {}).get("constraints") or route.get("write", {}).get("validation")
+        for route in captured["routes"]
+    ):
+        raise ValueError("captured write validation requires explicit sanka-verify.json scenarios")
     operations = []
     for route in captured["routes"]:
         operation = {"method": route["method"], "path": route["path"], "status": route["status"]}

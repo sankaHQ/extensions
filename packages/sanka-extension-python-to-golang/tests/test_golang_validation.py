@@ -45,6 +45,53 @@ def schema_source(framework: str) -> str:
     return definitions + source
 
 
+def native_fastapi_schema_source() -> str:
+    source = fastapi_write_source()
+    definitions = """from pydantic import BaseModel, Field
+from fastapi import Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+class WidgetInput(BaseModel):
+    name: str
+    count: int = Field(ge=-2147483648, le=2147483647)
+    enabled: bool
+    note: str | None = None
+class WidgetPatch(BaseModel):
+    name: str = None
+    count: int = Field(default=None, ge=-2147483648, le=2147483647)
+    enabled: bool = None
+    note: str | None = None
+def invalid_request(request: Request, exc: RequestValidationError):
+    return JSONResponse(status_code=422, content={"detail": "invalid request body"})
+"""
+    source = source.replace(
+        "app = FastAPI()",
+        "app = FastAPI(exception_handlers={RequestValidationError: invalid_request})",
+    )
+    for partial, name in [(False, "WidgetInput"), (True, "WidgetPatch")]:
+        error = 'raise HTTPException(status_code=400, detail="invalid request body")'
+        source = source.replace(
+            indent(widget_validation("data", partial, error), "    "),
+            "",
+        )
+        signature = "id: int, data: dict" if partial else "data: dict"
+        source = source.replace(
+            f"def {'patch_widget' if partial else 'create_widget'}({signature}):\n",
+            f"def {'patch_widget' if partial else 'create_widget'}("
+            + ("id: int, " if partial else "")
+            + f"data: {name}):\n    data = data.model_dump(exclude_unset=True)\n",
+        )
+    source = source.replace(
+        indent(widget_validation("data", False, error), "    "),
+        "",
+    ).replace(
+        "def replace_widget(id: int, data: dict):\n",
+        "def replace_widget(id: int, data: WidgetInput):\n"
+        "    data = data.model_dump(exclude_unset=True)\n",
+    )
+    return definitions + source
+
+
 def captured_source(root: Path, framework: str, target: str = "fiber", text: str | None = None):
     (root / "app.py").write_text(text if text is not None else schema_source(framework))
     (root / "models.py").write_text(model_source(framework))
@@ -72,6 +119,176 @@ def test_strict_schema_reuses_write_contract(tmp_path: Path, framework: str, tar
     assert captured["models"] == manual["models"]
     # Generated source uses the existing decoder; only provenance hashes differ.
     assert render(captured)["app.go"] == render(manual)["app.go"]
+
+
+@pytest.mark.parametrize("target", TARGETS)
+def test_native_fastapi_schema_capture(tmp_path: Path, target: str) -> None:
+    captured = captured_source(tmp_path, "fastapi", target, native_fastapi_schema_source())
+    assert captured["gaps"] == []
+    validations = [route["write"]["validation"] for route in captured["routes"][:3]]
+    assert validations == [
+        {
+            "kind": "pydantic",
+            "schema": "WidgetInput",
+            "partial": False,
+            "error": {"status": 422, "body": {"detail": "invalid request body"}},
+        },
+        {
+            "kind": "pydantic",
+            "schema": "WidgetPatch",
+            "partial": True,
+            "error": {"status": 422, "body": {"detail": "invalid request body"}},
+        },
+        {
+            "kind": "pydantic",
+            "schema": "WidgetInput",
+            "partial": False,
+            "error": {"status": 422, "body": {"detail": "invalid request body"}},
+        },
+    ]
+    assert capture(tmp_path, captured["configuration"]) == captured
+
+
+@pytest.mark.parametrize("target", TARGETS)
+def test_native_fastapi_uses_captured_validation_error(tmp_path: Path, target: str) -> None:
+    captured = captured_source(tmp_path, "fastapi", target, native_fastapi_schema_source())
+    app = render(captured)["app.go"]
+    assert "invalid request body" in app
+    assert "422" in app
+
+
+@pytest.mark.parametrize(
+    "before,after",
+    [
+        ("status_code=422", "status_code=400"),
+        ('{"detail": "invalid request body"}', '{"error": "invalid request body"}'),
+        ("ge=-2147483648", "ge=-10"),
+        ("le=2147483647", "le=10"),
+        ("exclude_unset=True", "exclude_unset=False"),
+        ("from pydantic import BaseModel, Field", "from counterfeit import BaseModel, Field"),
+    ],
+)
+def test_unqualified_native_pydantic_semantics_block(
+    tmp_path: Path, before: str, after: str
+) -> None:
+    source = native_fastapi_schema_source().replace(before, after, 1)
+    assert captured_source(tmp_path, "fastapi", text=source)["gaps"]
+
+
+def test_native_fastapi_source_validation_error(tmp_path: Path) -> None:
+    captured_source(tmp_path, "fastapi", text=native_fastapi_schema_source())
+    script = """
+from fastapi.testclient import TestClient
+from app import app
+client = TestClient(app)
+for body in ({}, {"name": 1, "count": "bad", "enabled": []}, []):
+    response = client.post('/widgets', json=body)
+    assert response.status_code == 422, (body, response.status_code)
+    assert response.json() == {"detail": "invalid request body"}
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=os.environ | {"DATABASE_URL": "sqlite://"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="requires qualified Go toolchain")
+@pytest.mark.parametrize("target", TARGETS)
+def test_generated_native_fastapi_validation_error(tmp_path: Path, target: str) -> None:
+    captured = captured_source(tmp_path, "fastapi", target, native_fastapi_schema_source())
+    output = tmp_path / "candidate"
+    for name, contents in render(captured).items():
+        destination = output / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(contents)
+    exchange = """response, err := app.Test(request)
+        if err != nil { t.Fatal(err) }
+        body, err := io.ReadAll(response.Body); response.Body.Close()
+        if err != nil { t.Fatal(err) }
+        status := response.StatusCode"""
+    extra_import = '; "io"'
+    if target != "fiber":
+        exchange = """response := httptest.NewRecorder()
+        app.ServeHTTP(response, request)
+        body, status := response.Body.Bytes(), response.Code"""
+        extra_import = ""
+    (output / "native_validation_test.go").write_text(
+        f'''package backend
+import ("net/http/httptest"; "strings"; "testing"; "github.com/jackc/pgx/v5/pgxpool"{extra_import})
+func TestNativeValidationError(t *testing.T) {{
+    app := NewApp(&pgxpool.Pool{{}})
+    for _, payload := range []string{{`{{}}`, `[]`, `{{"name":1,"count":"bad","enabled":[]}}`}} {{
+        request := httptest.NewRequest("POST", "/widgets", strings.NewReader(payload))
+        request.Header.Set("Content-Type", "application/json")
+        {exchange}
+        invalidBody := strings.TrimSpace(string(body)) != `{{"detail":"invalid request body"}}`
+        if status != 422 || invalidBody {{
+            t.Fatalf("status=%d body=%s", status, body)
+        }}
+    }}
+}}
+'''
+    )
+    result = subprocess.run(
+        ["go", "test", "-mod=readonly", "-p=2", "-run", "TestNativeValidationError", "."],
+        cwd=output,
+        env=os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"},
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="requires qualified Go toolchain")
+@pytest.mark.parametrize("target", TARGETS)
+def test_native_pydantic_and_go_decoder_agree(tmp_path: Path, target: str) -> None:
+    from pydantic import BaseModel, Field, ValidationError
+
+    class WidgetInput(BaseModel):
+        name: str
+        count: int = Field(ge=-2147483648, le=2147483647)
+        enabled: bool
+        note: str | None = None
+
+    class WidgetPatch(BaseModel):
+        name: str = None
+        count: int = Field(default=None, ge=-2147483648, le=2147483647)
+        enabled: bool = None
+        note: str | None = None
+
+    payloads = [
+        *validation_cases(),
+        {"name": "coerced", "count": "1", "enabled": "false", "extra": 1},
+        {"name": "coerced", "count": 1.0, "enabled": 1},
+        {"name": "coerced", "count": "1.0", "enabled": "YES"},
+        {"name": "coerced", "count": True, "enabled": 0.0},
+        {"name": "invalid", "count": 1, "enabled": " true "},
+        {"name": "invalid", "count": "1e2", "enabled": "maybe"},
+        {"name": "invalid", "count": 1.5, "enabled": 2},
+    ]
+    cases = []
+    for partial, schema in [(False, WidgetInput), (True, WidgetPatch)]:
+        for payload in payloads:
+            try:
+                result = schema.model_validate(payload).model_dump(exclude_unset=True)
+            except ValidationError:
+                result = None
+            cases.append(
+                {
+                    "body": json.dumps(payload),
+                    "partial": partial,
+                    "valid": result is not None,
+                    "expected": result,
+                }
+            )
+    captured = captured_source(tmp_path, "fastapi", target, native_fastapi_schema_source())
+    assert_go_decoder_parity(tmp_path, captured, cases, "decodeWidget_pydantic")
 
 
 @pytest.mark.parametrize(
