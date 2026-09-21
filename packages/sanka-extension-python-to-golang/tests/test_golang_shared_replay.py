@@ -21,7 +21,7 @@ from sanka_extension_python_to_golang.write_replay import (
 from test_golang_drf_validation import drf_serializer_source
 from test_golang_routing import group_backend
 from test_golang_schema import generate, schema_dsn
-from test_golang_validation import captured_source, schema_source
+from test_golang_validation import captured_source, native_fastapi_schema_source, schema_source
 from test_golang_write_parity import SCENARIOS, requires_database
 
 
@@ -74,6 +74,12 @@ def test_bigint_body_normalization_keeps_errors_and_types(tmp_path: Path) -> Non
     errors = [{"method": "POST", "path": "/widgets", "status": 400, "body": {"id": 2}}]
     normalize_bodies(errors, captured)
     assert errors[0]["body"]["id"] == 2
+
+
+def test_native_validation_requires_explicit_scenarios(tmp_path: Path) -> None:
+    captured = captured_source(tmp_path, "fastapi", text=native_fastapi_schema_source())
+    with pytest.raises(ValueError, match=r"explicit sanka-verify\.json"):
+        scenarios_for(tmp_path, captured)
 
 
 @pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="requires qualified Go toolchain")
@@ -194,6 +200,80 @@ def test_public_write_verify(
                     for step in changed["steps"]
                     for problem in step["problems"]
                 )
+        finally:
+            for name in created:
+                admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
+
+
+@requires_database
+@pytest.mark.parametrize("target", TARGETS)
+def test_native_fastapi_public_write_verify(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    import psycopg
+    from psycopg import sql
+    from test_golang_schema import generate
+
+    scenarios = [
+        {"id": "invalid", "method": "POST", "path": "/widgets", "body": {}, "expected_status": 422},
+        {
+            "id": "create",
+            "method": "POST",
+            "path": "/widgets",
+            "body": {"name": "alpha", "count": "7", "enabled": "true", "extra": 1},
+            "expected_status": 201,
+        },
+        {
+            "id": "patch",
+            "method": "PATCH",
+            "path": "/widgets/1",
+            "body": {"count": "9", "enabled": "false", "extra": 1},
+            "expected_status": 200,
+        },
+        {
+            "id": "replace",
+            "method": "PUT",
+            "path": "/widgets/1",
+            "body": {"name": "beta", "count": 2.0, "enabled": 1},
+            "expected_status": 200,
+        },
+        {"id": "delete", "method": "DELETE", "path": "/widgets/1", "expected_status": 204},
+        {
+            "id": "create-after",
+            "method": "POST",
+            "path": "/widgets",
+            "body": {"name": "gamma", "count": "3.0", "enabled": "no"},
+            "expected_status": 201,
+        },
+    ]
+    (tmp_path / "sanka-verify.json").write_text(
+        json.dumps({"schema": "sanka.http-scenarios/v1", "scenarios": scenarios})
+    )
+    output = generate(tmp_path, "fastapi", target, app_source=native_fastapi_schema_source())
+    captured = capture(
+        tmp_path,
+        configuration(
+            {"source_framework": "fastapi", "target_framework": target, "database_layer": "pgx"}
+        ),
+    )
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    created = []
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        try:
+            for _ in range(2):
+                name = "go_native_" + uuid.uuid4().hex
+                admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(name)))
+                created.append(name)
+            source_url, target_url = [schema_dsn(dsn, name) for name in created]
+            monkeypatch.setenv(
+                "SANKA_GO_SOURCE_TEST_DATABASE_URL",
+                source_url.replace("postgresql://", "postgresql+psycopg://", 1),
+            )
+            monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", target_url)
+            report = replay(tmp_path, output, captured, "verify")
+            assert report["ok"], report["steps"]
+            assert report["candidate"] == report["source"]
+            assert report["candidate"][-1]["sequences"]["widgets"] == ["2", True]
         finally:
             for name in created:
                 admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))

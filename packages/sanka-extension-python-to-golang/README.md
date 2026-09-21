@@ -380,6 +380,18 @@ exercise generated CRUD on PostgreSQL in CI. Public ordered write replay is now
 available; malformed/non-object body parity, native framework validation errors and
 general DRF serializer behavior remain open.
 
+FastAPI also accepts a bounded conventional request-model form. The handler injects
+the matching flat `BaseModel`, immediately calls `model_dump(exclude_unset=True)`,
+and uses the existing qualified SQLAlchemy write. Integer fields declare the exact
+database-width `Field(ge=..., le=...)` bounds. Pydantic's ordinary integer and boolean
+coercion and default extra-field ignoring are preserved in the Go decoder.
+
+This form requires an explicit `RequestValidationError` handler registered through
+`FastAPI(exception_handlers=...)` that returns status 422 with
+`{"detail": "invalid request body"}`. This keeps the error contract stable across
+source and generated applications. Default detailed FastAPI error arrays, custom
+validators, aliases, nested bodies and other exception handlers remain blockers.
+
 ## Strict DRF BaseSerializer validation
 
 DRF can move its explicit strict flat-field validation into a `BaseSerializer`

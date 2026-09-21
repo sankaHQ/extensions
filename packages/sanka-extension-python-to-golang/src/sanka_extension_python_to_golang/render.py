@@ -178,7 +178,11 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     error_key = "detail" if captured["configuration"]["source_framework"] == "fastapi" else "error"
     registrations = []
     helpers = []
-    write_models: set[str] = set()
+    write_models: set[tuple[str, str]] = set()
+    has_pydantic = any(
+        route.get("write", {}).get("validation", {}).get("kind") == "pydantic"
+        for route in captured["routes"]
+    )
     has_reads = any("read" in route for route in captured["routes"])
     has_detail_reads = any("lookup" in route.get("read", {}) for route in captured["routes"])
     for index, route in enumerate(captured["routes"]):
@@ -187,6 +191,8 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             model = next(
                 item for item in captured["models"] if item["name"] == route["write"]["model"]
             )
+            validation_kind = route["write"].get("validation", {}).get("kind", "strict")
+            decoder_key = (model["name"], validation_kind)
             if route["write"]["operation"] == "delete":
                 helpers.append(_delete_helper(index, route["write"], model))
                 registrations.append(
@@ -201,10 +207,10 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                 )
                 continue
             helpers.append(
-                _write_helper(index, route["write"], model, model["name"] not in write_models)
+                _write_helper(index, route["write"], model, decoder_key not in write_models)
             )
             if not route["write"].get("constraints"):
-                write_models.add(model["name"])
+                write_models.add(decoder_key)
             method = route["method"].title()
             status = route["status"]
             lookup_field = None
@@ -213,6 +219,9 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                     item for item in model["fields"] if item["name"] == route["write"]["lookup"]
                 )
             argument = ", lookup" if lookup_field else ""
+            invalid_status = (
+                route["write"].get("validation", {}).get("error", {}).get("status", 400)
+            )
             if target == "fiber":
                 lookup = ""
                 if lookup_field:
@@ -225,7 +234,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         item, err := writeRow{index}(c.Context(), pool, c.Body(){argument})
         if err != nil {{
             if errors.Is(err, errInvalidWrite) {{
-                return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid request body"}})
+                return c.Status({invalid_status}).JSON(fiber.Map{{{canonical(error_key)}: "invalid request body"}})
             }}
             if errors.Is(err, pgx.ErrNoRows) {{
                 return c.Status(404).JSON(fiber.Map{{{canonical(error_key)}: "not found"}})
@@ -253,7 +262,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         }}
         item, err := writeRow{index}(c.Request.Context(), pool, body{argument})
         if err != nil {{
-            if errors.Is(err, errInvalidWrite) {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid request body"}}); return }}
+            if errors.Is(err, errInvalidWrite) {{ c.JSON({invalid_status}, gin.H{{{canonical(error_key)}: "invalid request body"}}); return }}
             if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{canonical(error_key)}: "not found"}}); return }}
             c.JSON(500, gin.H{{"error": "database write failed"}})
             return
@@ -294,7 +303,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         }}
         item, err := writeRow{index}(r.Context(), pool, body{argument})
         if err != nil {{
-            if errors.Is(err, errInvalidWrite) {{ writeResponse(w, 400, map[string]string{{{canonical(error_key)}: "invalid request body"}}); return }}
+            if errors.Is(err, errInvalidWrite) {{ writeResponse(w, {invalid_status}, map[string]string{{{canonical(error_key)}: "invalid request body"}}); return }}
             if errors.Is(err, pgx.ErrNoRows) {{ writeResponse(w, 404, map[string]string{{{canonical(error_key)}: "not found"}}); return }}
             writeResponse(w, 500, map[string]string{{"error": "database write failed"}})
             return
@@ -412,6 +421,8 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         imports.extend(['"fmt"', '"strconv"', '"strings"'])
     elif has_replace or has_delete:
         imports.append('"strconv"')
+    if has_pydantic:
+        imports.extend(['"math"', '"strconv"', '"strings"'])
     if database:
         imports.append('"github.com/jackc/pgx/v5/pgxpool"')
     database_import = "; ".join(dict.fromkeys(imports))
@@ -434,6 +445,8 @@ func NewApp({arguments}) {return_type} {{
 '''
     if has_writes:
         source += '\nvar errInvalidWrite = errors.New("invalid write")\n'
+        if has_pydantic:
+            source += PYDANTIC_HELPERS
         if target in {"chi", "mux"}:
             source += """
 func writeResponse(w http.ResponseWriter, status int, payload any) {
@@ -641,6 +654,7 @@ def _write_helper(
     returning = ", ".join('"' + field["name"] + '"' for field in fields)
     destinations = ", ".join("&saved." + go_name(field["name"]) for field in fields)
     accepted = ", ".join(canonical(field["name"]) + ": {}" for field in writable)
+    validation_kind = write.get("validation", {}).get("kind", "strict")
     decoding = []
     required = []
     for field in writable:
@@ -650,16 +664,56 @@ def _write_helper(
         if not field["nullable"]:
             null_guard = ' || bytes.Equal(bytes.TrimSpace(raw), []byte("null"))'
             required.append(f"if !partial && !seen[{name}] {{ return item, nil, errInvalidWrite }}")
-        decoding.append(
-            f"""if raw, ok := values[{name}]; ok {{
+        if validation_kind == "pydantic":
+            value_type = {
+                "string": "string",
+                "int32": "int32",
+                "int64": "int64",
+                "bool": "bool",
+            }[field["go_type"]]
+            conversion = {
+                "string": "var value string\n            err := json.Unmarshal(raw, &value)",
+                "int32": "number, err := pydanticInt(raw, 32)\n            value := int32(number)",
+                "int64": "value, err := pydanticInt(raw, 64)",
+                "bool": "value, err := pydanticBool(raw)",
+            }[field["go_type"]]
+            if field["nullable"]:
+                code = f"""if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {{
+            {target} = nil
+        }} else {{
+            {conversion}
+            if err != nil {{ return item, nil, errInvalidWrite }}
+            converted := {value_type}(value)
+            {target} = &converted
+        }}"""
+            else:
+                code = f"""if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {{ return item, nil, errInvalidWrite }}
+        {conversion}
+        if err != nil {{ return item, nil, errInvalidWrite }}
+        {target} = {value_type}(value)"""
+                if field["go_type"] == "int32":
+                    code = code.replace(f"{target} = int32(value)", f"{target} = value")
+            decoding.append(
+                f"""if raw, ok := values[{name}]; ok {{
+        {code}
+        seen[{name}] = true
+    }}"""
+            )
+        else:
+            decoding.append(
+                f"""if raw, ok := values[{name}]; ok {{
         if err := json.Unmarshal(raw, &{target}); err != nil{null_guard} {{
             return item, nil, errInvalidWrite
         }}
         seen[{name}] = true
     }}"""
-        )
+            )
     constraints = write.get("constraints", {})
-    decoder_name = f"decode{model['name']}" + (f"_write{index}" if constraints else "")
+    decoder_name = f"decode{model['name']}"
+    if validation_kind == "pydantic":
+        decoder_name += "_pydantic"
+    if constraints:
+        decoder_name += f"_write{index}"
     for field in writable:
         target = "item." + go_name(field["name"])
         bounds = constraints.get(field["name"], {})
@@ -688,7 +742,7 @@ def _write_helper(
     }}
     allowed := map[string]struct{{}}{{{accepted}}}
     for name := range values {{
-        if _, ok := allowed[name]; !ok {{ return item, nil, errInvalidWrite }}
+        if _, ok := allowed[name]; !ok {{ {"delete(values, name)" if validation_kind == "pydantic" else "return item, nil, errInvalidWrite"} }}
     }}
     seen := map[string]bool{{}}
     {chr(10).join(decoding)}
@@ -765,6 +819,63 @@ def _write_helper(
 }}
 """
     return (decoder if include_decoder or constraints else "") + helper
+
+
+PYDANTIC_HELPERS = r"""
+func pydanticInt(raw []byte, bits int) (int64, error) {
+    var input any
+    decoder := json.NewDecoder(bytes.NewReader(raw))
+    decoder.UseNumber()
+    if err := decoder.Decode(&input); err != nil { return 0, errInvalidWrite }
+    var text string
+    fromString := false
+    switch value := input.(type) {
+    case bool:
+        if value { return 1, nil }
+        return 0, nil
+    case json.Number:
+        text = string(value)
+    case string:
+        text = strings.TrimSpace(value)
+        fromString = true
+    default:
+        return 0, errInvalidWrite
+    }
+    if value, err := strconv.ParseInt(text, 10, bits); err == nil { return value, nil }
+    value, err := strconv.ParseFloat(text, 64)
+    if err != nil || math.Trunc(value) != value || (fromString && strings.ContainsAny(text, "eE")) {
+        return 0, errInvalidWrite
+    }
+    integer := int64(value)
+    if bits == 32 && (integer < math.MinInt32 || integer > math.MaxInt32) {
+        return 0, errInvalidWrite
+    }
+    return integer, nil
+}
+
+func pydanticBool(raw []byte) (bool, error) {
+    var input any
+    decoder := json.NewDecoder(bytes.NewReader(raw))
+    decoder.UseNumber()
+    if err := decoder.Decode(&input); err != nil { return false, errInvalidWrite }
+    switch value := input.(type) {
+    case bool:
+        return value, nil
+    case json.Number:
+        number, err := strconv.ParseFloat(string(value), 64)
+        if err == nil && number == 0 { return false, nil }
+        if err == nil && number == 1 { return true, nil }
+    case string:
+        switch strings.ToLower(value) {
+        case "0", "off", "f", "false", "n", "no":
+            return false, nil
+        case "1", "on", "t", "true", "y", "yes":
+            return true, nil
+        }
+    }
+    return false, errInvalidWrite
+}
+"""
 
 
 QUERY_SOURCE = """// SPDX-License-Identifier: Apache-2.0

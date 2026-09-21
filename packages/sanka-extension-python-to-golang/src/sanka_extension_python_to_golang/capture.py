@@ -211,11 +211,171 @@ def _write_validation(fields: list[dict[str, Any]], data: str, partial: bool, er
 """
 
 
+def _normalize_native_pydantic(
+    tree: ast.Module,
+    models: list[dict[str, Any]],
+    framework: str,
+    validations: dict[str, dict[str, Any]],
+) -> ast.Module:
+    """Lower ordinary flat FastAPI body models without executing source code."""
+    imports = [
+        node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "pydantic"
+    ]
+    if not imports:
+        return tree
+    if (
+        len(imports) != 1
+        or imports[0].level
+        or {(alias.name, alias.asname) for alias in imports[0].names}
+        != {("BaseModel", None), ("Field", None)}
+    ):
+        return tree
+    if framework != "fastapi" or not models:
+        raise ValueError("native Pydantic request models require a qualified FastAPI write")
+    required_imports = {
+        "fastapi.exceptions": [("RequestValidationError", None)],
+        "fastapi.responses": [("JSONResponse", None)],
+    }
+    for module, expected_aliases in required_imports.items():
+        found = [
+            node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == module
+        ]
+        if (
+            len(found) != 1
+            or found[0].level
+            or [(alias.name, alias.asname) for alias in found[0].names] != expected_aliases
+        ):
+            raise ValueError("native Pydantic validation handler imports must be explicit")
+    if not any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "fastapi"
+        and node.level == 0
+        and ("Request", None) in [(alias.name, alias.asname) for alias in node.names]
+        for node in tree.body
+    ):
+        raise ValueError("native Pydantic validation handler requires FastAPI Request")
+    handler = ast.parse(
+        "def invalid_request(request: Request, exc: RequestValidationError):\n"
+        "    return JSONResponse(status_code=422, "
+        "content={'detail': 'invalid request body'})\n"
+    ).body[0]
+    handlers = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and ast.dump(node) == ast.dump(handler)
+    ]
+    apps = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "app"
+    ]
+    expected_app = ast.parse(
+        "app = FastAPI(exception_handlers={RequestValidationError: invalid_request})"
+    ).body[0]
+    if len(handlers) != 1 or len(apps) != 1 or ast.dump(apps[0]) != ast.dump(expected_app):
+        raise ValueError(
+            "native Pydantic models require the qualified stable validation error handler"
+        )
+    apps[0].value = ast.Call(func=ast.Name(id="FastAPI", ctx=ast.Load()), args=[], keywords=[])
+    classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+    matched: dict[str, tuple[list[dict[str, Any]], bool]] = {}
+    for name, candidate in classes.items():
+        for model in models:
+            fields = [field for field in model["fields"] if not field["auto"]]
+            for partial in (False, True):
+                lines = [f"class {name}(BaseModel):"]
+                for field in fields:
+                    kind = {
+                        "string": "str",
+                        "bool": "bool",
+                        "int32": "int",
+                        "int64": "int",
+                    }[field["go_type"]]
+                    if field["nullable"]:
+                        kind += " | None"
+                    if field["go_type"] in {"int32", "int64"}:
+                        bits = 32 if field["go_type"] == "int32" else 64
+                        low, high = -(2 ** (bits - 1)), 2 ** (bits - 1) - 1
+                        default = (
+                            f" = Field(default=None, ge={low}, le={high})"
+                            if partial or field["nullable"]
+                            else f" = Field(ge={low}, le={high})"
+                        )
+                    else:
+                        default = " = None" if partial or field["nullable"] else ""
+                    lines.append(f"    {field['name']}: {kind}{default}")
+                if ast.dump(candidate) == ast.dump(ast.parse("\n".join(lines)).body[0]):
+                    matched[name] = (fields, partial)
+                    break
+            if name in matched:
+                break
+        if name not in matched:
+            raise ValueError(
+                "native Pydantic request models must exactly match one flat database model"
+            )
+    used: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        schema_args = [
+            arg
+            for arg in node.args.args
+            if arg.annotation is not None and ast.unparse(arg.annotation) in matched
+        ]
+        if not schema_args:
+            continue
+        if len(schema_args) != 1:
+            raise ValueError("a handler must have exactly one native Pydantic request body")
+        argument = schema_args[0]
+        assert argument.annotation is not None
+        schema = ast.unparse(argument.annotation)
+        fields, partial = matched[schema]
+        expected_statement = ast.parse(
+            f"{argument.arg} = {argument.arg}.model_dump(exclude_unset=True)"
+        ).body[0]
+        if not node.body or ast.dump(node.body[0]) != ast.dump(expected_statement):
+            raise ValueError("native Pydantic bodies must be dumped with exclude_unset=True")
+        argument.annotation = ast.Name(id="dict", ctx=ast.Load())
+        invalid = 'raise HTTPException(status_code=400, detail="invalid request body")'
+        node.body[0] = ast.copy_location(
+            ast.parse(_write_validation(fields, argument.arg, partial, invalid)).body[0],
+            node.body[0],
+        )
+        validations[node.name] = {
+            "validation": {
+                "kind": "pydantic",
+                "schema": schema,
+                "partial": partial,
+                "error": {"status": 422, "body": {"detail": "invalid request body"}},
+            }
+        }
+        used.add(schema)
+    if used != classes.keys():
+        raise ValueError("unused native Pydantic request model")
+    discarded_imports = {"fastapi.exceptions", "fastapi.responses"}
+    body = []
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) or node in imports or node in handlers:
+            continue
+        if isinstance(node, ast.ImportFrom) and node.module in discarded_imports:
+            continue
+        if isinstance(node, ast.ImportFrom) and node.module == "fastapi":
+            node.names = [alias for alias in node.names if alias.name != "Request"]
+            if not node.names:
+                continue
+        body.append(node)
+    tree.body = body
+    return ast.fix_missing_locations(tree)
+
+
 def _normalize_pydantic(
     tree: ast.Module,
     models: list[dict[str, Any]],
     framework: str,
-    validations: dict[str, dict[str, dict[str, int]]],
+    validations: dict[str, dict[str, Any]],
 ) -> ast.Module:
     """Lower explicit strict schemas to the existing, qualified write validator."""
     schema_imports = {"BaseModel", "ConfigDict", "Field", "ValidationError"}
@@ -400,7 +560,7 @@ def _normalize_pydantic(
                             statement,
                         )
                         if constraints:
-                            validations[node.name] = constraints
+                            validations[node.name] = {"constraints": constraints}
                         used.add(name)
                         matched = True
                         break
@@ -905,8 +1065,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         tree = normalize_routes(tree, framework)
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("routing: " + str(error))
-    validations: dict[str, dict[str, dict[str, int]]] = {}
+    validations: dict[str, dict[str, Any]] = {}
     try:
+        tree = _normalize_native_pydantic(tree, models, framework, validations)
         tree = _normalize_pydantic(tree, models, framework, validations)
         if framework == "drf":
             tree = _normalize_drf_serializers(tree, models)
@@ -1110,7 +1271,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             else:
                 payload = _payload(function, framework, models)
             if name in validations:
-                payload["write"]["constraints"] = validations[name]
+                payload["write"].update(validations[name])
             lookup = payload.get("read", {}).get("lookup")
             path_lookup = route_path.rsplit(":", 1)[1] if ":" in route_path else None
             if (
