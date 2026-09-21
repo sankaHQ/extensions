@@ -582,11 +582,15 @@ def _normalize_pydantic(
     return ast.fix_missing_locations(tree)
 
 
-def _normalize_drf_serializers(tree: ast.Module, models: list[dict[str, Any]]) -> ast.Module:
-    """Recognize strict BaseSerializer validation without executing serializer code."""
+def _normalize_drf_serializers(
+    tree: ast.Module,
+    models: list[dict[str, Any]],
+    validations: dict[str, dict[str, Any]],
+) -> ast.Module:
+    """Recognize qualified flat DRF serializers without executing source code."""
     schema_imports = {"BaseSerializer", "ValidationError"}
     imports: set[str] = set()
-    schemas: dict[str, list[dict[str, Any]]] = {}
+    schemas: dict[str, tuple[list[dict[str, Any]], str]] = {}
     used: set[str] = set()
     result: list[ast.stmt] = []
 
@@ -596,12 +600,27 @@ def _normalize_drf_serializers(tree: ast.Module, models: list[dict[str, Any]]) -
                 return ast.copy_location(ast.parse("request.data", mode="eval").body, node)
             return node
 
-    if not any(
-        isinstance(node, ast.ImportFrom) and node.module == "rest_framework.serializers"
+    native_imports = [
+        node
         for node in tree.body
-    ):
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "rest_framework"
+        and node.level == 0
+        and [(alias.name, alias.asname) for alias in node.names] == [("serializers", None)]
+    ]
+    strict_imports = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "rest_framework.serializers"
+    ]
+    if not native_imports and not strict_imports:
         return tree
+    if len(native_imports) + len(strict_imports) != 1:
+        raise ValueError("use one explicit DRF serializer import style")
+    native = bool(native_imports)
     for node in tree.body:
+        if node in native_imports:
+            continue
         if isinstance(node, ast.ImportFrom) and node.module == "rest_framework.serializers":
             if node.level or any(a.asname or a.name not in schema_imports for a in node.names):
                 raise ValueError(
@@ -610,28 +629,59 @@ def _normalize_drf_serializers(tree: ast.Module, models: list[dict[str, Any]]) -
             imports.update(a.name for a in node.names)
             continue
         if isinstance(node, ast.ClassDef):
-            if imports != schema_imports:
+            if not native and imports != schema_imports:
                 raise ValueError("serializer imports must precede their declarations")
             for model in models:
+                fields = [field for field in model["fields"] if not field["auto"]]
+                if native:
+                    lines = [f"class {node.name}(serializers.Serializer):"]
+                    for field in fields:
+                        options = []
+                        if field["nullable"]:
+                            options.extend(["required=False", "allow_null=True"])
+                        if field["go_type"] == "string":
+                            match = re.fullmatch(r"varchar\((\d+)\)", field["sql_type"])
+                            if match:
+                                options.append(f"max_length={match.group(1)}")
+                            options.extend(["allow_blank=True", "trim_whitespace=False"])
+                            field_type = "CharField"
+                        elif field["go_type"] in {"int32", "int64"}:
+                            bits = 32 if field["go_type"] == "int32" else 64
+                            options.extend(
+                                [
+                                    f"min_value={-(2 ** (bits - 1))}",
+                                    f"max_value={2 ** (bits - 1) - 1}",
+                                ]
+                            )
+                            field_type = "IntegerField"
+                        elif field["go_type"] == "bool":
+                            field_type = "BooleanField"
+                        else:
+                            break
+                        lines.append(
+                            f"    {field['name']} = serializers.{field_type}({', '.join(options)})"
+                        )
+                    else:
+                        source = "\n".join(lines)
+                        if ast.dump(node) == ast.dump(ast.parse(source).body[0]):
+                            schemas[node.name] = (fields, "drf")
+                            break
+                    continue
                 error = 'raise ValidationError("invalid request body")'
                 source = (
                     f"class {node.name}(BaseSerializer):\n"
                     "    def to_internal_value(self, data):\n"
                     "        if self.partial:\n"
-                    + indent(
-                        _write_validation(model["fields"], "data", True, error), "            "
-                    )
+                    + indent(_write_validation(fields, "data", True, error), "            ")
                     + "        else:\n"
-                    + indent(
-                        _write_validation(model["fields"], "data", False, error), "            "
-                    )
+                    + indent(_write_validation(fields, "data", False, error), "            ")
                     + "        return data\n"
                 )
                 if ast.dump(node) == ast.dump(ast.parse(source).body[0]):
-                    schemas[node.name] = model["fields"]
+                    schemas[node.name] = (fields, "strict")
                     break
             else:
-                raise ValueError("serializer is outside the qualified strict BaseSerializer recipe")
+                raise ValueError("serializer is outside the qualified flat DRF recipe")
             continue
         if isinstance(node, ast.FunctionDef):
             locals_ = {
@@ -641,7 +691,7 @@ def _normalize_drf_serializers(tree: ast.Module, models: list[dict[str, Any]]) -
             }
             locals_ |= {arg.arg for arg in node.args.args}
             error = 'return Response({"error": "invalid request body"}, status=400)'
-            for name, fields in schemas.items():
+            for name, (fields, kind) in schemas.items():
                 if name in locals_:
                     continue
                 matched = False
@@ -663,6 +713,14 @@ def _normalize_drf_serializers(tree: ast.Module, models: list[dict[str, Any]]) -
                         + remaining.body
                     )
                     used.add(name)
+                    if kind == "drf":
+                        validations[node.name] = {
+                            "validation": {
+                                "kind": "drf",
+                                "schema": name,
+                                "partial": partial,
+                            }
+                        }
                     matched = True
                     break
                 if matched:
@@ -1070,7 +1128,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         tree = _normalize_native_pydantic(tree, models, framework, validations)
         tree = _normalize_pydantic(tree, models, framework, validations)
         if framework == "drf":
-            tree = _normalize_drf_serializers(tree, models)
+            tree = _normalize_drf_serializers(tree, models, validations)
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("validation: " + str(error))
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}

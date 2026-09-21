@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,7 @@ from sanka_extension_python_to_golang.write_replay import (
     scenarios_for,
     write_probe,
 )
-from test_golang_drf_validation import drf_serializer_source
+from test_golang_drf_validation import drf_field_serializer_source, drf_serializer_source
 from test_golang_routing import group_backend
 from test_golang_schema import generate, schema_dsn
 from test_golang_validation import captured_source, native_fastapi_schema_source, schema_source
@@ -206,16 +207,34 @@ def test_public_write_verify(
 
 
 @requires_database
+@pytest.mark.parametrize(
+    ("framework", "app_source", "invalid_status"),
+    [
+        ("fastapi", native_fastapi_schema_source, 422),
+        ("drf", drf_field_serializer_source, 400),
+    ],
+)
 @pytest.mark.parametrize("target", TARGETS)
-def test_native_fastapi_public_write_verify(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
+def test_native_validation_public_write_verify(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    framework: str,
+    app_source: Callable[[], str],
+    invalid_status: int,
+    target: str,
 ) -> None:
     import psycopg
     from psycopg import sql
     from test_golang_schema import generate
 
     scenarios = [
-        {"id": "invalid", "method": "POST", "path": "/widgets", "body": {}, "expected_status": 422},
+        {
+            "id": "invalid",
+            "method": "POST",
+            "path": "/widgets",
+            "body": {},
+            "expected_status": invalid_status,
+        },
         {
             "id": "create",
             "method": "POST",
@@ -249,11 +268,15 @@ def test_native_fastapi_public_write_verify(
     (tmp_path / "sanka-verify.json").write_text(
         json.dumps({"schema": "sanka.http-scenarios/v1", "scenarios": scenarios})
     )
-    output = generate(tmp_path, "fastapi", target, app_source=native_fastapi_schema_source())
+    output = generate(tmp_path, framework, target, app_source=app_source())
     captured = capture(
         tmp_path,
         configuration(
-            {"source_framework": "fastapi", "target_framework": target, "database_layer": "pgx"}
+            {
+                "source_framework": framework,
+                "target_framework": target,
+                "database_layer": "pgx",
+            }
         ),
     )
     dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
@@ -265,10 +288,9 @@ def test_native_fastapi_public_write_verify(
                 admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(name)))
                 created.append(name)
             source_url, target_url = [schema_dsn(dsn, name) for name in created]
-            monkeypatch.setenv(
-                "SANKA_GO_SOURCE_TEST_DATABASE_URL",
-                source_url.replace("postgresql://", "postgresql+psycopg://", 1),
-            )
+            if framework != "drf":
+                source_url = source_url.replace("postgresql://", "postgresql+psycopg://", 1)
+            monkeypatch.setenv("SANKA_GO_SOURCE_TEST_DATABASE_URL", source_url)
             monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", target_url)
             report = replay(tmp_path, output, captured, "verify")
             assert report["ok"], report["steps"]

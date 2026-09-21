@@ -86,7 +86,7 @@ and missing module globals block generation.
 A Flask factory may take no arguments, construct `app = Flask(__name__)`, register
 blueprints, and return the app, followed by `app = create_app()` at module scope.
 Factory configuration, hooks, nested router registration, custom dependencies,
-General Pydantic models, DRF serializers/ViewSets and custom authentication still require
+Custom Pydantic models, DRF ModelSerializer/ViewSets and custom authentication still require
 additional capture. This routing support does not imply whole-project parity.
 
 ## Process entrypoint
@@ -419,11 +419,27 @@ Source and Go tests compare accepted values and rejected payloads; native DRF
 requests check POST/PUT/PATCH error bodies without opening a server. Generated
 PostgreSQL CRUD fixtures cover grouped routes on all four targets in CI.
 
-Field-based `Serializer`/`ModelSerializer`, coercion, custom persistence methods,
-representation hooks, extra validation, `many=True` and native field-level error
-responses remain unsupported. This contract does not imply arbitrary serializer
-translation. Both Pydantic and DRF capture reject schema names shadowed by handler
-locals, so normalization cannot hide an unbound or incorrectly resolved name.
+Custom persistence methods, representation hooks, extra validation, `many=True` and
+native field-level error responses remain unsupported. This contract does not imply
+arbitrary serializer translation. Both Pydantic and DRF capture reject schema names
+shadowed by handler locals, so normalization cannot hide an unbound or incorrectly
+resolved name.
+
+## Conventional flat DRF Serializer fields
+
+The same handler sequence can use one flat `serializers.Serializer` that exactly
+matches a captured model's writable fields. The bounded field set is `CharField`,
+`IntegerField` and `BooleanField`. Integer fields require the database-width bounds;
+nullable fields require `required=False, allow_null=True`; strings preserve blanks
+with `allow_blank=True, trim_whitespace=False`, and varchar fields require their
+captured `max_length`.
+
+Generated decoders preserve DRF scalar coercion, ignored unknown fields, nullable
+values, full-write required fields and PATCH omission. Capture rejects changed field
+options, custom hooks, aliases, extra fields, `ModelSerializer` and custom inheritance.
+Source and Go decoder tests cover all four routers. Ordered PostgreSQL replay compares
+the original DRF application and generated target when explicit fixture databases are
+available.
 
 ## Write qualification
 
