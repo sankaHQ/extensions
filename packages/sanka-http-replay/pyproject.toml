@@ -1,6 +1,6 @@
 [project]
 name = "sanka-http-replay"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Versioned HTTP scenario and observation contract shared by Sanka code extensions"
 readme = "README.md"
 requires-python = ">=3.12"

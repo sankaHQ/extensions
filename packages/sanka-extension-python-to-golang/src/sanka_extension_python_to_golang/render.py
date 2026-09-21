@@ -203,7 +203,8 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             helpers.append(
                 _write_helper(index, route["write"], model, model["name"] not in write_models)
             )
-            write_models.add(model["name"])
+            if not route["write"].get("constraints"):
+                write_models.add(model["name"])
             method = route["method"].title()
             status = route["status"]
             lookup_field = None
@@ -657,7 +658,25 @@ def _write_helper(
         seen[{name}] = true
     }}"""
         )
-    decoder = f"""func decode{model["name"]}(body []byte, partial bool) ({model["name"]}, map[string]bool, error) {{
+    constraints = write.get("constraints", {})
+    decoder_name = f"decode{model['name']}" + (f"_write{index}" if constraints else "")
+    for field in writable:
+        target = "item." + go_name(field["name"])
+        bounds = constraints.get(field["name"], {})
+        tests = []
+        for key, bound in sorted(bounds.items()):
+            value = ("*" if field["nullable"] else "") + target
+            if key in {"min_length", "max_length"}:
+                value = f"len([]rune({value}))"
+            tests.append(f"{value} {'<' if key in {'ge', 'min_length'} else '>'} {bound}")
+        if tests:
+            guard = f"seen[{canonical(field['name'])}]"
+            if field["nullable"]:
+                guard += f" && {target} != nil"
+            decoding.append(
+                f"if {guard} && ({' || '.join(tests)}) {{ return item, nil, errInvalidWrite }}"
+            )
+    decoder = f"""func {decoder_name}(body []byte, partial bool) ({model["name"]}, map[string]bool, error) {{
     var item {model["name"]}
     var values map[string]json.RawMessage
     decoder := json.NewDecoder(bytes.NewReader(body))
@@ -683,7 +702,7 @@ def _write_helper(
         arguments = ", ".join("item." + go_name(field["name"]) for field in writable)
         query = f'INSERT INTO "{model["table"]}" ({columns}) VALUES ({placeholders}) RETURNING {returning}'
         helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte) ({model["name"]}, error) {{
-    item, _, err := decode{model["name"]}(body, false)
+    item, _, err := {decoder_name}(body, false)
     if err != nil {{ return {model["name"]}{{}}, err }}
     var saved {model["name"]}
     err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
@@ -703,7 +722,7 @@ def _write_helper(
             f"RETURNING {returning}"
         )
         helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte, lookup {lookup["go_type"]}) ({model["name"]}, error) {{
-    item, _, err := decode{model["name"]}(body, false)
+    item, _, err := {decoder_name}(body, false)
     if err != nil {{ return {model["name"]}{{}}, err }}
     var saved {model["name"]}
     err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
@@ -728,7 +747,7 @@ def _write_helper(
             f'UPDATE "{model["table"]}" SET %s WHERE "{lookup["name"]}" = $%d RETURNING {returning}'
         )
         helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte, lookup {lookup["go_type"]}) ({model["name"]}, error) {{
-    item, seen, err := decode{model["name"]}(body, true)
+    item, seen, err := {decoder_name}(body, true)
     if err != nil {{ return {model["name"]}{{}}, err }}
     var saved {model["name"]}
     err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
@@ -745,7 +764,7 @@ def _write_helper(
     return saved, err
 }}
 """
-    return (decoder if include_decoder else "") + helper
+    return (decoder if include_decoder or constraints else "") + helper
 
 
 QUERY_SOURCE = """// SPDX-License-Identifier: Apache-2.0

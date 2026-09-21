@@ -224,10 +224,38 @@ updated row with 200. DELETE returns 404 or an empty 204 and commits through the
 same transaction primitive. Each router uses its native path-parameter API and passes
 the same generated lifecycle contract.
 
-Public `test`/`verify` fail closed for captured writes until the versioned shared HTTP scenario
-adapter can compare ordered requests and database effects safely. The extension does not reuse the
-GET-only replay or mutate an arbitrary prepared fixture. CI instead runs the bounded lifecycle for
-all four routers against an isolated PostgreSQL schema for every supported Python source recipe.
+Public `test`/`verify` use `sanka-http-replay` for captured writes. Supply dedicated,
+resettable fixtures through `SANKA_GO_TARGET_TEST_DATABASE_URL` and, for `verify`,
+`SANKA_GO_SOURCE_TEST_DATABASE_URL`. Both must identify PostgreSQL hosts and databases;
+SQLAlchemy source URLs use `postgresql+psycopg://`. Source and target must resolve to
+different database schemas. Never use a customer or production database: the runner
+resets captured tables and identity sequences before executing requests. Final fixture
+effects remain available for inspection. `schema_mode=adopt-existing` is rejected.
+
+Requests run in order without TCP listeners. Responses, all captured table rows and
+sequence state are compared using the versioned shared observation contract. Bigint
+model values and sequence counters use decimal strings in observations. Source,
+candidate and scenario digests identify the evidence; source/candidate/scenario drift
+invalidates the run. Observation reports fail above 16 MiB rather than truncating
+evidence. The source Python environment can be selected with
+`SANKA_GO_SOURCE_PYTHON`, as for GET replay.
+
+Place an ordered `sanka-verify.json` in the source root to provide explicit scenarios:
+
+```json
+{"schema":"sanka.http-scenarios/v1","scenarios":[
+  {"id":"invalid-create","method":"POST","path":"/widgets","body":{},"expected_status":400},
+  {"id":"create","method":"POST","path":"/widgets","body":{"name":"alpha","count":7,"enabled":true},"expected_status":201},
+  {"id":"delete","method":"DELETE","path":"/widgets/1","expected_status":204}
+]}
+```
+
+Without that file the shared generator supplies deterministic default scenarios.
+Field-constrained endpoints require explicit scenarios because generic sample values
+may violate their constraints. Default scenarios may expose unsupported native errors
+(such as invalid path parameters); a failed comparison remains a failure, not a claim
+of parity. Choose scenarios covering the source contract, including negative cases.
+The acceptance matrix exercises all three Python sources and four Go routers.
 
 When a captured route reads data, generated `NewApp(pool *pgxpool.Pool)` takes an
 existing non-nil pool; its caller owns opening, configuring, and closing that
@@ -331,15 +359,26 @@ nonnullable annotations for nonnullable columns. Pydantic does not validate thes
 omitted defaults; `exclude_unset=True` removes them. Explicit null is still rejected
 for nonnullable fields. False, zero, empty string and explicit nullable null remain
 present. No source code runs during capture; qualified schemas lower to the same
-Go decoder as manual validation.
+Go decoder as manual validation when no additional constraints are present.
+
+String fields also accept literal nonnegative `min_length` and `max_length`.
+Integer `ge` and `le` may narrow the database integer range. Contradictory bounds
+block capture. These constraints belong to each endpoint, including PATCH, and
+nullable fields retain missing-versus-null behavior. String lengths count Unicode
+code points, not bytes. For example:
+
+```python
+name: str = Field(min_length=2, max_length=40)
+count: int = Field(ge=0, le=100)
+```
 
 Coercion, custom validators/serializers, aliases, nested schemas, different defaults,
-extra constraints, unused classes and inheritance beyond `BaseModel` block capture.
+unsupported constraints, unused classes and inheritance beyond `BaseModel` block capture.
 Tests compare Pydantic outcomes and values with native Go decoders for all four
 routers, check invalid-object responses through original Python test clients, and
-exercise generated CRUD on PostgreSQL in CI. This is not full HTTP write replay:
-malformed/non-object body parity, native framework validation errors and DRF
-serializer behavior remain open.
+exercise generated CRUD on PostgreSQL in CI. Public ordered write replay is now
+available; malformed/non-object body parity, native framework validation errors and
+general DRF serializer behavior remain open.
 
 ## Strict DRF BaseSerializer validation
 
@@ -385,9 +424,9 @@ invalid fields, missing rows and subsequent ID allocation. A deliberate database
 mutation must fail comparison even when the HTTP response matches. Successful
 DELETE preserves the source framework's empty-body content type.
 
-This is a bounded CI acceptance corpus, not the public shared scenario runner.
-The extension's `test`/`verify` still blocks write replay until the coordinated
-versioned adapter is available. Authentication, malformed-body/lookup parity,
+The public shared runner is also exercised through `verify` against independent
+PostgreSQL schemas, including repeated baseline resets and a database-only mutation
+that must fail comparison. Authentication, malformed-body/lookup parity,
 custom database errors and general business operations remain outside this corpus.
 
 ## Remaining backend work

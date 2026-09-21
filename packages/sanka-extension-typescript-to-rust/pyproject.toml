@@ -1,6 +1,6 @@
 [project]
 name = "sanka-extension-typescript-to-rust"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Deterministic TypeScript to Rust migration extension (experimental)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -10,7 +10,7 @@ authors = [{ name = "Sanka, Inc." }]
 dependencies = [
   "sanka-extension-sdk==0.1.0a4",
   "sanka-ts-capture==0.1.0a1",
-  "sanka-http-replay==0.1.0a1",
+  "sanka-http-replay==0.1.0a2",
 ]
 
 [project.scripts]

@@ -123,7 +123,8 @@ def compare(
     """Compare the candidate with the expected statuses and, when given, the source.
 
     Media types must be ``application/json`` for every response that carries a body;
-    bodyless statuses (204, 205, 304) must carry neither a body nor a media type.
+    bodyless statuses (204, 205, 304) must carry no body. Their media types
+    are preserved and compared with the source, including framework defaults.
     """
     steps: list[dict[str, Any]] = []
     ok = True
@@ -137,8 +138,8 @@ def compare(
         for side, observed in zip(("candidate", "source")[: len(sides)], sides, strict=True):
             item = observed[index]
             if item["status"] in BODYLESS:
-                if item["body"] is not None or item["media_type"]:
-                    problems.append(f"{side}: bodyless status carries a body or media type")
+                if item["body"] is not None:
+                    problems.append(f"{side}: bodyless status carries a body")
             elif item["media_type"] != "application/json":
                 problems.append(f"{side}: media type {item['media_type']!r} is not JSON")
         if source is not None:

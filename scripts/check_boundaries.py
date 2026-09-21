@@ -125,9 +125,12 @@ def main() -> int:
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
                 errors.append("Jev converter requires its isolated executable")
         if package.name == GO_EXTENSION_NAME:
-            allowed_modules += ("sanka_extension_sdk", "sanka_extensions")
-            if project.get("dependencies") != ["sanka-extension-sdk==0.1.0a4"]:
-                errors.append("Python to Golang depends only on the published SDK a4")
+            allowed_modules += ("sanka_extension_sdk", "sanka_extensions", "sanka_http_replay")
+            if project.get("dependencies") != [
+                "sanka-extension-sdk==0.1.0a4",
+                "sanka-http-replay==0.1.0a2",
+            ]:
+                errors.append("Python to Golang depends only on SDK a4 and HTTP replay a2")
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
                 errors.append("Python to Golang requires its isolated executable")
         if package.name == RN_EXTENSION_NAME:
@@ -152,7 +155,7 @@ def main() -> int:
             if project.get("dependencies") != [
                 "sanka-extension-sdk==0.1.0a4",
                 "sanka-ts-capture==0.1.0a1",
-                "sanka-http-replay==0.1.0a1",
+                "sanka-http-replay==0.1.0a2",
             ]:
                 errors.append(
                     "TypeScript to Rust depends only on the published SDK a4, the TypeScript "

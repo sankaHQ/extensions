@@ -1,6 +1,6 @@
 # Experimental Go and Rust release
 
-`api-converters-v0.1.0a1` is a scoped GitHub prerelease containing Python-to-Go
+`api-converters-v0.1.0a2` is the next scoped GitHub prerelease candidate (not yet published) containing Python-to-Go
 and TypeScript-to-Rust 0.1.0a1, TypeScript capture and HTTP replay helpers, and
 the original published Extension SDK 0.1.0a4 and compatibility SDK 0.1.0a12 wheels.
 It does not publish React Native, Compose, Jev, or a replacement SDK.
@@ -38,7 +38,7 @@ Never replace artifacts or reuse a published version with different bytes.
 ## Publication and readback
 
 After exact-head approval, green CI and governed landing, create the immutable
-`api-converters-v0.1.0a1` tag at the reviewed merge commit. Dispatch
+`api-converters-v0.1.0a2` tag at the reviewed merge commit. Dispatch
 `api-release.yml` on that tag. The workflow verifies that the tag is contained in
 main and repeats both consumer qualifications before its publication job runs.
 The release contains six wheels, two manifests, a scoped catalog, and the two
@@ -64,3 +64,7 @@ Keep downloaded acceptance reports outside the nine-file artifact directory
 when invoking the strict artifact validator. Public readback must pass before
 describing publication as consumer-verified or updating examples to published
 installation commands. The CLI default marketplace pin is intentionally unchanged.
+
+The published `api-converters-v0.1.0a1` assets remain immutable. This candidate
+adds shared Python-to-Go write replay; Go, Rust and HTTP replay advance to a2,
+while the unchanged TypeScript capture wheel remains a1.

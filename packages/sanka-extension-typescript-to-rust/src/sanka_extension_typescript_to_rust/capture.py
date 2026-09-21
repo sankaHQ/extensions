@@ -24,7 +24,7 @@ from .writes import OPERATIONS, idiom_shapes, match_idiom
 
 SOURCES = ("express",)
 TARGETS = ("axum",)
-VERSION = "0.1.0a1"
+VERSION = "0.1.0a2"
 DEFAULT_SOURCE_FILE = "src/app.ts"
 DEFAULT_SCHEMA_FILE = "schema.sql"
 DEFAULT_MODELS_FILE = "src/models.ts"

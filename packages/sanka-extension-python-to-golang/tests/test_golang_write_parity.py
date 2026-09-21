@@ -160,7 +160,13 @@ func TestWriteParity(t *testing.T) {
 
 
 def qualify_writes(
-    tmp_path: Path, framework: str, target: str, schemas: bool, *, tamper: bool = False
+    tmp_path: Path,
+    framework: str,
+    target: str,
+    schemas: bool,
+    *,
+    tamper: bool = False,
+    constrained: bool = False,
 ):
     import psycopg
     from psycopg import sql
@@ -174,6 +180,35 @@ def qualify_writes(
             "fastapi": fastapi_write_source,
         }[framework]()
     )
+    scenarios = SCENARIOS
+    if constrained:
+        source = source.replace(
+            "name: str = Field()", "name: str = Field(min_length=2, max_length=7)"
+        ).replace("ge=-2147483648, le=2147483647", "ge=-10, le=10", 1)
+        scenarios = [dict(case) for case in SCENARIOS]
+        scenarios[-2]["status"] = 400
+        scenarios.extend(
+            [
+                {
+                    "method": "POST",
+                    "path": "/api/widgets",
+                    "body": {"name": "a", "count": 1, "enabled": True},
+                    "status": 400,
+                },
+                {
+                    "method": "POST",
+                    "path": "/api/widgets",
+                    "body": {"name": "日本", "count": 10, "enabled": False},
+                    "status": 201,
+                },
+                {
+                    "method": "PATCH",
+                    "path": "/api/widgets/2",
+                    "body": {"name": "", "count": 11},
+                    "status": 200,
+                },
+            ]
+        )
     output = generate(tmp_path, framework, target, app_source=group_backend(source, framework))
     dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
     names = ["go_write_parity_" + uuid.uuid4().hex for _ in range(2)]
@@ -221,7 +256,7 @@ def qualify_writes(
                     SOURCE_WRITES,
                     framework,
                     str(tmp_path / "app.py"),
-                    json.dumps(SCENARIOS),
+                    json.dumps(scenarios),
                     str(source_report),
                     str(tmp_path / "models.py"),
                     "1",
@@ -233,7 +268,7 @@ def qualify_writes(
                 timeout=60,
             )
             assert result.returncode == 0, result.stdout + result.stderr
-            (output / "write-cases.json").write_text(json.dumps(SCENARIOS))
+            (output / "write-cases.json").write_text(json.dumps(scenarios))
             (output / "write_parity_test.go").write_text(write_probe(target, tamper=tamper))
             result = subprocess.run(
                 ["go", "test", "-mod=readonly", "-count=1", "-p=2", "-run", "TestWriteParity", "."],
@@ -246,8 +281,8 @@ def qualify_writes(
             assert result.returncode == 0, result.stdout + result.stderr
             expected = json.loads(source_report.read_text())
             actual = json.loads((output / "write-observed.json").read_text())
-            assert [item["status"] for item in expected] == [case["status"] for case in SCENARIOS]
-            assert len(expected) == len(actual) == len(SCENARIOS)
+            assert [item["status"] for item in expected] == [case["status"] for case in scenarios]
+            assert len(expected) == len(actual) == len(scenarios)
             return expected, actual
         finally:
             for name in created:
@@ -298,3 +333,11 @@ def test_write_probe_compiles_without_database(tmp_path: Path, target: str) -> N
         timeout=180,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@requires_database
+@pytest.mark.parametrize("framework", ["flask", "fastapi"])
+@pytest.mark.parametrize("target", TARGETS)
+def test_constrained_write_effects(tmp_path: Path, framework: str, target: str) -> None:
+    expected, actual = qualify_writes(tmp_path, framework, target, True, constrained=True)
+    assert actual == expected

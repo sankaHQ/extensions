@@ -155,6 +155,7 @@ jobs:
           go-version: "1.26.5"
           cache: false
       - run: uv sync --frozen --all-packages
+      - run: uv build --wheel --package sanka-http-replay --out-dir release/python-to-golang
       - run: uv build --wheel --package sanka-extension-python-to-golang --out-dir release/python-to-golang
       - name: Install the actual candidate wheel
         run: |
