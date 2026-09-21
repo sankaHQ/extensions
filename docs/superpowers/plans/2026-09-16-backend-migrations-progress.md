@@ -675,3 +675,17 @@ Changed bounds, handler behavior, imports or dump semantics block capture.
 Default detailed FastAPI validation arrays, custom validators, aliases and nested
 models remain open, as do conventional DRF and Flask validation. This slice advances
 G1 but does not close its conventional three-source CRUD exit gate.
+
+## Conventional DRF Serializer field slice (2026-09-21)
+
+G1 now also recognizes one bounded flat `serializers.Serializer` form matching a
+captured Django model. Static capture qualifies explicit char, integer and boolean
+fields with deterministic nullability, database-width bounds, varchar length and
+blank/whitespace settings. Generated Fiber, chi, mux and Gin decoders preserve DRF
+scalar coercion, ignored unknown keys, missing versus null values and PATCH omission.
+
+Native source-versus-Go decoder tests cover accepted values and rejection boundaries.
+The shared PostgreSQL replay matrix now includes explicit conventional DRF scenarios
+for every Go router. `ModelSerializer`, ViewSet/router wiring, field-shaped errors,
+custom validators and nested serializers remain open, so G1 and the complete-backend
+gates remain unfinished.

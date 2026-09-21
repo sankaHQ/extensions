@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import re
 from importlib.resources import files
 from typing import Any
 
@@ -181,6 +182,10 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     write_models: set[tuple[str, str]] = set()
     has_pydantic = any(
         route.get("write", {}).get("validation", {}).get("kind") == "pydantic"
+        for route in captured["routes"]
+    )
+    has_drf = any(
+        route.get("write", {}).get("validation", {}).get("kind") == "drf"
         for route in captured["routes"]
     )
     has_reads = any("read" in route for route in captured["routes"])
@@ -421,7 +426,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         imports.extend(['"fmt"', '"strconv"', '"strings"'])
     elif has_replace or has_delete:
         imports.append('"strconv"')
-    if has_pydantic:
+    if has_pydantic or has_drf:
         imports.extend(['"math"', '"strconv"', '"strings"'])
     if database:
         imports.append('"github.com/jackc/pgx/v5/pgxpool"')
@@ -447,6 +452,8 @@ func NewApp({arguments}) {return_type} {{
         source += '\nvar errInvalidWrite = errors.New("invalid write")\n'
         if has_pydantic:
             source += PYDANTIC_HELPERS
+        if has_drf:
+            source += DRF_HELPERS
         if target in {"chi", "mux"}:
             source += """
 func writeResponse(w http.ResponseWriter, status int, payload any) {
@@ -664,21 +671,32 @@ def _write_helper(
         if not field["nullable"]:
             null_guard = ' || bytes.Equal(bytes.TrimSpace(raw), []byte("null"))'
             required.append(f"if !partial && !seen[{name}] {{ return item, nil, errInvalidWrite }}")
-        if validation_kind == "pydantic":
+        if validation_kind in {"pydantic", "drf"}:
             value_type = {
                 "string": "string",
                 "int32": "int32",
                 "int64": "int64",
                 "bool": "bool",
             }[field["go_type"]]
-            conversion = {
-                "string": "var value string\n            err := json.Unmarshal(raw, &value)",
-                "int32": "number, err := pydanticInt(raw, 32)\n            value := int32(number)",
-                "int64": "value, err := pydanticInt(raw, 64)",
-                "bool": "value, err := pydanticBool(raw)",
-            }[field["go_type"]]
+            if validation_kind == "pydantic":
+                conversion = {
+                    "string": "var value string\n            err := json.Unmarshal(raw, &value)",
+                    "int32": "number, err := pydanticInt(raw, 32)\n            value := int32(number)",
+                    "int64": "value, err := pydanticInt(raw, 64)",
+                    "bool": "value, err := pydanticBool(raw)",
+                }[field["go_type"]]
+            else:
+                conversion = {
+                    "string": "value, err := drfString(raw)",
+                    "int32": "number, err := drfInt(raw, 32)\n            value := int32(number)",
+                    "int64": "value, err := drfInt(raw, 64)",
+                    "bool": "value, err := drfBool(raw)",
+                }[field["go_type"]]
             if field["nullable"]:
-                code = f"""if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {{
+                null_value = 'bytes.Equal(bytes.TrimSpace(raw), []byte("null"))'
+                if validation_kind == "drf" and field["go_type"] == "bool":
+                    null_value += ' || bytes.Equal(bytes.TrimSpace(raw), []byte(`""`))'
+                code = f"""if {null_value} {{
             {target} = nil
         }} else {{
             {conversion}
@@ -708,11 +726,17 @@ def _write_helper(
         seen[{name}] = true
     }}"""
             )
-    constraints = write.get("constraints", {})
+    custom_constraints = write.get("constraints", {})
+    constraints = dict(custom_constraints)
+    if validation_kind == "drf":
+        for field in writable:
+            match = re.fullmatch(r"varchar\((\d+)\)", field["sql_type"])
+            if match:
+                constraints[field["name"]] = {"max_length": int(match.group(1))}
     decoder_name = f"decode{model['name']}"
-    if validation_kind == "pydantic":
-        decoder_name += "_pydantic"
-    if constraints:
+    if validation_kind in {"pydantic", "drf"}:
+        decoder_name += f"_{validation_kind}"
+    if custom_constraints:
         decoder_name += f"_write{index}"
     for field in writable:
         target = "item." + go_name(field["name"])
@@ -742,7 +766,7 @@ def _write_helper(
     }}
     allowed := map[string]struct{{}}{{{accepted}}}
     for name := range values {{
-        if _, ok := allowed[name]; !ok {{ {"delete(values, name)" if validation_kind == "pydantic" else "return item, nil, errInvalidWrite"} }}
+        if _, ok := allowed[name]; !ok {{ {"delete(values, name)" if validation_kind in {"pydantic", "drf"} else "return item, nil, errInvalidWrite"} }}
     }}
     seen := map[string]bool{{}}
     {chr(10).join(decoding)}
@@ -818,7 +842,7 @@ def _write_helper(
     return saved, err
 }}
 """
-    return (decoder if include_decoder or constraints else "") + helper
+    return (decoder if include_decoder or custom_constraints else "") + helper
 
 
 PYDANTIC_HELPERS = r"""
@@ -841,9 +865,17 @@ func pydanticInt(raw []byte, bits int) (int64, error) {
     default:
         return 0, errInvalidWrite
     }
+    if fromString && !strings.ContainsAny(text, "eE") {
+        if dot := strings.IndexByte(text, '.'); dot >= 0 && strings.Trim(text[dot+1:], "0") == "" {
+            text = text[:dot]
+        }
+    }
     if value, err := strconv.ParseInt(text, 10, bits); err == nil { return value, nil }
     value, err := strconv.ParseFloat(text, 64)
-    if err != nil || math.Trunc(value) != value || (fromString && strings.ContainsAny(text, "eE")) {
+    if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value || (fromString && strings.ContainsAny(text, "eE")) {
+        return 0, errInvalidWrite
+    }
+    if bits == 64 && (value < -9223372036854775808.0 || value >= 9223372036854775808.0) {
         return 0, errInvalidWrite
     }
     integer := int64(value)
@@ -854,6 +886,82 @@ func pydanticInt(raw []byte, bits int) (int64, error) {
 }
 
 func pydanticBool(raw []byte) (bool, error) {
+    var input any
+    decoder := json.NewDecoder(bytes.NewReader(raw))
+    decoder.UseNumber()
+    if err := decoder.Decode(&input); err != nil { return false, errInvalidWrite }
+    switch value := input.(type) {
+    case bool:
+        return value, nil
+    case json.Number:
+        number, err := strconv.ParseFloat(string(value), 64)
+        if err == nil && number == 0 { return false, nil }
+        if err == nil && number == 1 { return true, nil }
+    case string:
+        switch strings.ToLower(value) {
+        case "0", "off", "f", "false", "n", "no":
+            return false, nil
+        case "1", "on", "t", "true", "y", "yes":
+            return true, nil
+        }
+    }
+    return false, errInvalidWrite
+}
+"""
+
+
+DRF_HELPERS = r"""
+func drfString(raw []byte) (string, error) {
+    var input any
+    decoder := json.NewDecoder(bytes.NewReader(raw))
+    decoder.UseNumber()
+    if err := decoder.Decode(&input); err != nil { return "", errInvalidWrite }
+    switch value := input.(type) {
+    case string:
+        return value, nil
+    case json.Number:
+        return string(value), nil
+    }
+    return "", errInvalidWrite
+}
+
+func drfInt(raw []byte, bits int) (int64, error) {
+    var input any
+    decoder := json.NewDecoder(bytes.NewReader(raw))
+    decoder.UseNumber()
+    if err := decoder.Decode(&input); err != nil { return 0, errInvalidWrite }
+    var text string
+    fromString := false
+    switch value := input.(type) {
+    case json.Number:
+        text = string(value)
+    case string:
+        text = strings.TrimSpace(value)
+        fromString = true
+    default:
+        return 0, errInvalidWrite
+    }
+    if fromString && !strings.ContainsAny(text, "eE") {
+        if dot := strings.IndexByte(text, '.'); dot >= 0 && strings.Trim(text[dot+1:], "0") == "" {
+            text = text[:dot]
+        }
+    }
+    if value, err := strconv.ParseInt(text, 10, bits); err == nil { return value, nil }
+    value, err := strconv.ParseFloat(text, 64)
+    if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value || (fromString && strings.ContainsAny(text, "eE")) {
+        return 0, errInvalidWrite
+    }
+    if bits == 64 && (value < -9223372036854775808.0 || value >= 9223372036854775808.0) {
+        return 0, errInvalidWrite
+    }
+    integer := int64(value)
+    if bits == 32 && (integer < math.MinInt32 || integer > math.MaxInt32) {
+        return 0, errInvalidWrite
+    }
+    return integer, nil
+}
+
+func drfBool(raw []byte) (bool, error) {
     var input any
     decoder := json.NewDecoder(bytes.NewReader(raw))
     decoder.UseNumber()

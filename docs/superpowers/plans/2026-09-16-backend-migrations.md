@@ -493,6 +493,10 @@ when reuse requires it. Bounded support already exists for all three sources.
 - [ ] DRF scanner: explicit strict BaseSerializer validation is bounded support;
   expand field-based serializers, views/routers, permissions and application
   settings without silently dropping unsupported behavior.
+  - [x] Qualify flat conventional `Serializer` scalar fields, coercion, ignored
+    unknown keys, nullable values and PATCH omission across all four Go routers.
+  - [ ] Qualify `ModelSerializer`, ViewSet/router wiring, field-shaped errors,
+    permissions and application settings.
 
 - [ ] Flask scanner: application factories, Blueprints, installed ORM/schema libraries,
   request hooks, auth decorators, error handlers and registered routes.
