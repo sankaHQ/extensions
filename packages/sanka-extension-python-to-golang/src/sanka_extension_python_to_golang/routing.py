@@ -43,65 +43,15 @@ def normalize_routes(tree: ast.Module, framework: str) -> ast.Module:
     )
     if not imported:
         return tree
-    # Consumed declarations must not hide rebinding or counterfeit framework imports.
-    names: set[str] = set()
-    for node in tree.body:
-        declared = []
-        if isinstance(node, ast.ImportFrom):
-            declared = [alias.asname or alias.name for alias in node.names]
-        elif isinstance(node, ast.Assign):
-            declared = [target.id for target in node.targets if isinstance(target, ast.Name)]
-        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            declared = [node.name]
-        for name in declared:
-            if name in names:
-                raise ValueError("routing symbols must not be reassigned")
-            names.add(name)
     blueprint_names: set[str] = set()
     imported_constructor = False
     app_seen = False
     routers: dict[str, str] = {}
     registered: dict[str, str] = {}
+    parents: dict[str, str] = {}
     definitions: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
-    body: list[ast.stmt] = []
-    factory: ast.FunctionDef | None = None
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == "create_app":
-            if (
-                framework != "flask"
-                or node.decorator_list
-                or node.returns
-                or node.type_params
-                or ast.unparse(node.args)
-            ):
-                raise ValueError("only a zero-argument Flask factory is qualified")
-            if (
-                len(node.body) < 3
-                or ast.unparse(node.body[0]) != "app = Flask(__name__)"
-                or ast.unparse(node.body[-1]) != "return app"
-            ):
-                raise ValueError(
-                    "factory must only construct app, register blueprints and return app"
-                )
-            if any(not _registration(item, registration) for item in node.body[1:-1]):
-                raise ValueError("factory configuration and hooks require additional capture")
-            factory = node
-            continue
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-        ):
-            name, value = node.targets[0].id, node.value
-            if name == "app" and ast.unparse(value) == "create_app()" and factory is not None:
-                body.extend(factory.body[:-1])
-                factory = None
-                continue
-        body.append(node)
-    if factory is not None:
-        raise ValueError("factory must be instantiated with app = create_app()")
     result: list[ast.stmt] = []
-    for node in body:
+    for node in tree.body:
         if isinstance(node, ast.ImportFrom) and node.module == framework:
             if any(alias.name == constructor and alias.asname for alias in node.names):
                 raise ValueError("aliased router constructors require additional capture")
@@ -155,8 +105,9 @@ def normalize_routes(tree: ast.Module, framework: str) -> ast.Module:
             assert isinstance(call.func, ast.Attribute)
             assert isinstance(call.func.value, ast.Name)
             if (
-                not app_seen
-                or call.func.value.id != "app"
+                (call.func.value.id == "app" and not app_seen)
+                or call.func.value.id not in {"app", *routers}
+                or call.func.value.id in registered
                 or len(call.args) != 1
                 or not isinstance(call.args[0], ast.Name)
                 or any(k.arg != prefix_key for k in call.keywords)
@@ -164,8 +115,14 @@ def normalize_routes(tree: ast.Module, framework: str) -> ast.Module:
             ):
                 raise ValueError("only app registration with a literal prefix is qualified")
             name = call.args[0].id
-            if name not in routers or name in registered or not definitions[name]:
+            if (
+                name not in routers
+                or name in registered
+                or name == call.func.value.id
+                or not (definitions[name] or name in parents.values())
+            ):
                 raise ValueError("routers must be declared with routes and registered exactly once")
+            parents[name] = call.func.value.id
             prefix = _prefix(call.keywords[0].value) if call.keywords else ""
             registered[name] = (
                 (prefix if call.keywords else routers[name])
@@ -194,6 +151,18 @@ def normalize_routes(tree: ast.Module, framework: str) -> ast.Module:
         result.append(node)
     if set(routers) != set(registered):
         raise ValueError("every captured router must be registered")
+    for name in registered:
+        parent = parents[name]
+        seen = {name}
+        prefix = registered[name]
+        while parent != "app":
+            if parent in seen:
+                raise ValueError("router registration cycle")
+            seen.add(parent)
+            prefix = registered[parent] + prefix
+            parent = parents[parent]
+        # Keep the original relative prefixes until every chain has been resolved.
+        routers[name] = prefix
     for name, functions in definitions.items():
         for function in functions:
             for decorator in function.decorator_list:
@@ -209,7 +178,7 @@ def normalize_routes(tree: ast.Module, framework: str) -> ast.Module:
                     if type(path) is not str or not path.startswith("/"):
                         raise ValueError("router route paths must start with /")
                     decorator.func.value.id = "app"
-                    decorator.args[0] = ast.Constant(registered[name] + path)
+                    decorator.args[0] = ast.Constant(routers[name] + path)
     # App construction precedes decorators in the normalized validation tree only.
     # Replay executes the original source, including its original factory ordering.
     apps = [
@@ -416,21 +385,81 @@ def _django(tree: ast.Module) -> ast.Module:
 
 
 def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Module, list[str]]:
-    """Inline explicit imports from flat local modules; retain original files for replay."""
+    """Inline an explicit package graph, retaining original files for replay."""
     if Path(filename).stem in RESERVED_MODULES:
         raise ValueError("source filename conflicts with runtime imports")
     visited: set[str] = set()
     active: set[str] = set()
     total_bytes = 0
     module_exports: dict[str, set[str]] = {}
+    exports: dict[str, set[str]] = {}
     shared_imports: set[tuple[str | None, str, str | None, int]] = set()
+
+    def packages(name: str) -> None:
+        nonlocal total_bytes
+        for parent in reversed(Path(name).parents):
+            if parent == Path("."):
+                continue
+            if (root / parent).is_symlink():
+                raise ValueError("source packages must not be symlinks")
+            init = (parent / "__init__.py").as_posix()
+            path = root / init
+            if not path.is_file() or path.is_symlink():
+                raise ValueError("source packages require regular __init__.py files")
+            if init not in visited:
+                total_bytes += path.stat().st_size
+                if len(visited) >= 32 or total_bytes > 10_000_000:
+                    raise ValueError("source package graph exceeds capture limits")
+                body = ast.parse(path.read_text()).body
+                if any(
+                    not isinstance(item, ast.Pass)
+                    and not (
+                        isinstance(item, ast.Expr)
+                        and isinstance(item.value, ast.Constant)
+                        and type(item.value.value) is str
+                    )
+                    for item in body
+                ):
+                    raise ValueError("package initializer behavior requires additional capture")
+                visited.add(init)
+
+    def local_module(node: ast.ImportFrom, name: str) -> str | None:
+        if node.level:
+            parents = list(Path(name).parent.parts)
+            if node.level > len(parents) or not node.module:
+                raise ValueError("relative imports must name a module inside the source package")
+            parts = parents[: len(parents) - node.level + 1] + node.module.split(".")
+        elif node.module:
+            parts = node.module.split(".")
+        else:
+            return None
+        if not all(part.isidentifier() for part in parts):
+            raise ValueError("source imports require canonical module names")
+        path = Path(*parts).with_suffix(".py")
+        candidate = root / path
+        if (root / Path(*parts) / "__init__.py").exists():
+            raise ValueError("import a declared symbol from its module, not a package initializer")
+        if candidate.exists():
+            if parts[0] in RESERVED_MODULES:
+                raise ValueError("source package conflicts with runtime imports")
+            packages(path.as_posix())
+            return path.as_posix()
+        if node.level:
+            raise ValueError("relative source module is missing")
+        return None
 
     def read(name: str) -> list[ast.stmt]:
         nonlocal total_bytes
         if name in active:
             raise ValueError("cyclic source imports require additional capture")
         if name in visited:
-            raise ValueError("repeated local imports require additional capture")
+            return []
+        if name != filename or any(
+            (root / parent / "__init__.py").exists()
+            for parent in Path(name).parents
+            if parent != Path(".")
+        ):
+            packages(name)
         if len(visited) >= 32:
             raise ValueError("source module graph exceeds 32 files")
         path = root / name
@@ -473,6 +502,17 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
                     raise ValueError("source module symbols must not be reassigned")
                 declared.add(symbol)
         module_exports[name] = declared
+        exports[name] = {
+            node.name
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        } | {
+            target.id
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
         # Inlining must not resolve a missing module global through another file.
         for node in tree.body:
             locals_ = {
@@ -489,41 +529,25 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
                 }
                 - declared
                 - locals_
-                - {"__name__", "list", "dict", "set", "type", "int", "str", "bool"}
+                - {"__name__", "list", "dict", "set", "type", "int", "str", "bool", "len"}
             )
             if missing:
                 raise ValueError(f"{name}: unresolved module symbols: {', '.join(sorted(missing))}")
         result = []
         for node in tree.body:
-            if (
-                isinstance(node, ast.ImportFrom)
-                and not node.level
-                and node.module
-                and node.module.isidentifier()
-                and (root / (node.module + ".py")).exists()
-                and node.module + ".py" != models_file
-            ):
-                if node.module in RESERVED_MODULES or any(
-                    a.asname or a.name == "*" for a in node.names
-                ):
+            local = local_module(node, name) if isinstance(node, ast.ImportFrom) else None
+            if isinstance(node, ast.ImportFrom) and local == models_file:
+                node.module = Path(models_file).stem
+                node.level = 0
+                local = None
+            if isinstance(node, ast.ImportFrom) and local:
+                if any(a.asname or a.name == "*" for a in node.names):
                     raise ValueError("local imports require unaliased, nonconflicting module names")
-                statements = read(node.module + ".py")
-                exports = {
-                    n.name
-                    for n in statements
-                    if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-                } | {
-                    t.id
-                    for n in statements
-                    if isinstance(n, ast.Assign)
-                    for t in n.targets
-                    if isinstance(t, ast.Name)
-                }
-                if (
-                    not {a.name for a in node.names}
-                    <= exports & module_exports[node.module + ".py"]
-                ):
+                statements = read(local)
+                imported = {a.name for a in node.names}
+                if not imported <= exports[local] & module_exports[local]:
                     raise ValueError("local import does not refer to a declared symbol")
+                exports[name].update(imported)
                 result.extend(statements)
             elif isinstance(node, ast.ImportFrom):
                 aliases = []

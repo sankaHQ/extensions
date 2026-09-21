@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 from textwrap import indent
 from typing import Any
 
+from .application import normalize_application
 from .async_persistence import normalize_async_persistence
 from .models import capture_models
 from .persistence import capture_fastapi_persistence
@@ -297,6 +298,8 @@ def _normalize_native_pydantic(
     classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
     matched: dict[str, tuple[list[dict[str, Any]], bool]] = {}
     for name, candidate in classes.items():
+        if name in {"int", "str", "bool", "dict", "list", "set", "type", "len"}:
+            raise ValueError("schema names must not shadow builtins")
         for model in models:
             fields = [field for field in model["fields"] if not field["auto"]]
             for partial in (False, True):
@@ -412,7 +415,7 @@ def _normalize_pydantic(
             raise ValueError("schema symbols must not be reassigned")
         names.update(declared)
         if isinstance(node, ast.ClassDef):
-            if node.name in {"int", "str", "bool", "dict", "list", "set", "type"}:
+            if node.name in {"int", "str", "bool", "dict", "list", "set", "type", "len"}:
                 raise ValueError("schema names must not shadow builtins")
             classes[node.name] = node
     if not imported:
@@ -1153,7 +1156,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         except (ValueError, TypeError, OSError, SyntaxError) as error:
             gaps.append("models: " + str(error))
     lowered_repositories: set[tuple[str | None, str]] = set()
+    application: dict[str, Any] = {}
     try:
+        tree, application = normalize_application(tree, framework)
         if framework == "fastapi" and models:
             tree, lowered_repositories = normalize_async_persistence(tree)
         tree = normalize_routes(tree, framework)
@@ -1214,6 +1219,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         if models and isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             available |= {
                 "list",
+                "len",
                 "bool",
                 "dict",
                 "int",
@@ -1466,6 +1472,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
 
     if modules:
         result["source_modules"] = modules
+    if application:
+        result["application"] = application
     if topology is not None:
         result["fastapi_topology"] = topology
     if persistence is not None:

@@ -202,12 +202,17 @@ def _injected_sessions(tree: ast.Module) -> set[tuple[str | None, str]]:
     helpers: set[str] = set()
     used_methods: dict[str, set[str]] = {}
     for route in functions.values():
-        if not route.decorator_list or not route.args.defaults:
+        if (
+            not route.decorator_list
+            or not route.args.defaults
+            or not route.args.args
+            or ast.unparse(route.args.args[-1]) != "session: AsyncSession"
+        ):
             continue
         args = route.args
         default = args.defaults[-1]
         if not (
-            len(args.defaults) == 1
+            len(args.defaults) >= 1
             and args.args
             and ast.unparse(args.args[-1]) == "session: AsyncSession"
             and isinstance(default, ast.Call)
@@ -228,7 +233,7 @@ def _injected_sessions(tree: ast.Module) -> set[tuple[str | None, str]]:
             raise ValueError("session dependency must only yield one AsyncSession(engine)")
         providers.add(name)
         args.args.pop()
-        args.defaults.clear()
+        args.defaults.pop()
         body = route.body
         tail = body[-1]
         if isinstance(tail, ast.Return) and isinstance(tail.value, ast.Await):
@@ -394,10 +399,10 @@ def normalize_async_persistence(tree: ast.Module) -> tuple[ast.Module, set[tuple
         if any(
             not isinstance(decorator, ast.Call)
             or not isinstance(decorator.func, ast.Attribute)
-            or decorator.func.attr not in {"post", "put", "patch", "delete"}
+            or decorator.func.attr not in {"get", "post", "put", "patch", "delete"}
             for decorator in node.decorator_list
         ):
-            raise ValueError("async persistence currently qualifies CRUD writes only")
+            raise ValueError("async persistence requires qualified CRUD routes")
         tail = node.body[-1]
         if isinstance(tail, ast.Return) and isinstance(tail.value, ast.Await):
             call = tail.value.value
