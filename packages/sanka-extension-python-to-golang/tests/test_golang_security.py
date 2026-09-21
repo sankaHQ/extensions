@@ -335,11 +335,19 @@ def test_security_database_verify(
                     app.write_text(changed)
                     missing_scope = replay(tmp_path, output, captured, "verify")
                     assert not missing_scope["ok"]
+                    # compare() reports only the first JSON difference. A leaked
+                    # update changes both the response and rows; inspect its evidence
+                    # directly rather than depending on which difference is reported.
                     assert any(
-                        "$.tables" in problem
-                        for step in missing_scope["steps"]
-                        for problem in step["problems"]
-                    )
+                        candidate["method"] == "PUT"
+                        and ".cross-row-" in candidate["id"]
+                        and candidate["status"] == 200
+                        and source["status"] == 404
+                        and candidate["tables"] != source["tables"]
+                        for candidate, source in zip(
+                            missing_scope["candidate"], missing_scope["source"], strict=True
+                        )
+                    ), missing_scope["steps"]
                     app.write_text(original_app)
                 path = output / "security.go"
                 original = path.read_text()
