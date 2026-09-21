@@ -83,6 +83,12 @@ plan hash and is copied unchanged into the source replay environment. Cyclic or
 repeated local imports, aliases, package-relative imports, conflicting names,
 and missing module globals block generation.
 
+`source_file` and `models_file` accept canonical project-relative Python paths,
+including nested entrypoints such as `app/main.py`. Scan and plan hash up to 20,000
+regular files and 256 MiB of source deterministically. Python modules outside the
+qualified semantic graph produce one bounded gap with representative paths; they
+never disappear from the source digest or become generated placeholders.
+
 A Flask factory may take no arguments, construct `app = Flask(__name__)`, register
 blueprints, and return the app, followed by `app = create_app()` at module scope.
 Factory configuration, hooks, nested router registration, custom dependencies,

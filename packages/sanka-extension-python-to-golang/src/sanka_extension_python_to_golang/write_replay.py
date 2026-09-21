@@ -24,7 +24,7 @@ from sanka_http_replay import (
 
 from .capture import canonical, capture, digest
 from .render import render
-from .replay import SOURCE_PROBE, _run, _snapshot, _source_python
+from .replay import SOURCE_PROBE, _run, _snapshot, _source_python, _write_source_files
 from .toolchain import ensure_go
 
 
@@ -390,8 +390,7 @@ def replay_writes(
         if command == "verify":
             source = workspace / "source"
             source.mkdir()
-            for name, content in files.items():
-                (source / name).write_bytes(content)
+            _write_source_files(source, files)
             observed = workspace / "source-observed.json"
             _run(
                 [

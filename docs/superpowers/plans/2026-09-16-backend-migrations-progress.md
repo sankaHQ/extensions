@@ -689,3 +689,18 @@ The shared PostgreSQL replay matrix now includes explicit conventional DRF scena
 for every Go router. `ModelSerializer`, ViewSet/router wiring, field-shaped errors,
 custom validators and nested serializers remain open, so G1 and the complete-backend
 gates remain unfinished.
+
+
+## Large-project deterministic capture prerequisite (2026-09-21)
+
+Python-to-Go scan and plan now accept canonical nested entrypoints and model paths.
+The source digest remains deterministic across up to 20,000 regular files and 256 MiB,
+covering the current measured `sanka-api` repository size without executing it. Python
+files outside the qualified semantic graph produce one bounded gap with eight stable
+representative paths instead of thousands of repetitive plan entries. Nested source
+snapshots are materialized safely for later replay.
+
+This is a capture prerequisite, not `sanka-api` conversion evidence. No migration,
+generation, source execution, repository write, server or database operation was run
+against `sanka-api`. FastAPI factories, router graphs, lifespan, dependencies,
+middleware, async psycopg repositories and migration history remain the next gates.

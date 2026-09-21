@@ -108,6 +108,13 @@ def _run(
     return result.stdout
 
 
+def _write_source_files(root: Path, files: dict[str, bytes]) -> None:
+    for name, content in files.items():
+        destination = root / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+
+
 def _source_python() -> str:
     """Select an explicit source environment without resolving venv interpreter symlinks."""
     configured = os.environ.get("SANKA_GO_SOURCE_PYTHON")
@@ -351,15 +358,14 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             # Execute the exact captured source snapshot, not an import through PYTHONPATH.
             source_directory = workspace / "source"
             source_directory.mkdir()
-            for name, content in module_bytes.items():
-                (source_directory / name).write_bytes(content)
+            _write_source_files(source_directory, module_bytes)
             model_file = ""
             if model_bytes is not None:
                 model_path = source_directory / config["models_file"]
-                model_path.write_bytes(model_bytes)
+                _write_source_files(source_directory, {config["models_file"]: model_bytes})
                 model_file = str(model_path)
             source = source_directory / config["source_file"]
-            source.write_bytes(source_bytes)
+            _write_source_files(source_directory, {config["source_file"]: source_bytes})
             observed = workspace / "source-observed.json"
             _run(
                 [

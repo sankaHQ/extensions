@@ -520,6 +520,27 @@ assert unsupported_custom_dependency.completion_allowed is False
 **Exit:** source framework × target framework × persistence support is backed by
 specific passing evidence. Additional combinations are separate incremental work.
 
+### Accelerated FastAPI production-readiness sequence
+
+Use the maintained `sanka-api` architecture as a read-only qualification corpus.
+Do not create `sanka-api-go`, execute a migration, or write to that repository while
+completing these gates.
+
+- [x] Accept nested entrypoints and deterministically inventory a repository of the
+  current measured size, with bounded resource use and bounded semantic-gap output.
+- [ ] Capture application factories, lifespan, nested APIRouter composition,
+  middleware, exception handlers and dependency/security order without importing source.
+- [ ] Capture Pydantic domain/request/response models, PostgreSQL migration history and
+  async psycopg repository contracts, including relationships and exact scalar types.
+- [ ] Lower qualified services, repositories and transaction boundaries only when the
+  captured call graph requires those layers.
+- [ ] Preserve authentication, workspace/tenant permissions, middleware, filtering,
+  ordering and pagination through source-versus-target behavioral replay.
+- [ ] Pass generated Go tests, race checks, vet, build, deterministic regeneration and
+  PostgreSQL replay for Fiber first, then run the same qualified corpus on chi, mux and Gin.
+- [ ] Publish the completed extension and enable the separately owned hosted recipe only
+  after installed-wheel and exact-release-artifact qualification passes.
+
 ## Execution checks and progress reporting
 
 For each task, keep its checkboxes open until its own exit criteria pass. Report the
