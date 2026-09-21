@@ -413,6 +413,7 @@ def test_source_probe_awaits_async_engine_cleanup(tmp_path: Path) -> None:
         "use_database": "1",
         "framework": "fastapi",
         "filename": str(source),
+        "source_root": tmp_path,
         "Path": Path,
         "sys": SimpleNamespace(
             modules={"source": SimpleNamespace(__file__=str(source), engine=engine)}

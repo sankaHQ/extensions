@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from textwrap import indent
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
@@ -22,6 +23,14 @@ import importlib.util, json, os, sys
 from urllib.parse import urlsplit, parse_qsl, unquote
 from pathlib import Path
 framework, filename, routes, destination, models_file, use_database = sys.argv[1:]
+source_root = Path(filename).parent
+while (source_root / "__init__.py").is_file():
+    source_root = source_root.parent
+sys.path.insert(0, str(source_root))
+def module_name(path):
+    path = Path(path)
+    return (".".join(path.relative_to(source_root).with_suffix("").parts)
+            if path.is_relative_to(source_root) else path.stem)
 if framework == "drf":
     from django.conf import settings
     databases = {}
@@ -37,14 +46,14 @@ if framework == "drf":
     import django
     django.setup()
 if models_file:
-    model_spec = importlib.util.spec_from_file_location(Path(models_file).stem, models_file)
+    model_spec = importlib.util.spec_from_file_location(module_name(models_file), models_file)
     model_module = importlib.util.module_from_spec(model_spec)
     sys.modules[model_spec.name] = model_module
     model_spec.loader.exec_module(model_module)
-sys.path.insert(0, str(Path(filename).parent))
-spec = importlib.util.spec_from_file_location("migration_source", filename)
+spec = importlib.util.spec_from_file_location(module_name(filename), filename)
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
+sys.modules["migration_source"] = module
 spec.loader.exec_module(module)
 if framework == "drf":
     from django.test import Client
@@ -67,16 +76,32 @@ if use_database == "1":
         from django.db import connections
         connections.close_all()
     else:
+        disposed_engines = set()
         for loaded in tuple(sys.modules.values()):
             origin = getattr(loaded, "__file__", None)
-            if origin and Path(origin).parent == Path(filename).parent:
+            if origin and Path(origin).is_relative_to(source_root):
                 engine = getattr(loaded, "engine", None)
-                if engine is not None:
+                if engine is not None and id(engine) not in disposed_engines:
+                    disposed_engines.add(id(engine))
                     import asyncio, inspect
                     disposed = engine.dispose()
                     if inspect.isawaitable(disposed):
                         asyncio.run(disposed)
 """
+
+
+def _client_lifecycle(probe: str) -> str:
+    """Run either probe's requests inside the framework lifespan context."""
+    setup, requests = probe.split("observed = []", 1)
+    requests, cleanup = ("observed = []" + requests).split("Path(destination).write_text", 1)
+    return (
+        setup
+        + "from contextlib import nullcontext\n"
+        + "with client if framework == 'fastapi' else nullcontext():\n"
+        + indent(requests, "    ")
+        + "Path(destination).write_text"
+        + cleanup
+    )
 
 
 def _run(
@@ -401,7 +426,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
                     str(source_python),
                     "-I",
                     "-c",
-                    SOURCE_PROBE,
+                    _client_lifecycle(SOURCE_PROBE),
                     config["source_framework"],
                     str(source),
                     canonical(paths),

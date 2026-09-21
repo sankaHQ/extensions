@@ -68,7 +68,8 @@ The same handler and database contracts work with Flask Blueprints, FastAPI
 APIRouters, and DRF `path(prefix, include([...]))` URL lists. Flask registration
 prefixes override the Blueprint prefix; FastAPI registration prefixes are added
 to the APIRouter prefix. Static prefixes and one registration per router are
-qualified. Routes must be defined before registration.
+qualified, including nested registrations. Each child must be complete before its
+parent is mounted. Routes must be defined before registration.
 
 DRF multi-method `api_view` functions can dispatch using explicit
 `if request.method == "PATCH"` / `elif` branches (or separate `if` branches),
@@ -79,9 +80,12 @@ path do not provide method-based dispatch in Django.
 
 Explicit imports such as `from routes import api` or `from views import health`
 are captured without importing source. Every consumed file participates in the
-plan hash and is copied unchanged into the source replay environment. Cyclic or
-repeated local imports, aliases, package-relative imports, conflicting names,
-and missing module globals block generation.
+plan hash and is copied unchanged into the source replay environment. Explicit
+package imports (`from service.api.routes import api`, `from .routes import api`)
+and repeated imports of the same declared symbol qualify. Packages require regular
+`__init__.py` files containing only docstrings or `pass`; initializer behavior,
+cycles, aliases, conflicting names and missing module globals block generation.
+The executable module graph is bounded to 32 files and 10 MB.
 
 `source_file` and `models_file` accept canonical project-relative Python paths,
 including nested entrypoints such as `app/main.py`. Scan and plan hash up to 20,000
@@ -170,11 +174,37 @@ database rows and sequences after every GET.
 Replay executes the original async Python source and awaits
 engine cleanup; normalization is used only for static contract checking.
 
-A Flask factory may take no arguments, construct `app = Flask(__name__)`, register
-blueprints, and return the app, followed by `app = create_app()` at module scope.
-Factory configuration, hooks, nested router registration, custom dependencies,
-Custom Pydantic models, DRF ModelSerializer/ViewSets and custom authentication still require
-additional capture. This routing support does not imply whole-project parity.
+Flask and FastAPI support a zero-argument `create_app` that constructs the app,
+registers completed blueprints/routers, and returns it, followed by
+`app = create_app()` at module scope. Literal uppercase string, integer and boolean
+settings can supply qualified arguments. `DATABASE_URL = environ["DATABASE_URL"]`
+may initialize the database engine. Values, imports and initializers are hashed;
+configuration is never evaluated during capture. Computed settings, rebinding and
+custom factory side effects remain blocked.
+
+FastAPI additionally qualifies this explicit lifespan recipe:
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with engine.connect() as connection:
+        await connection.execute(text("SELECT 1"))
+    try:
+        yield
+    finally:
+        await engine.dispose()
+```
+
+Pass `lifespan=lifespan` to `FastAPI`. It reuses the generated process's database
+startup ping and pool cleanup. Source replay enters and exits the original
+FastAPI TestClient context, including startup failure handling. Custom lifecycle
+tasks, dependencies, authentication, and schema shapes outside the qualified
+contracts still require additional capture. This support does not imply parity
+for arbitrary projects. The packaged fixture in
+[the project tests](tests/test_golang_project.py) combines settings, database and
+model modules, a factory, nested routers, lifespan, CRUD, filtering and pagination;
+PostgreSQL CI compares ordered HTTP responses, rows and sequences across all four
+targets.
 
 ## Process entrypoint
 

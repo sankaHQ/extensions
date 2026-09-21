@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 from textwrap import indent
 from typing import Any
 
+from .application import normalize_application
 from .async_persistence import normalize_async_persistence
 from .models import capture_models
 from .persistence import capture_fastapi_persistence
@@ -1155,7 +1156,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         except (ValueError, TypeError, OSError, SyntaxError) as error:
             gaps.append("models: " + str(error))
     lowered_repositories: set[tuple[str | None, str]] = set()
+    application: dict[str, Any] = {}
     try:
+        tree, application = normalize_application(tree, framework)
         if framework == "fastapi" and models:
             tree, lowered_repositories = normalize_async_persistence(tree)
         tree = normalize_routes(tree, framework)
@@ -1469,6 +1472,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
 
     if modules:
         result["source_modules"] = modules
+    if application:
+        result["application"] = application
     if topology is not None:
         result["fastapi_topology"] = topology
     if persistence is not None:

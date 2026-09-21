@@ -16,12 +16,19 @@ def _module_file(root: Path, module: str) -> Path | None:
     return None
 
 
-def _imports(root: Path, tree: ast.Module) -> dict[str, tuple[Path, str]]:
+def _imports(root: Path, tree: ast.Module, source: Path) -> dict[str, tuple[Path, str]]:
     result: dict[str, tuple[Path, str]] = {}
     for node in tree.body:
-        if not isinstance(node, ast.ImportFrom) or node.level or not node.module:
+        if not isinstance(node, ast.ImportFrom) or not node.module:
             continue
-        path = _module_file(root, node.module)
+        parts = list(source.relative_to(root).parts[:-1])
+        if node.level:
+            if node.level > len(parts):
+                continue
+            module = ".".join(parts[: len(parts) - node.level + 1] + node.module.split("."))
+        else:
+            module = node.module
+        path = _module_file(root, module)
         if path is None:
             continue
         for alias in node.names:
@@ -38,7 +45,23 @@ def _call_name(node: ast.expr) -> str:
     return ast.unparse(node)
 
 
-def _literal_string(node: ast.expr | None) -> str | None:
+def _literal_string(
+    node: ast.expr | None, tree: ast.Module, imports: dict[str, tuple[Path, str]]
+) -> str | None:
+    if isinstance(node, ast.Name):
+        name = node.id
+        if name in imports:
+            path, name = imports[name]
+            tree = ast.parse(path.read_text())
+        values = [
+            item.value
+            for item in tree.body
+            if isinstance(item, ast.Assign)
+            and len(item.targets) == 1
+            and isinstance(item.targets[0], ast.Name)
+            and item.targets[0].id == name
+        ]
+        node = values[0] if len(values) == 1 else None
     return node.value if isinstance(node, ast.Constant) and type(node.value) is str else None
 
 
@@ -163,7 +186,7 @@ def _router(
 ) -> dict[str, Any] | None:
     relative = path.relative_to(root).as_posix()
     tree = ast.parse(path.read_text(), filename=relative)
-    imports = _imports(root, tree)
+    imports = _imports(root, tree, path)
     assignment = next(
         (
             node
@@ -184,7 +207,7 @@ def _router(
     prefix_node = next(
         (keyword.value for keyword in assignment.value.keywords if keyword.arg == "prefix"), None
     )
-    router_prefix = _literal_string(prefix_node)
+    router_prefix = _literal_string(prefix_node, tree, imports)
     if prefix_node is not None and router_prefix is None:
         gaps.append(f"{relative}:{name}: dynamic router prefix")
         router_prefix = ""
@@ -211,7 +234,7 @@ def _router(
                 and decorator.args
             ):
                 continue
-            route_path = _literal_string(decorator.args[0])
+            route_path = _literal_string(decorator.args[0], tree, imports)
             if route_path is None:
                 gaps.append(f"{relative}:{function.name}: dynamic route path")
                 continue
@@ -248,7 +271,7 @@ def _router(
         child_prefix = next(
             (keyword.value for keyword in call.keywords if keyword.arg == "prefix"), None
         )
-        literal = _literal_string(child_prefix)
+        literal = _literal_string(child_prefix, tree, imports)
         if imported is None or (child_prefix is not None and literal is None):
             gaps.append(f"{relative}:{name}: dynamic included router")
             continue
@@ -275,7 +298,7 @@ def capture_fastapi_topology(root: Path, source_file: str) -> dict[str, Any]:
     """Capture application composition and dependency order without importing source."""
     entrypoint = root / source_file
     tree = ast.parse(entrypoint.read_text(), filename=source_file)
-    imports = _imports(root, tree)
+    imports = _imports(root, tree, entrypoint)
     application_file = source_file
     local_app = any(
         isinstance(node, ast.Assign)
@@ -287,7 +310,7 @@ def capture_fastapi_topology(root: Path, source_file: str) -> dict[str, Any]:
         entrypoint = imported_app[0]
         application_file = entrypoint.relative_to(root).as_posix()
         tree = ast.parse(entrypoint.read_text(), filename=application_file)
-        imports = _imports(root, tree)
+        imports = _imports(root, tree, entrypoint)
     factory_name = None
     for node in tree.body:
         if (
@@ -358,7 +381,7 @@ def capture_fastapi_topology(root: Path, source_file: str) -> dict[str, Any]:
             prefix_node = next(
                 (keyword.value for keyword in call.keywords if keyword.arg == "prefix"), None
             )
-            prefix = _literal_string(prefix_node)
+            prefix = _literal_string(prefix_node, tree, imports)
             if imported is None or (prefix_node is not None and prefix is None):
                 gaps.append(f"{application_file}: dynamic included router")
             else:
@@ -376,6 +399,9 @@ def capture_fastapi_topology(root: Path, source_file: str) -> dict[str, Any]:
     routers = []
     visited: set[tuple[str, str, str]] = set()
     while queue:
+        if len(visited) >= 64:
+            gaps.append("router graph exceeds static capture limit")
+            break
         path, name, prefix, include_dependencies = queue.pop(0)
         key = (path.relative_to(root).as_posix(), name, prefix)
         if key in visited:

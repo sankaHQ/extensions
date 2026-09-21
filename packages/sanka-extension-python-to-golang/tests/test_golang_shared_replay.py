@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 from sanka_extension_python_to_golang.capture import SOURCES, TARGETS, capture, configuration
-from sanka_extension_python_to_golang.replay import replay
+from sanka_extension_python_to_golang.replay import _client_lifecycle, replay
 from sanka_extension_python_to_golang.write_replay import (
     SOURCE_WRITES,
     normalize_bodies,
@@ -35,7 +35,7 @@ def test_shared_write_contract_and_guards(tmp_path: Path, monkeypatch: pytest.Mo
     assert scenarios == scenarios_for(tmp_path, captured)
     assert any(s["method"] == "PATCH" for s in scenarios)
     assert any(s["id"].endswith("create.after") for s in scenarios)
-    compile(SOURCE_WRITES, "source-probe", "exec")
+    compile(_client_lifecycle(SOURCE_WRITES), "source-probe", "exec")
     monkeypatch.delenv("SANKA_GO_TARGET_TEST_DATABASE_URL", raising=False)
     with pytest.raises(ValueError, match="resettable PostgreSQL fixtures"):
         replay(tmp_path, tmp_path / "missing", captured, "verify")
@@ -335,7 +335,7 @@ def test_native_validation_public_write_verify(
 
 
 @requires_database
-@pytest.mark.parametrize("style", ["owned", "function", "class", "factory"])
+@pytest.mark.parametrize("style", ["owned", "function", "class", "factory", "packaged"])
 @pytest.mark.parametrize("target", TARGETS)
 def test_async_reads_and_pagination_replay(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, style: str, target: str
@@ -347,17 +347,27 @@ def test_async_reads_and_pagination_replay(
     (tmp_path / "sanka-verify.json").write_text(
         json.dumps({"schema": "sanka.http-scenarios/v1", "scenarios": scenarios})
     )
-    output = generate(tmp_path, "fastapi", target, app_source=async_read_backend(style))
-    captured = capture(
-        tmp_path,
-        configuration(
-            {
-                "source_framework": "fastapi",
-                "target_framework": target,
-                "database_layer": "pgx",
-            }
-        ),
-    )
+    if style == "packaged":
+        from test_golang_project import packaged_backend
+
+        scenarios = [dict(case, path="/api/backend/v1" + case["path"]) for case in scenarios]
+        (tmp_path / "sanka-verify.json").write_text(
+            json.dumps({"schema": "sanka.http-scenarios/v1", "scenarios": scenarios})
+        )
+        # Scenarios are part of the source digest: plan after the final scenario document.
+        output, captured = packaged_backend(tmp_path, target)
+    else:
+        output = generate(tmp_path, "fastapi", target, app_source=async_read_backend(style))
+        captured = capture(
+            tmp_path,
+            configuration(
+                {
+                    "source_framework": "fastapi",
+                    "target_framework": target,
+                    "database_layer": "pgx",
+                }
+            ),
+        )
     dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
     created = []
     with psycopg.connect(dsn, autocommit=True) as admin:

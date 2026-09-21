@@ -24,7 +24,14 @@ from sanka_http_replay import (
 
 from .capture import canonical, capture, digest
 from .render import render
-from .replay import SOURCE_PROBE, _run, _snapshot, _source_python, _write_source_files
+from .replay import (
+    SOURCE_PROBE,
+    _client_lifecycle,
+    _run,
+    _snapshot,
+    _source_python,
+    _write_source_files,
+)
 from .toolchain import ensure_go
 
 
@@ -397,7 +404,7 @@ def replay_writes(
                     str(source_python),
                     "-I",
                     "-c",
-                    SOURCE_WRITES,
+                    _client_lifecycle(SOURCE_WRITES),
                     config["source_framework"],
                     str(source / config["source_file"]),
                     str(cases),

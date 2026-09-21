@@ -45,7 +45,7 @@ def read_scenarios() -> list[dict]:
             "expected_status": 201,
             "body": {"name": name, "count": i, "enabled": True},
         }
-        for i, name in enumerate(["alpha", "bravo", "alpha"], 1)
+        for i, name in enumerate(["alpha", "bravo", "charlie"], 1)
     ]
     paths = [
         ("/widgets/1", 200),
