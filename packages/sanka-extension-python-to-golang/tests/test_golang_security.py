@@ -283,7 +283,7 @@ def test_security_database_capture_and_scenarios(tmp_path: Path) -> None:
 
 
 @requires_database
-@pytest.mark.parametrize("policy", ["bearer", "jwt", "native"])
+@pytest.mark.parametrize("policy", ["bearer", "jwt", "native", "scoped-tenant", "scoped-owner"])
 @pytest.mark.parametrize("framework", SOURCES)
 @pytest.mark.parametrize("target", TARGETS)
 def test_security_database_verify(
@@ -319,16 +319,38 @@ def test_security_database_verify(
             assert report["security_headers"]["ok"]
             assert {401, 403, 201, 204} <= {c["status"] for c in report["candidate"]}
             if framework == "fastapi" and target == "fiber":
+                if policy.startswith("scoped-"):
+                    import re
+
+                    app = output / "app.go"
+                    original_app = app.read_text()
+                    lines = original_app.splitlines(keepends=True)
+                    for index, line in enumerate(lines):
+                        if "UPDATE" in line and "RETURNING" in line and "fmt.Sprintf" not in line:
+                            lines[index] = re.sub(
+                                r'AND \\"name\\" = (\$\d+)', r"AND (\1::text IS NOT NULL)", line
+                            )
+                    changed = "".join(lines)
+                    assert changed != original_app
+                    app.write_text(changed)
+                    missing_scope = replay(tmp_path, output, captured, "verify")
+                    assert not missing_scope["ok"]
+                    assert any(
+                        "$.tables" in problem
+                        for step in missing_scope["steps"]
+                        for problem in step["problems"]
+                    )
+                    app.write_text(original_app)
                 path = output / "security.go"
                 original = path.read_text()
                 path.write_text(
                     original.replace("return nil, 403", "return nil, 0")
-                    if policy == "native"
+                    if policy in {"native", "scoped-tenant", "scoped-owner"}
                     else original.replace("return 403", "return 0")
                 )
                 tampered = replay(tmp_path, output, captured, "verify")
                 assert not tampered["ok"]
-                if policy != "native":
+                if policy == "bearer" or policy == "jwt":
                     path.write_text(original.replace('"no-store"', '"public"'))
                     tampered = replay(tmp_path, output, captured, "verify")
                     assert not tampered["ok"]
@@ -376,6 +398,13 @@ def prepare_security_fixture(
     root: Path, framework: str, target: str, policy: str = "bearer"
 ) -> tuple[Path, dict]:
     import tempfile
+
+    if policy.startswith("scoped-"):
+        from test_golang_row_security import prepare_scoped_fixture
+
+        return prepare_scoped_fixture(
+            root, framework, target, "tenant" if policy == "scoped-tenant" else "sub"
+        )
 
     from test_golang_schema import generate
     from test_golang_shared_replay import prepare_write_fixture

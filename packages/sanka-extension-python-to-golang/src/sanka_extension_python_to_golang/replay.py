@@ -388,6 +388,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
         requests = security_cases(
             [{"path": path, "method": "GET", "expected_status": status} for path, status in cases],
             captured["security"]["kind"],
+            captured["routes"],
         )
         cases = [(case["path"], case["expected_status"]) for case in requests]
     paths = [path for path, _ in cases]

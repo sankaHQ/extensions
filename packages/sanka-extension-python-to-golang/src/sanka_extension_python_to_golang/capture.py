@@ -20,6 +20,7 @@ from .models import capture_models
 from .persistence import capture_fastapi_persistence
 from .queries import capture_read
 from .routing import normalize_routes, project_tree
+from .row_security import attach_scope, normalize_row_security
 from .security import normalize_security
 from .topology import capture_fastapi_topology
 
@@ -1177,6 +1178,11 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             tree = _normalize_drf_serializers(tree, models, validations)
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("validation: " + str(error))
+    row_scopes: dict[str, Any] = {}
+    try:
+        row_scopes = normalize_row_security(tree, framework, security)
+    except (ValueError, TypeError, SyntaxError) as error:
+        gaps.append("row security: " + str(error))
     if persistence is not None:
         source_modules = {filename, *modules}
         remaining_repositories = [
@@ -1424,8 +1430,14 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 if method != "GET" or "body" not in payload:
                     raise ValueError("identity projections require a qualified GET response")
                 payload = {"identity": security["projections"][name]}
+            if name in row_scopes:
+                attach_scope(payload, row_scopes[name], models)
             if name in validations:
                 payload["write"].update(validations[name])
+                if payload["write"].get("scope") and payload["write"].get("validation", {}).get(
+                    "kind"
+                ) in {"drf", "pydantic"}:
+                    raise ValueError("identity body guards require strict, noncoercing validation")
             lookup = payload.get("read", {}).get("lookup")
             path_lookup = route_path.rsplit(":", 1)[1] if ":" in route_path else None
             if (

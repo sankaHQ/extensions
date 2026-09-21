@@ -141,6 +141,7 @@ def normalize_native_security(
             )
         consumed += unavailable
     projections: dict[str, dict[str, str]] = {}
+    receivers: dict[str, str] = {}
     routes = 0
     for node in tree.body:
         if (
@@ -200,6 +201,7 @@ def normalize_native_security(
                 index = node.args.args.index(argument)
                 node.args.defaults.pop(index - (len(node.args.args) - len(node.args.defaults)))
                 node.args.args.pop(index)
+        receivers[node.name] = receiver
         routes += 1
         if len(node.body) != 1 or not isinstance(node.body[0], ast.Return):
             continue
@@ -263,4 +265,5 @@ def normalize_native_security(
         "success_headers": {},
         "denied_headers": {},
         "projections": projections,
+        "receivers": receivers,
     }
