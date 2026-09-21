@@ -72,7 +72,10 @@ if use_database == "1":
             if origin and Path(origin).parent == Path(filename).parent:
                 engine = getattr(loaded, "engine", None)
                 if engine is not None:
-                    engine.dispose()
+                    import asyncio, inspect
+                    disposed = engine.dispose()
+                    if inspect.isawaitable(disposed):
+                        asyncio.run(disposed)
 """
 
 

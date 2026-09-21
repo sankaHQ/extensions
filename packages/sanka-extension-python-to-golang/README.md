@@ -104,12 +104,29 @@ Alembic revision ancestry plus ordered upgrade/downgrade operations; and ordered
 `AsyncSession` calls with explicit `begin` or `begin_nested` scopes. Files recognized by
 this scanner no longer appear as generic unconsumed-module gaps.
 
-This persistence document is a lowering prerequisite. Migrations, async repositories,
+This persistence document is a lowering prerequisite. Migrations, injected-session repositories,
 relationships, and domain/request/response models outside the existing flat write
 profile remain explicit gaps and block generation. Dynamic field options, migration
 operations, session methods, conditional repository flows and custom validators also
 remain gaps. Existing qualified flat schemas and SQLAlchemy models continue through
 their current Go generation path.
+
+FastAPI also lowers the same flat CRUD profile from async handlers using
+`async with AsyncSession(engine) as session`. The engine must use
+`create_async_engine(environ["DATABASE_URL"], poolclass=NullPool)`; `get`, `delete`,
+`commit`, and `refresh` must be awaited, while `add` remains synchronous. The existing
+qualified native Pydantic bodies and stable validation error handler apply unchanged.
+Source verification uses the psycopg async driver through `postgresql+psycopg://`.
+
+A handler may delegate its final session scope with `return await repository(...)`.
+The repository must be a plain async function with unannotated positional arguments
+passed unchanged by name and a single session scope. Explicit flat-module imports
+are supported. The complete expanded body must match the qualified CRUD recipe;
+missing awaits, extra side effects, changed commits and unknown operations block
+generation. This emits the existing direct Go operations without extra layers.
+Class repositories, injected sessions, nested transactions and arbitrary orchestration
+remain unsupported. Replay executes the original async Python source and awaits
+engine cleanup; normalization is used only for static contract checking.
 
 A Flask factory may take no arguments, construct `app = Flask(__name__)`, register
 blueprints, and return the app, followed by `app = create_app()` at module scope.
@@ -237,7 +254,7 @@ Fiber, chi, mux, and Gin with pgx accept one bounded create/PUT/PATCH/DELETE rec
 on one integer primary-key path. The source handler must explicitly reject unknown fields,
 missing required create fields, nulls for non-null fields, wrong JSON scalar types, and integers
 outside the captured PostgreSQL width. Any changed statement, validation bound, response shape,
-status, side effect, async handler, custom hook, or unsupported field leaves a capture gap.
+status, side effect, unqualified async shape, custom hook, or unsupported field leaves a capture gap.
 DELETE on the same integer path must explicitly load the row, return the captured 404 for a
 missing row, delete and commit it, then return an empty 204 response.
 PUT on that path must validate the complete replacement, assign every writable field, save or

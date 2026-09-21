@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 from textwrap import indent
 from typing import Any
 
+from .async_persistence import normalize_async_persistence
 from .models import capture_models
 from .persistence import capture_fastapi_persistence
 from .queries import capture_read
@@ -1153,6 +1154,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         except (ValueError, TypeError, OSError, SyntaxError) as error:
             gaps.append("models: " + str(error))
     try:
+        if framework == "fastapi" and models:
+            tree = normalize_async_persistence(tree)
         tree = normalize_routes(tree, framework)
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("routing: " + str(error))
