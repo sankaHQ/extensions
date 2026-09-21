@@ -234,10 +234,18 @@ print(json.dumps(cases))
 
 
 @pytest.mark.parametrize("target", TARGETS)
-def test_drf_field_and_go_validation_agree(tmp_path: Path, target: str) -> None:
+@pytest.mark.parametrize("bits", [32, 64])
+def test_drf_field_and_go_validation_agree(tmp_path: Path, target: str, bits: int) -> None:
     if os.getenv("SANKA_GO_TESTS") != "1":
         pytest.skip("requires qualified Go toolchain and DRF environment")
-    captured = capture_source(tmp_path, target, drf_field_serializer_source())
+    source = drf_field_serializer_source()
+    models = model_source("drf")
+    if bits == 64:
+        source = source.replace("-2147483648", "-9223372036854775808").replace(
+            "2147483647", "9223372036854775807"
+        )
+        models = models.replace("count = models.IntegerField()", "count = models.BigIntegerField()")
+    captured = capture_source(tmp_path, target, source, models)
     assert captured["gaps"] == []
     payloads = [
         {"name": " x ", "count": "1.0", "enabled": "yes"},
@@ -248,6 +256,12 @@ def test_drf_field_and_go_validation_agree(tmp_path: Path, target: str) -> None:
         {"name": None, "count": 1, "enabled": True},
         {"name": "x" * 41, "count": 1, "enabled": True},
         {"name": "x", "count": 1, "enabled": True, "note": None},
+        {
+            "name": "x",
+            "count": f"{2 ** (bits - 1) - 1}.0",
+            "enabled": True,
+        },
+        {"name": "x", "count": f"{2 ** (bits - 1)}.0", "enabled": True},
         {},
     ]
     (tmp_path / "cases.json").write_text(json.dumps(payloads))

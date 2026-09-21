@@ -865,6 +865,11 @@ func pydanticInt(raw []byte, bits int) (int64, error) {
     default:
         return 0, errInvalidWrite
     }
+    if fromString && !strings.ContainsAny(text, "eE") {
+        if dot := strings.IndexByte(text, '.'); dot >= 0 && strings.Trim(text[dot+1:], "0") == "" {
+            text = text[:dot]
+        }
+    }
     if value, err := strconv.ParseInt(text, 10, bits); err == nil { return value, nil }
     value, err := strconv.ParseFloat(text, 64)
     if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value || (fromString && strings.ContainsAny(text, "eE")) {
@@ -935,6 +940,11 @@ func drfInt(raw []byte, bits int) (int64, error) {
         fromString = true
     default:
         return 0, errInvalidWrite
+    }
+    if fromString && !strings.ContainsAny(text, "eE") {
+        if dot := strings.IndexByte(text, '.'); dot >= 0 && strings.Trim(text[dot+1:], "0") == "" {
+            text = text[:dot]
+        }
     }
     if value, err := strconv.ParseInt(text, 10, bits); err == nil { return value, nil }
     value, err := strconv.ParseFloat(text, 64)
