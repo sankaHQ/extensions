@@ -98,23 +98,7 @@ def test_shared_probe_compiles(tmp_path: Path, target: str) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@requires_database
-@pytest.mark.parametrize("framework", SOURCES)
-@pytest.mark.parametrize("target", TARGETS)
-def test_public_write_verify(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, framework: str, target: str
-) -> None:
-    import psycopg
-    from psycopg import sql
-
-    source = drf_serializer_source() if framework == "drf" else schema_source(framework)
-    output = generate(tmp_path, framework, target, app_source=group_backend(source, framework))
-    captured = capture(
-        tmp_path,
-        configuration(
-            {"source_framework": framework, "target_framework": target, "database_layer": "pgx"}
-        ),
-    )
+def prepare_write_fixture(root: Path, framework: str, target: str) -> tuple[Path, dict]:
     cases = [
         {
             "id": f"step{index}",
@@ -125,9 +109,45 @@ def test_public_write_verify(
         }
         for index, case in enumerate(SCENARIOS)
     ]
-    (tmp_path / "sanka-verify.json").write_text(
+    (root / "sanka-verify.json").write_text(
         json.dumps({"schema": "sanka.http-scenarios/v1", "scenarios": cases})
     )
+    source = drf_serializer_source() if framework == "drf" else schema_source(framework)
+    output = generate(root, framework, target, app_source=group_backend(source, framework))
+    captured = capture(
+        root,
+        configuration(
+            {"source_framework": framework, "target_framework": target, "database_layer": "pgx"}
+        ),
+    )
+    return output, captured
+
+
+def test_write_fixture_capture_is_stable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output, captured = prepare_write_fixture(tmp_path, "fastapi", "fiber")
+    assert capture(tmp_path, captured["configuration"]) == captured
+    scenarios = json.loads((tmp_path / "sanka-verify.json").read_text())
+    scenarios["scenarios"][0]["id"] = "changed-after-capture"
+    (tmp_path / "sanka-verify.json").write_text(json.dumps(scenarios))
+    monkeypatch.setenv(
+        "SANKA_GO_TARGET_TEST_DATABASE_URL", "postgresql://fixture@localhost/target"
+    )
+    with pytest.raises(ValueError, match="source changed before replay"):
+        replay(tmp_path, output, captured, "test")
+
+
+@requires_database
+@pytest.mark.parametrize("framework", SOURCES)
+@pytest.mark.parametrize("target", TARGETS)
+def test_public_write_verify(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, framework: str, target: str
+) -> None:
+    import psycopg
+    from psycopg import sql
+
+    output, captured = prepare_write_fixture(tmp_path, framework, target)
     dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
     created = []
     with psycopg.connect(dsn, autocommit=True) as admin:
