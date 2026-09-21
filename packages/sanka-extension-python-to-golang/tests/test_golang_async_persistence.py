@@ -11,8 +11,8 @@ from sanka_extension_python_to_golang.replay import SOURCE_PROBE
 from test_golang_validation import captured_source, native_fastapi_schema_source
 
 
-def async_source(repository: bool = False) -> str:
-    tree = ast.parse(native_fastapi_schema_source())
+def async_source(repository: bool = False, source: str | None = None) -> str:
+    tree = ast.parse(source or native_fastapi_schema_source())
     helpers = []
     for node in tree.body:
         if not isinstance(node, ast.FunctionDef) or not node.decorator_list:
@@ -26,7 +26,7 @@ def async_source(repository: bool = False) -> str:
                     isinstance(value, ast.Call)
                     and isinstance(value.func, ast.Attribute)
                     and ast.unparse(value.func.value) == "session"
-                    and value.func.attr in {"get", "commit", "refresh", "delete"}
+                    and value.func.attr in {"get", "commit", "refresh", "delete", "execute"}
                 ):
                     setattr(statement, field, ast.Await(value=value))
         node.body[-1] = ast.AsyncWith(items=scope.items, body=scope.body, type_comment=None)
@@ -41,6 +41,10 @@ def async_source(repository: bool = False) -> str:
     tree.body[0:0] = helpers
     source = ast.unparse(ast.fix_missing_locations(tree))
     source = source.replace(
+        "from sqlalchemy import create_engine, select",
+        "from sqlalchemy import select\nfrom sqlalchemy.pool import NullPool",
+    )
+    source = source.replace(
         "from sqlalchemy import create_engine", "from sqlalchemy.pool import NullPool"
     )
     source = source.replace(
@@ -53,8 +57,8 @@ def async_source(repository: bool = False) -> str:
     )
 
 
-def injected_source(repository: str = "function") -> str:
-    tree = ast.parse(async_source())
+def injected_source(repository: str = "function", source: str | None = None) -> str:
+    tree = ast.parse(async_source(source=source))
     provider = ast.parse(
         "async def get_session():\n"
         "    async with AsyncSession(engine) as session:\n"
@@ -110,9 +114,11 @@ def injected_source(repository: str = "function") -> str:
     return ast.unparse(ast.fix_missing_locations(tree))
 
 
-def factory_source(repository: str = "class", annotation: str = "alias") -> str:
+def factory_source(
+    repository: str = "class", annotation: str = "alias", source: str | None = None
+) -> str:
     source = (
-        injected_source(repository)
+        injected_source(repository, source)
         .replace(
             "import AsyncSession, create_async_engine",
             "import AsyncSession, create_async_engine, async_sessionmaker",
@@ -128,7 +134,8 @@ def factory_source(repository: str = "class", annotation: str = "alias") -> str:
     source = "from typing import Annotated\n" + source
     dependency = "Annotated[AsyncSession, Depends(get_session)]"
     if annotation == "alias":
-        source = source.replace("@app.post", f"SessionDep = {dependency}\n\n@app.post", 1)
+        position = source.index("@app.")
+        source = source[:position] + f"SessionDep = {dependency}\n\n" + source[position:]
         dependency = "SessionDep"
     return source.replace("session: AsyncSession=Depends(get_session)", f"session: {dependency}")
 

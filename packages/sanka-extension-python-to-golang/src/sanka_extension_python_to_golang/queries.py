@@ -4,12 +4,94 @@
 from __future__ import annotations
 
 import ast
+import copy
 from typing import Any
+
+
+def _pagination(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, dict[str, str]] | None:
+    """Match explicit bounded ASCII query validation before normalizing the query."""
+    if len(node.args.args) < 2 or len(node.args.defaults) < 2:
+        return None
+    if [ast.unparse(arg) for arg in node.args.args[-2:]] != ["limit: str", "offset: str"]:
+        return None
+    defaults = node.args.defaults[-2:]
+    if not all(isinstance(item, ast.Constant) and type(item.value) is str for item in defaults):
+        return None
+    limit, offset = (ast.literal_eval(item) for item in defaults)
+    if not (
+        limit.isascii()
+        and limit.isdecimal()
+        and len(limit) <= 4
+        and 1 <= int(limit) <= 1000
+        and offset.isascii()
+        and offset.isdecimal()
+        and len(offset) <= 10
+        and 0 <= int(offset) <= 2147483647
+    ):
+        raise ValueError("pagination defaults must satisfy the captured bounds")
+    if len({arg.arg for arg in node.args.args}) != len(node.args.args):
+        raise ValueError("pagination parameter names must be unique")
+    if len(node.body) != 1 or not isinstance(node.body[0], ast.With):
+        return None
+    scope = node.body[0]
+    guard = ast.parse("""if not (limit.isascii() and limit.isdecimal() and len(limit) <= 4
+            and 1 <= int(limit) <= 1000 and offset.isascii() and offset.isdecimal()
+            and len(offset) <= 10 and 0 <= int(offset) <= 2147483647):
+    raise HTTPException(status_code=400, detail="invalid pagination")
+""").body[0]
+    if len(scope.body) != 2 or ast.dump(scope.body[0]) != ast.dump(guard):
+        return None
+    lowered = copy.deepcopy(node)
+    lowered.args.args = lowered.args.args[:-2]
+    lowered.args.defaults = lowered.args.defaults[:-2]
+    lowered_scope = lowered.body[0]
+    assert isinstance(lowered_scope, ast.With)
+    lowered_scope.body.pop(0)
+
+    class Page(ast.NodeTransformer):
+        count = 0
+
+        def visit_Call(self, item: ast.Call) -> ast.AST:
+            if (
+                isinstance(item.func, ast.Attribute)
+                and item.func.attr == "offset"
+                and len(item.args) == 1
+                and ast.unparse(item.args[0]) == "int(offset)"
+            ) and not item.keywords:
+                limited = item.func.value
+                if (
+                    isinstance(limited, ast.Call)
+                    and isinstance(limited.func, ast.Attribute)
+                    and limited.func.attr == "limit"
+                    and len(limited.args) == 1
+                    and ast.unparse(limited.args[0]) == "int(limit)"
+                    and not limited.keywords
+                ):
+                    self.count += 1
+                    limited.args = [ast.Constant(value=int(limit))]
+                    return limited
+            return self.generic_visit(item)
+
+    page = Page()
+    page.visit(lowered)
+    if page.count != 1:
+        return None
+    return lowered, {"limit": limit, "offset": offset}
 
 
 def capture_read(
     node: ast.FunctionDef | ast.AsyncFunctionDef, framework: str, models: list[dict[str, Any]]
 ) -> dict[str, Any] | None:
+    page = _pagination(node) if framework == "fastapi" else None
+    if page:
+        lowered, pagination = page
+        result = capture_read(lowered, framework, models)
+        if result is not None and "lookup" not in result:
+            result["pagination"] = pagination
+            return result
+        return None
     referenced = {item.id for item in ast.walk(node) if isinstance(item, ast.Name)}
     models = [model for model in models if model["name"] in referenced]
     if not models:
@@ -73,7 +155,18 @@ return Response({response})
     parameters: list[tuple[str, str, str]] = []
     if framework == "fastapi" and len(node.args.args) == 1 and len(node.args.defaults) == 1:
         arg, default_node = node.args.args[0], node.args.defaults[0]
-        reserved = {"engine", "session", "Session", "select", "dict", "row", "str"}
+        reserved = {
+            "engine",
+            "session",
+            "Session",
+            "select",
+            "dict",
+            "row",
+            "str",
+            "int",
+            "len",
+            "HTTPException",
+        }
         reserved.update(model["name"] for model in models)
         if (ast.unparse(arg.annotation) == "str" if arg.annotation else False) and (
             isinstance(default_node, ast.Constant)

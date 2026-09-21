@@ -208,10 +208,22 @@ def request_paths(route: dict[str, Any]) -> list[str]:
     if lookup:
         return [path.replace(f":{lookup}", "1")]
     filtered = route.get("read", {}).get("filter")
-    if not filtered:
-        return [path]
-    key = filtered["parameter"]
     result = [path]
+    if "pagination" in route.get("read", {}):
+        result.extend(
+            path + "?" + query
+            for query in (
+                "limit=1&offset=0",
+                "limit=1&offset=1",
+                "limit=2&offset=2",
+                "limit=0001&offset=0000000001",
+                "limit=1000&offset=2147483647",
+                "limit=bad&limit=1",
+            )
+        )
+    if not filtered:
+        return result
+    key = filtered["parameter"]
     for value in (
         "",
         "first",
@@ -307,6 +319,20 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
     cases = [
         (path, route["status"]) for route in captured["routes"] for path in request_paths(route)
     ]
+    cases.extend(
+        (route["path"] + "?" + query, 400)
+        for route in captured["routes"]
+        if "pagination" in route.get("read", {})
+        for query in (
+            "limit=0",
+            "limit=1001",
+            "limit=",
+            "limit=1&limit=bad",
+            "limit=%D9%A1",
+            "offset=-1",
+            "offset=2147483648",
+        )
+    )
     paths = [path for path, _ in cases]
     with tempfile.TemporaryDirectory(prefix="sanka-go-replay-") as temporary:
         workspace = Path(temporary)

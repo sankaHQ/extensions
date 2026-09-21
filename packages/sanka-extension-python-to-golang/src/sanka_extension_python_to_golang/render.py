@@ -189,6 +189,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         for route in captured["routes"]
     )
     has_reads = any("read" in route for route in captured["routes"])
+    has_pagination = any("pagination" in route.get("read", {}) for route in captured["routes"])
     has_detail_reads = any("lookup" in route.get("read", {}) for route in captured["routes"])
     for index, route in enumerate(captured["routes"]):
         path = canonical(route["path"])
@@ -333,17 +334,30 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                 "chi": "r.URL.RawQuery",
                 "mux": "r.URL.RawQuery",
             }[target]
-            query_argument = ", " + raw_query if "filter" in route["read"] else ""
+            paginated = "pagination" in route["read"]
+            query_argument = ", " + raw_query if "filter" in route["read"] or paginated else ""
+            pagination_error = (
+                {
+                    "fiber": 'if errors.Is(err, errInvalidPage) { return c.Status(400).Send([]byte(`{"detail":"invalid pagination"}`)) }',
+                    "gin": 'if errors.Is(err, errInvalidPage) { c.Data(400, "application/json", []byte(`{"detail":"invalid pagination"}`)); return }',
+                    "chi": 'if errors.Is(err, errInvalidPage) { w.WriteHeader(400); _, _ = w.Write([]byte(`{"detail":"invalid pagination"}`)); return }',
+                    "mux": 'if errors.Is(err, errInvalidPage) { w.WriteHeader(400); _, _ = w.Write([]byte(`{"detail":"invalid pagination"}`)); return }',
+                }[target]
+                if paginated
+                else ""
+            )
             if target == "fiber":
                 registrations.append(f"""app.Get({path}, func(c fiber.Ctx) error {{
         body, err := readRows{index}(c.Context(), pool{query_argument})
         c.Set("Content-Type", "application/json")
+        {pagination_error}
         if err != nil {{ return c.Status(500).Send([]byte(`{{"error":"database read failed"}}`)) }}
         return c.Send(body)
     }})""")
             elif target == "gin":
                 registrations.append(f"""app.GET({path}, func(c *gin.Context) {{
         body, err := readRows{index}(c.Request.Context(), pool{query_argument})
+        {pagination_error}
         if err != nil {{
             c.Data(500, "application/json", []byte(`{{"error":"database read failed"}}`))
             return
@@ -360,6 +374,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                 registrations.append(f"""{method} func(w http.ResponseWriter, r *http.Request) {{
         body, err := readRows{index}(r.Context(), pool{query_argument})
         w.Header().Set("Content-Type", "application/json")
+        {pagination_error}
         if err != nil {{
             w.WriteHeader(500)
             _, _ = w.Write([]byte(`{{"error":"database read failed"}}`))
@@ -428,6 +443,8 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         imports.append('"strconv"')
     if has_pydantic or has_drf:
         imports.extend(['"math"', '"strconv"', '"strings"'])
+    if has_pagination:
+        imports.append('"errors"')
     if database:
         imports.append('"github.com/jackc/pgx/v5/pgxpool"')
     database_import = "; ".join(dict.fromkeys(imports))
@@ -477,7 +494,9 @@ func writeResponse(w http.ResponseWriter, status int, payload any) {
     if captured["configuration"]["database_layer"] == "pgx":
         result.update(render_database(captured))
     result.update(_runtime(target, database, captured["configuration"]["database_layer"] == "pgx"))
-    if any("filter" in route.get("read", {}) for route in captured["routes"]):
+    if has_pagination:
+        result["pagination.go"] = PAGINATION_SOURCE
+    if has_pagination or any("filter" in route.get("read", {}) for route in captured["routes"]):
         first = str(captured["configuration"]["source_framework"] == "flask").lower()
         result["query.go"] = QUERY_SOURCE.replace("QUERY_FIRST", first)
     return result
@@ -486,11 +505,14 @@ func writeResponse(w http.ResponseWriter, status int, payload any) {
 def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str:
     columns = ", ".join('"' + field["name"] + '"' for field in model["fields"])
     filtered = read.get("filter")
-    where = f' WHERE "{filtered["field"]}" = $2' if filtered else ""
+    pagination = read.get("pagination")
+    where = f' WHERE "{filtered["field"]}" = ${3 if pagination else 2}' if filtered else ""
     query = (
         f'SELECT {columns} FROM "{model["table"]}"{where} ORDER BY "{read["order_by"]}" LIMIT $1'
     )
-    signature = ", rawQuery string" if filtered else ""
+    if pagination:
+        query += " OFFSET $2"
+    signature = ", rawQuery string" if filtered or pagination else ""
     parameter = (
         f", queryValue(rawQuery, {json.dumps(filtered['parameter'], ensure_ascii=False)}, "
         f"{json.dumps(filtered['default'], ensure_ascii=False)})"
@@ -499,8 +521,17 @@ def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str
     )
     destinations = ", ".join("&item." + go_name(field["name"]) for field in model["fields"])
     arguments = "ctx context.Context, pool *pgxpool.Pool" + signature
+    page = ""
+    values = str(read["limit"]) + parameter
+    if pagination:
+        page = f"""limit, err := pageValue(queryValue(rawQuery, "limit", {canonical(pagination["limit"])}), 4, 1, 1000)
+    if err != nil {{ return nil, err }}
+    offset, err := pageValue(queryValue(rawQuery, "offset", {canonical(pagination["offset"])}), 10, 0, 2147483647)
+    if err != nil {{ return nil, err }}"""
+        values = "limit, offset" + parameter
     return f"""func readRows{index}({arguments}) ([]byte, error) {{
-    rows, err := pool.Query(ctx, {canonical(query)}, {read["limit"]}{parameter})
+    {page}
+    rows, err := pool.Query(ctx, {canonical(query)}, {values})
     if err != nil {{ return nil, err }}
     defer rows.Close()
     items := make([]{model["name"]}, 0)
@@ -982,6 +1013,23 @@ func drfBool(raw []byte) (bool, error) {
         }
     }
     return false, errInvalidWrite
+}
+"""
+
+
+PAGINATION_SOURCE = """// SPDX-License-Identifier: Apache-2.0
+package backend
+import "errors"
+var errInvalidPage = errors.New("invalid pagination")
+func pageValue(raw string, digits int, low, high int64) (int64, error) {
+    if len(raw) == 0 || len(raw) > digits { return 0, errInvalidPage }
+    var value int64
+    for i := 0; i < len(raw); i++ {
+        if raw[i] < '0' || raw[i] > '9' { return 0, errInvalidPage }
+        value = value*10 + int64(raw[i]-'0')
+    }
+    if value < low || value > high { return 0, errInvalidPage }
+    return value, nil
 }
 """
 

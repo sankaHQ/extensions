@@ -297,6 +297,8 @@ def _normalize_native_pydantic(
     classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
     matched: dict[str, tuple[list[dict[str, Any]], bool]] = {}
     for name, candidate in classes.items():
+        if name in {"int", "str", "bool", "dict", "list", "set", "type", "len"}:
+            raise ValueError("schema names must not shadow builtins")
         for model in models:
             fields = [field for field in model["fields"] if not field["auto"]]
             for partial in (False, True):
@@ -412,7 +414,7 @@ def _normalize_pydantic(
             raise ValueError("schema symbols must not be reassigned")
         names.update(declared)
         if isinstance(node, ast.ClassDef):
-            if node.name in {"int", "str", "bool", "dict", "list", "set", "type"}:
+            if node.name in {"int", "str", "bool", "dict", "list", "set", "type", "len"}:
                 raise ValueError("schema names must not shadow builtins")
             classes[node.name] = node
     if not imported:
@@ -1214,6 +1216,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         if models and isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             available |= {
                 "list",
+                "len",
                 "bool",
                 "dict",
                 "int",

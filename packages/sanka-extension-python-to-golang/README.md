@@ -146,6 +146,27 @@ arguments qualify; factory reconfiguration, custom session classes, bind overrid
 and automatic-commit `factory.begin()` scopes remain blocked. Existing explicit
 commit and refresh requirements still apply.
 
+The same async session and repository forms now accept primary-key lookups and
+primary-key-ordered lists using `await session.get(...)` or
+`(await session.execute(select(...))).mappings()`. Lists retain the existing captured
+projection, string equality filter and source limit. Streaming results, joins,
+alternative ordering, multiple statements and side effects remain blockers.
+
+FastAPI lists can also use the explicit limit/offset recipe in
+[the executable read fixture](tests/test_golang_async_reads.py). It declares
+`limit: str = "2", offset: str = "0"` (defaults may vary within the same bounds),
+validates ASCII decimal input before executing the query, then calls
+`.limit(int(limit)).offset(int(offset))`. Limits are 1–1000 with at most four
+digits; offsets are 0–2147483647 with at most ten digits. Invalid input returns
+400 with `{"detail":"invalid pagination"}`. Leading zeros are accepted within
+those length bounds; repeated parameters use FastAPI's last value. The optional
+captured string filter may precede these parameters. Pagination SQL uses bound
+parameters, and primary-key ordering keeps pages deterministic for a fixed database
+snapshot. Native `Query` constraints, cursor pagination and total-count envelopes
+remain unsupported. Public read verification exercises valid and invalid pages;
+ordered PostgreSQL replay also checks lookups, reads after deletion and unchanged
+database rows and sequences after every GET.
+
 Replay executes the original async Python source and awaits
 engine cleanup; normalization is used only for static contract checking.
 

@@ -8,6 +8,7 @@ import os
 import subprocess
 import uuid
 from collections.abc import Callable
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from sanka_extension_python_to_golang.write_replay import (
     write_probe,
 )
 from test_golang_async_persistence import async_source, factory_source, injected_source
+from test_golang_async_reads import async_read_backend, read_scenarios
 from test_golang_drf_validation import drf_field_serializer_source, drf_serializer_source
 from test_golang_routing import group_backend
 from test_golang_schema import generate, schema_dsn
@@ -327,6 +329,58 @@ def test_native_validation_public_write_verify(
             assert report["ok"], report["steps"]
             assert report["candidate"] == report["source"]
             assert report["candidate"][-1]["sequences"]["widgets"] == ["2", True]
+        finally:
+            for name in created:
+                admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
+
+
+@requires_database
+@pytest.mark.parametrize("style", ["owned", "function", "class", "factory"])
+@pytest.mark.parametrize("target", TARGETS)
+def test_async_reads_and_pagination_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, style: str, target: str
+) -> None:
+    import psycopg
+    from psycopg import sql
+
+    scenarios = read_scenarios()
+    (tmp_path / "sanka-verify.json").write_text(
+        json.dumps({"schema": "sanka.http-scenarios/v1", "scenarios": scenarios})
+    )
+    output = generate(tmp_path, "fastapi", target, app_source=async_read_backend(style))
+    captured = capture(
+        tmp_path,
+        configuration(
+            {
+                "source_framework": "fastapi",
+                "target_framework": target,
+                "database_layer": "pgx",
+            }
+        ),
+    )
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    created = []
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        try:
+            for _ in range(2):
+                name = "go_reads_" + uuid.uuid4().hex
+                admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(name)))
+                created.append(name)
+            source_url, target_url = [schema_dsn(dsn, name) for name in created]
+            monkeypatch.setenv(
+                "SANKA_GO_SOURCE_TEST_DATABASE_URL",
+                source_url.replace("postgresql://", "postgresql+psycopg://", 1),
+            )
+            monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", target_url)
+            report = replay(tmp_path, output, captured, "verify")
+            assert report["ok"], report["steps"]
+            assert report["candidate"] == report["source"]
+            observed = report["candidate"]
+            for previous, current in pairwise(observed):
+                if current["method"] == "GET":
+                    assert current["tables"] == previous["tables"]
+                    assert current["sequences"] == previous["sequences"]
+            assert observed[-1]["body"][0]["id"] == "3"
         finally:
             for name in created:
                 admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
