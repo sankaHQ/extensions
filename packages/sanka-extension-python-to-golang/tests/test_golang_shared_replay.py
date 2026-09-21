@@ -19,7 +19,7 @@ from sanka_extension_python_to_golang.write_replay import (
     scenarios_for,
     write_probe,
 )
-from test_golang_async_persistence import async_source
+from test_golang_async_persistence import async_source, injected_source
 from test_golang_drf_validation import drf_field_serializer_source, drf_serializer_source
 from test_golang_routing import group_backend
 from test_golang_schema import generate, schema_dsn
@@ -214,6 +214,9 @@ def test_public_write_verify(
         ("fastapi", native_fastapi_schema_source, 422),
         ("fastapi", async_source, 422),
         ("fastapi", lambda: async_source(True), 422),
+        ("fastapi", lambda: injected_source("direct"), 422),
+        ("fastapi", injected_source, 422),
+        ("fastapi", lambda: injected_source("class"), 422),
         ("drf", drf_field_serializer_source, 400),
     ],
 )

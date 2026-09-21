@@ -1114,7 +1114,6 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         if persistence is not None:
             consumed = set(persistence["files"])
             unconsumed = [name for name in unconsumed if name not in consumed]
-            gaps.extend(f"persistence: {gap}" for gap in persistence["gaps"])
     if unconsumed:
         samples = ", ".join(unconsumed[:GAP_PATH_SAMPLES])
         gaps.append(
@@ -1153,9 +1152,10 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             allowed_imports[model_module] = {model["name"] for model in models} - reserved
         except (ValueError, TypeError, OSError, SyntaxError) as error:
             gaps.append("models: " + str(error))
+    lowered_repositories: set[tuple[str | None, str]] = set()
     try:
         if framework == "fastapi" and models:
-            tree = normalize_async_persistence(tree)
+            tree, lowered_repositories = normalize_async_persistence(tree)
         tree = normalize_routes(tree, framework)
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("routing: " + str(error))
@@ -1168,6 +1168,22 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("validation: " + str(error))
     if persistence is not None:
+        source_modules = {filename, *modules}
+        remaining_repositories = [
+            item
+            for item in persistence["repositories"]
+            if item["module"] not in source_modules
+            or (item["owner"], item["name"]) not in lowered_repositories
+        ]
+        lowered_locations = {
+            (item["module"], item["name"]) for item in persistence["repositories"]
+        } - {(item["module"], item["name"]) for item in remaining_repositories}
+        resolved_gaps = {
+            f"{module}:{name}: conditional repository flow requires capture"
+            for module, name in lowered_locations
+        }
+        persistence_gaps = [gap for gap in persistence["gaps"] if gap not in resolved_gaps]
+        gaps.extend(f"persistence: {gap}" for gap in persistence_gaps)
         lowered_schemas = {
             value["validation"]["schema"]
             for value in validations.values()
@@ -1182,13 +1198,13 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         lowered_models = {model["name"] for model in models}
         requires_lowering = bool(
             persistence["migrations"]
-            or persistence["repositories"]
+            or remaining_repositories
             or {model["name"] for model in persistence["pydantic_models"]} - lowered_schemas
             or {model["name"] for model in persistence["sqlalchemy_models"]} - lowered_models
         )
         if requires_lowering:
             gaps.append("persistence: captured contracts require Go lowering")
-        elif not persistence["gaps"]:
+        elif not persistence_gaps:
             persistence = None
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     imports: set[str] = set()
