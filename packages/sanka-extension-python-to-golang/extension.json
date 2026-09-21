@@ -51,7 +51,7 @@
     {
       "name": "sanka_extension_python_to_golang-0.1.0a2-py3-none-any.whl",
       "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a2/sanka_extension_python_to_golang-0.1.0a2-py3-none-any.whl",
-      "sha256": "eedeaccddc23422b1a9b5e67758974ef98f0a807e1f59fa8c6e726c6913b8f0d"
+      "sha256": "38bb7f62ff4b33a96c4e833a192f19fd6724aa6a3dab4c3072bbeff9ca822e0f"
     },
     {
       "name": "sanka_http_replay-0.1.0a2-py3-none-any.whl",
