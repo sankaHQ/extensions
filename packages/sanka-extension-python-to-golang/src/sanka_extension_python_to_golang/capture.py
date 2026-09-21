@@ -1426,6 +1426,12 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 payload = _drf_write(function, method, models)
             else:
                 payload = _payload(function, framework, models)
+            if "write" in payload and any(
+                "references" in field for model in models for field in model["fields"]
+            ):
+                raise ValueError(
+                    "relational writes require multi-table HTTP scenarios and error capture"
+                )
             if name in security.get("projections", {}):
                 if method != "GET" or "body" not in payload:
                     raise ValueError("identity projections require a qualified GET response")

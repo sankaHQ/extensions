@@ -254,7 +254,8 @@ def request_paths(route: dict[str, Any]) -> list[str]:
     path = route["path"]
     lookup = route.get("read", {}).get("lookup")
     if lookup:
-        return [path.replace(f":{lookup}", "1")]
+        values = ("1", "2", "2147483647") if route["read"].get("many") else ("1",)
+        return [path.replace(f":{lookup}", value) for value in values]
     filtered = route.get("read", {}).get("filter")
     result = [path]
     if "pagination" in route.get("read", {}):
