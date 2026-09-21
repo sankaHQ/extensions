@@ -104,6 +104,7 @@ SOURCE_WRITES = (
 import psycopg
 from psycopg import sql
 observed = []
+observed_bytes = 0
 with psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://'), autocommit=True) as connection:
     for case in json.loads(Path(routes).read_text())['scenarios']:
         method, path = case['method'], case['path']
@@ -133,9 +134,13 @@ with psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://',
                 sequence = connection.execute('SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid=pg_get_serial_sequence(%s, %s)::regclass', ('"' + model['table'] + '"', primary['name'])).fetchone()
                 value, called = connection.execute(sql.SQL('SELECT last_value::text,is_called FROM {}').format(sql.Identifier(*sequence))).fetchone()
                 sequences[model['table']] = [value, called]
-        observed.append({'id': case['id'], 'method': method, 'path': path, 'status': response.status_code,
+        record = {'id': case['id'], 'method': method, 'path': path, 'status': response.status_code,
             'media_type': response.headers.get('Content-Type', '').split(';')[0],
-            'body': json.loads(raw) if raw else None, 'tables': tables, 'sequences': sequences})
+            'body': json.loads(raw) if raw else None, 'tables': tables, 'sequences': sequences}
+        observed_bytes += len(json.dumps(record, allow_nan=False).encode())
+        if observed_bytes > 16 * 1024 * 1024:
+            raise ValueError('write observations exceed 16 MiB')
+        observed.append(record)
 """
     + SOURCE_PROBE[SOURCE_PROBE.index("Path(destination).write_text") :]
 )
@@ -194,6 +199,7 @@ func TestSankaContractReplay(t *testing.T) {
     var document struct { Scenarios []struct { ID, Method, Path string; Headers map[string]string; Body json.RawMessage } }
     if err := json.Unmarshal(raw, &document); err != nil { t.Fatal(err) }
     observed := []map[string]any{}
+    observedBytes := 0
     for _, c := range document.Scenarios {
         request := httptest.NewRequest(c.Method, c.Path, bytes.NewReader(c.Body))
         for key,value := range c.Headers { request.Header.Set(key,value) }
@@ -205,8 +211,12 @@ func TestSankaContractReplay(t *testing.T) {
         if !json.Valid(body) { t.Fatal("non-JSON response") }
         tables, sequences := map[string]any{}, map[string]any{}
         QUERIES
-        observed = append(observed, map[string]any{"id":c.ID,"method":c.Method,"path":c.Path,"status":status,
-            "media_type":strings.Split(mediaType,";")[0],"body":json.RawMessage(body),"tables":tables,"sequences":sequences})
+        record := map[string]any{"id":c.ID,"method":c.Method,"path":c.Path,"status":status,
+            "media_type":strings.Split(mediaType,";")[0],"body":json.RawMessage(body),"tables":tables,"sequences":sequences}
+        encoded, err := json.Marshal(record); if err != nil { t.Fatal(err) }
+        observedBytes += len(encoded)
+        if observedBytes > 16*1024*1024 { t.Fatal("write observations exceed 16 MiB") }
+        observed = append(observed, record)
     }
     data, err := json.Marshal(observed); if err != nil { t.Fatal(err) }
     if err := os.WriteFile("sanka-observed.json",data,0600); err != nil { t.Fatal(err) }

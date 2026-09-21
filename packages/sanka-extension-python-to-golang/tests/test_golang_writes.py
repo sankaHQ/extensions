@@ -478,7 +478,10 @@ def test_write_generation_preserves_presence_and_transactions(tmp_path: Path, ta
         assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_public_write_replay_requires_explicit_fixtures(tmp_path: Path) -> None:
+def test_public_write_replay_requires_explicit_fixtures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("SANKA_GO_TARGET_TEST_DATABASE_URL", raising=False)
     with pytest.raises(ValueError, match="write replay requires explicit"):
         replay(tmp_path, tmp_path / "missing", write_contract(), "test")
 
