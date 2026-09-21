@@ -20,7 +20,7 @@ if __package__ in {None, ""}:
 from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel  # noqa: E402
 from scripts.check_release_artifacts import _entry_points, _wheel_metadata  # noqa: E402
 
-VERSION = "0.1.0a1"
+VERSION = "0.1.0a2"
 TAG = f"api-converters-v{VERSION}"
 PREFIX = f"https://github.com/sankaHQ/extensions/releases/download/{TAG}/"
 PACKAGES = (
@@ -29,16 +29,18 @@ PACKAGES = (
     "sanka-ts-capture",
     "sanka-http-replay",
 )
+VERSIONS = dict.fromkeys(PACKAGES, VERSION)
+VERSIONS["sanka-ts-capture"] = "0.1.0a1"
 SDK = tuple(
     w
     for w in PINNED_LOCAL_WHEELS
     if w.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}
 )
 DEPENDENCIES = {
-    PACKAGES[0]: ["sanka-extension-sdk==0.1.0a4"],
+    PACKAGES[0]: ["sanka-extension-sdk==0.1.0a4", "sanka-http-replay==0.1.0a2"],
     PACKAGES[1]: [
         "sanka-extension-sdk==0.1.0a4",
-        "sanka-http-replay==0.1.0a1",
+        "sanka-http-replay==0.1.0a2",
         "sanka-ts-capture==0.1.0a1",
     ],
     PACKAGES[2]: [],
@@ -60,11 +62,11 @@ def digest(path: Path) -> str:
 
 
 def wheel_name(package: str) -> str:
-    return f"{package.replace('-', '_')}-{VERSION}-py3-none-any.whl"
+    return f"{package.replace('-', '_')}-{VERSIONS[package]}-py3-none-any.whl"
 
 
 def closure(package: str) -> list[str]:
-    own = [package, *PACKAGES[2:]] if package == PACKAGES[1] else [package]
+    own = [package, *PACKAGES[2:]] if package == PACKAGES[1] else [package, PACKAGES[3]]
     return [*(wheel_name(p) for p in own), *(w.name for w in SDK)]
 
 
@@ -113,7 +115,7 @@ def validate(output: Path, root: Path = ROOT) -> None:
         expected_entry = {package: package.replace("-", "_") + ".__main__:main"}
         if (
             metadata["Name"] != package
-            or metadata["Version"] != VERSION
+            or metadata["Version"] != VERSIONS[package]
             or requirements != DEPENDENCIES[package]
             or _entry_points(entries, "console_scripts")
             != (expected_entry if package in PACKAGES[:2] else {})

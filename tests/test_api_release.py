@@ -66,7 +66,7 @@ def test_publication_requires_landed_tag_and_both_consumer_jobs() -> None:
     assert "workflow_dispatch" in jobs["publish"]["if"]
     assert "github.ref_type == 'tag'" in jobs["publish"]["if"]
     guard = jobs["build"]["steps"][1]["run"]
-    assert "api-converters-v0.1.0a1" in guard
+    assert "api-converters-v0.1.0a2" in guard
     assert 'git merge-base --is-ancestor "$GITHUB_SHA" origin/main' in guard
     assert jobs["qualify"]["strategy"]["matrix"]["target"] == ["go", "rust"]
     assert jobs["publish"]["permissions"] == {"contents": "write"}

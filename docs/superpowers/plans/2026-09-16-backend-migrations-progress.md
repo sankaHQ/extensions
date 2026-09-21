@@ -618,3 +618,45 @@ The CLI selected-target dependency is already implemented in `sankaHQ/sanka` PR1
 target into reviewed plan configuration and rejects conflicting explicit targets;
 the Go extension already normalizes that key. No duplicate runtime implementation
 was started. Cross-repository lifecycle acceptance remains open until it lands.
+
+
+## Endpoint field constraints (2026-09-18)
+
+PR87 merged as `dc9e391` after exact-head approval and all required CI passed,
+including the source/Go PostgreSQL write matrix and installed Flask wheel checks.
+
+Strict Pydantic schemas now capture string length limits and narrower integer
+bounds. Constraints are recorded per endpoint, not on the shared database model;
+POST/PUT and PATCH can therefore retain different validation rules. Generated
+Go decoders preserve nullable fields and count Unicode code points. Static capture
+still rejects unsupported coercion, aliases, custom validators and nested schemas.
+
+Native tests compare the original Pydantic validators against all four Go targets.
+The PostgreSQL qualification matrix adds constrained Flask/FastAPI writes,
+including rejected writes, sequence preservation and distinct PATCH rules.
+Local database tests remain skipped without the explicit PostgreSQL fixture.
+Standard DRF field serializers and native FastAPI request injection remain open;
+this batch does not close the general serializer or backend-readiness gates.
+
+
+## Shared write replay adoption (2026-09-21)
+
+Pulled main through `8260052`; shared HTTP replay from PR91 is available and reused.
+Public Python-to-Go write test/verify now consume its ordered scenarios and compare
+responses, every captured table and identity sequence. The runner resets explicitly
+named fixtures, checks their connection identities before resetting, and rejects
+adopt-existing mode. Scenario bytes are hashed and drift invalidates evidence.
+Constrained endpoints require explicit scenarios; generic defaults are not assumed
+to satisfy captured bounds. GET replay retains its existing prepared-fixture behavior.
+
+The shared comparator preserves native empty-204 content types, and missing-field
+scenarios now remain invalid for single-required-field models. Native probe compilation
+and the local package suites are separate from PostgreSQL CI qualification. The new
+public lifecycle matrix covers three sources by four targets, reset repeatability,
+and a database-only mutation negative control.
+
+The a1 scoped API converter release was already published. This change prepares a2
+Go/Rust/shared-replay wheels and manifests without publishing or changing a1 assets;
+the unchanged TypeScript capture helper stays a1. Full backend readiness, standard
+serializer coverage, native error parity, authentication/permissions, middleware,
+relationships and hosted integration remain open. PR88 needs review on its new head.

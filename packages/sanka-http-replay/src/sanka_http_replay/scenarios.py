@@ -248,7 +248,7 @@ def default_scenarios(
                     "POST",
                     path,
                     INVALID_BODY,
-                    {required[0]["name"]: _sample(required[0], 0)},
+                    {},
                 )
                 add(
                     f"{name}.create.wrong-type",
@@ -314,7 +314,7 @@ def default_scenarios(
                         "PUT",
                         first,
                         INVALID_BODY,
-                        {required[0]["name"]: _sample(required[0], 2)},
+                        {},
                     )
                 add(
                     f"{name}.replace.first",

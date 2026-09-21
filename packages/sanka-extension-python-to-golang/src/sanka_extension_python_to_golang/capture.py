@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 import json
 import os
@@ -19,7 +20,7 @@ from .routing import normalize_routes, project_tree
 
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
-VERSION = "0.1.0a1"
+VERSION = "0.1.0a2"
 PATH = re.compile(r"/[A-Za-z0-9_/-]*\Z")
 FLASK_INT_PATH = re.compile(r"(?P<prefix>/[A-Za-z0-9_/-]*)<int:(?P<name>[a-z][a-z0-9_]*)>\Z")
 FASTAPI_INT_PATH = re.compile(r"(?P<prefix>/[A-Za-z0-9_/-]*)\{(?P<name>[a-z][a-z0-9_]*)\}\Z")
@@ -211,7 +212,10 @@ def _write_validation(fields: list[dict[str, Any]], data: str, partial: bool, er
 
 
 def _normalize_pydantic(
-    tree: ast.Module, models: list[dict[str, Any]], framework: str
+    tree: ast.Module,
+    models: list[dict[str, Any]],
+    framework: str,
+    validations: dict[str, dict[str, dict[str, int]]],
 ) -> ast.Module:
     """Lower explicit strict schemas to the existing, qualified write validator."""
     schema_imports = {"BaseModel", "ConfigDict", "Field", "ValidationError"}
@@ -293,7 +297,83 @@ def _normalize_pydantic(
                                 bits = 32 if field["go_type"] == "int32" else 64
                                 options += [f"ge={-(2 ** (bits - 1))}", f"le={2 ** (bits - 1) - 1}"]
                             lines.append(f"    {key}: {kind} = Field({', '.join(options)})")
-                        if ast.dump(classes[name]) != ast.dump(ast.parse("\n".join(lines)).body[0]):
+                        expected = ast.parse("\n".join(lines)).body[0]
+                        candidate = copy.deepcopy(classes[name])
+                        constraints: dict[str, dict[str, int]] = {}
+                        for declaration in candidate.body:
+                            if not isinstance(declaration, ast.AnnAssign) or not isinstance(
+                                declaration.target, ast.Name
+                            ):
+                                continue
+                            field = next(
+                                (f for f in model["fields"] if f["name"] == declaration.target.id),
+                                None,
+                            )
+                            value = declaration.value
+                            if (
+                                field is None
+                                or not isinstance(value, ast.Call)
+                                or not isinstance(value.func, ast.Name)
+                                or value.func.id != "Field"
+                            ):
+                                continue
+                            retained = []
+                            bounds: dict[str, int] = {}
+                            for keyword in value.keywords:
+                                key = keyword.arg
+                                allowed = (
+                                    {"min_length", "max_length"}
+                                    if field["go_type"] == "string"
+                                    else {"ge", "le"}
+                                    if field["go_type"] in {"int32", "int64"}
+                                    else set()
+                                )
+                                if key not in allowed:
+                                    retained.append(keyword)
+                                    continue
+                                bound = ast.literal_eval(keyword.value)
+                                if type(bound) is not int or key in bounds:
+                                    raise ValueError(
+                                        "schema bounds must be unique literal integers"
+                                    )
+                                bounds[key] = bound
+                                if key in {"ge", "le"}:
+                                    bits = 32 if field["go_type"] == "int32" else 64
+                                    low, high = -(2 ** (bits - 1)), 2 ** (bits - 1) - 1
+                                    if not low <= bound <= high:
+                                        raise ValueError(
+                                            "schema integer bounds exceed the database type"
+                                        )
+                                    retained.append(
+                                        ast.keyword(
+                                            arg=key,
+                                            value=ast.parse(
+                                                str(low if key == "ge" else high), mode="eval"
+                                            ).body,
+                                        )
+                                    )
+                                elif not 0 <= bound <= 9223372036854775807:
+                                    raise ValueError(
+                                        "schema length bounds must fit nonnegative int64"
+                                    )
+                            if bounds.get("min_length", 0) > bounds.get(
+                                "max_length", 9223372036854775807
+                            ) or bounds.get("ge", -9223372036854775808) > bounds.get(
+                                "le", 9223372036854775807
+                            ):
+                                raise ValueError("schema bounds are reversed")
+                            value.keywords = retained
+                            if field["go_type"] in {"int32", "int64"}:
+                                bits = 32 if field["go_type"] == "int32" else 64
+                                bounds = {
+                                    k: v
+                                    for k, v in bounds.items()
+                                    if v
+                                    != (-(2 ** (bits - 1)) if k == "ge" else 2 ** (bits - 1) - 1)
+                                }
+                            if bounds:
+                                constraints[field["name"]] = bounds
+                        if ast.dump(candidate) != ast.dump(expected):
                             continue
                         error = (
                             'return jsonify({"error": "invalid request body"}), 400'
@@ -319,6 +399,8 @@ def _normalize_pydantic(
                             ).body[0],
                             statement,
                         )
+                        if constraints:
+                            validations[node.name] = constraints
                         used.add(name)
                         matched = True
                         break
@@ -823,8 +905,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         tree = normalize_routes(tree, framework)
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("routing: " + str(error))
+    validations: dict[str, dict[str, dict[str, int]]] = {}
     try:
-        tree = _normalize_pydantic(tree, models, framework)
+        tree = _normalize_pydantic(tree, models, framework, validations)
         if framework == "drf":
             tree = _normalize_drf_serializers(tree, models)
     except (ValueError, TypeError, SyntaxError) as error:
@@ -1026,6 +1109,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 payload = _drf_write(function, method, models)
             else:
                 payload = _payload(function, framework, models)
+            if name in validations:
+                payload["write"]["constraints"] = validations[name]
             lookup = payload.get("read", {}).get("lookup")
             path_lookup = route_path.rsplit(":", 1)[1] if ":" in route_path else None
             if (

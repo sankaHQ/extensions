@@ -256,3 +256,24 @@ def test_observations_and_comparison() -> None:
     ):
         with pytest.raises(ObservationError):
             validate_observations(broken, scenarios)
+
+
+@pytest.mark.parametrize("media_type", ["", "application/json", "text/html"])
+def test_bodyless_source_headers_remain_observable(media_type: str) -> None:
+    scenarios = validate_scenarios(
+        [{"id": "delete", "method": "DELETE", "path": "/w/1", "expected_status": 204}]
+    )
+    observed = validate_observations(
+        [{"status": 204, "body": None, "media_type": media_type}], scenarios
+    )
+    assert compare(scenarios, observed, observed)["ok"]
+    changed = [dict(observed[0], media_type="different")]
+    assert not compare(scenarios, changed, observed)["ok"]
+    assert not compare(scenarios, [dict(observed[0], body={})])["ok"]
+
+
+def test_single_required_field_is_actually_missing() -> None:
+    model = dict(WIDGET, fields=WIDGET["fields"][:2])
+    scenarios = default_scenarios(OPERATIONS, [model])
+    assert next(s for s in scenarios if s["id"] == "Widget.create.missing")["body"] == {}
+    assert next(s for s in scenarios if s["id"] == "Widget.replace.missing-field")["body"] == {}
