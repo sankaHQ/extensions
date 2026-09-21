@@ -42,7 +42,9 @@ def scenarios_for(root: Path, captured: dict[str, Any]) -> list[dict[str, Any]]:
     if path.exists():
         return load_scenarios(path)
     if any(
-        route.get("write", {}).get("constraints") or route.get("write", {}).get("validation")
+        route.get("write", {}).get("constraints")
+        or route.get("write", {}).get("validation")
+        or route.get("write", {}).get("scope")
         for route in captured["routes"]
     ):
         raise ValueError("captured write validation requires explicit sanka-verify.json scenarios")
@@ -159,6 +161,28 @@ with psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://',
 )
 
 
+# Reuse exactly the per-request snapshot for the initial denial baseline.
+_snapshot_start = SOURCE_WRITES.index("        tables, sequences = {}, {}")
+_snapshot_end = SOURCE_WRITES.index("        record =", _snapshot_start)
+_snapshot_body = SOURCE_WRITES[_snapshot_start:_snapshot_end]
+SOURCE_WRITES = (
+    SOURCE_WRITES[:_snapshot_start]
+    + "        tables, sequences = snapshot(connection)\n"
+    + SOURCE_WRITES[_snapshot_end:]
+)
+SOURCE_WRITES = SOURCE_WRITES.replace(
+    "observed = []",
+    "def snapshot(connection):\n"
+    + "\n".join(line[4:] for line in _snapshot_body.splitlines())
+    + "\n    return tables, sequences\nobserved = []",
+).replace(
+    "    for case in json.loads(Path(routes).read_text())['scenarios']:",
+    "    tables, sequences = snapshot(connection)\n"
+    "    Path(destination).with_suffix('.initial.json').write_text(json.dumps({'tables': tables, 'sequences': sequences}))\n"
+    "    for case in json.loads(Path(routes).read_text())['scenarios']:",
+)
+
+
 def write_probe(captured: dict[str, Any]) -> str:
     target = captured["configuration"]["target_framework"]
     exchange = """response, err := app.Test(request)
@@ -211,6 +235,14 @@ func TestSankaContractReplay(t *testing.T) {
     raw, err := os.ReadFile("sanka-cases.json"); if err != nil { t.Fatal(err) }
     var document struct { Scenarios []struct { ID, Method, Path string; Headers map[string]string; Body json.RawMessage } }
     if err := json.Unmarshal(raw, &document); err != nil { t.Fatal(err) }
+    snapshot := func() (map[string]any, map[string]any) {
+        tables, sequences := map[string]any{}, map[string]any{}
+        QUERIES
+        return tables, sequences
+    }
+    tables, sequences := snapshot()
+    baseline, err := json.Marshal(map[string]any{"tables":tables,"sequences":sequences}); if err != nil { t.Fatal(err) }
+    if err := os.WriteFile("sanka-observed.initial.json", baseline, 0600); err != nil { t.Fatal(err) }
     observed := []map[string]any{}
     observedBytes := 0
     for _, c := range document.Scenarios {
@@ -222,8 +254,7 @@ func TestSankaContractReplay(t *testing.T) {
         if len(body) > 1048576 { t.Fatal("oversized response") }
         if len(body) == 0 { body = []byte("null") }
         if !json.Valid(body) { t.Fatal("non-JSON response") }
-        tables, sequences := map[string]any{}, map[string]any{}
-        QUERIES
+        tables, sequences := snapshot()
         record := map[string]any{"id":c.ID,"method":c.Method,"path":c.Path,"status":status,
             "media_type":strings.Split(mediaType,";")[0],"body":json.RawMessage(body),"tables":tables,"sequences":sequences}
         encoded, err := json.Marshal(record); if err != nil { t.Fatal(err) }
@@ -283,7 +314,9 @@ def replay_writes(
     )
     if captured.get("security"):
         scenarios = validate_scenarios(
-            cases_document(security_cases(scenarios, captured["security"]["kind"]))
+            cases_document(
+                security_cases(scenarios, captured["security"]["kind"], captured["routes"])
+            )
         )
     target_url = os.environ.get("SANKA_GO_TARGET_TEST_DATABASE_URL", "")
     source_url = os.environ.get("SANKA_GO_SOURCE_TEST_DATABASE_URL", "")
@@ -403,6 +436,8 @@ def replay_writes(
             "complete_backend": False,
             "candidate": actual,
         }
+        initial = json.loads((candidate / "sanka-observed.initial.json").read_text())
+        source_initial = {}
         source_observed = None
         source_headers = None
         if command == "verify":
@@ -430,6 +465,7 @@ def replay_writes(
             )
             if captured.get("security"):
                 source_headers = json.loads(observed.with_suffix(".headers.json").read_text())
+            source_initial = json.loads(observed.with_suffix(".initial.json").read_text())
             source_observed = validate_observations(json.loads(observed.read_text()), scenarios)
             normalize_bodies(source_observed, captured)
             result["source"] = source_observed
@@ -445,14 +481,9 @@ def replay_writes(
                 captured,
                 len(scenarios),
             )
-            # Every denied request follows an observed request, including the first
-            # denial. Check each runtime independently, not just matching effects.
-            unchanged = all(
-                current["tables"] == previous["tables"]
-                and current["sequences"] == previous["sequences"]
-                for observations in (actual, source_observed or [])
-                for previous, current in pairwise(observations)
-                if current["status"] in (401, 403)
+            # Include the pre-request snapshot, so even the first denial must be inert.
+            unchanged = denied_writes_unchanged(initial, actual) and denied_writes_unchanged(
+                source_initial, source_observed or []
             )
             result["denied_writes_unchanged"] = unchanged
             result["ok"] = result["ok"] and result["security_headers"]["ok"] and unchanged
@@ -465,3 +496,12 @@ def replay_writes(
                 "source, candidate or scenarios changed during replay; discard observations"
             )
         return result
+
+
+def denied_writes_unchanged(initial: dict[str, Any], observations: list[dict[str, Any]]) -> bool:
+    return all(
+        current["tables"] == previous["tables"] and current["sequences"] == previous["sequences"]
+        for previous, current in pairwise([initial, *observations])
+        if current["status"] in (401, 403)
+        or (".cross-" in current["id"] and current["status"] == 404)
+    )

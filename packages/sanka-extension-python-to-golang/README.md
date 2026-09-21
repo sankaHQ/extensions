@@ -115,11 +115,53 @@ Native exceptions preserve the source error envelope: FastAPI/DRF use `detail`,
 Flask uses `error`; 401 includes the Bearer challenge. Every captured FastAPI/DRF
 route must select the same qualified authenticator. Mixed public/protected routes,
 other dependency graphs, custom permission classes, additional response hooks,
-and identity-dependent business/query expressions remain blockers. This does not
-implement tenant/owner filtering: the signed tenant claim is available to qualified
-handlers, but persistence isolation still requires its own captured predicates.
+and identity-dependent business expressions remain blockers. The explicit row predicates
+below extend the qualified database profile; other query policies remain unsupported.
 As with the other profiles, malformed-body, unmatched-route and implicit
 HEAD/OPTIONS behavior are outside the qualification corpus.
+
+### Tenant and owner row predicates
+
+Native signed-token handlers can explicitly scope a nonnullable string column to
+verified `tenant` or `sub`. Column names are taken from the source, not inferred.
+The executable recipes in [test_golang_row_security.py](tests/test_golang_row_security.py)
+cover DRF, Flask and FastAPI on all four Go targets.
+
+For lists, DRF uses `.filter(tenant_id=request.auth["tenant"])` directly on the
+model manager; SQLAlchemy uses `.where(Model.tenant_id == principal["tenant"])`
+directly after `select(...)`. Flask uses `g.principal`; DRF also accepts
+`request.user.pk` for the subject. Multiple predicates use keyword arguments or
+SQLAlchemy `where` arguments, with AND semantics. Existing ordering, limits and
+qualified filtering/pagination remain in place.
+
+Detail reads, updates and deletes use the existing explicit lookup followed by
+`if item is None or item.tenant_id != principal["tenant"]:` and the existing 404
+response. Writes additionally require this guard immediately after strict body
+validation and before persistence:
+
+```python
+if "tenant_id" in data and data["tenant_id"] != principal["tenant"]:
+    raise HTTPException(status_code=403, detail="permission denied")
+```
+
+Use the corresponding Flask/DRF 403 response recipe; DRF manual validation uses
+`request.data`. PUT/PATCH body predicates must match every row predicate, so a
+request cannot change ownership. Multiple body predicates are consecutive guards.
+Unknown policy expressions, nullable/non-string ownership fields and coercing
+serializer profiles block generation. Guards never create a policy absent from
+the source, and unscoped source routes remain unscoped.
+
+Generated reads, UPDATE and DELETE bind identity as SQL parameters. Empty PATCH
+also performs a scoped lookup. The implementation reuses the existing direct
+handlers and transactions. It does not add database row-level security, shared
+resource policies, administrator bypasses or concurrent ownership-transfer semantics.
+
+Scoped writes require explicit `sanka-verify.json` scenarios using the synthetic
+`fixture-tenant` / `fixture-user` identities. Replay independently changes tenant
+and subject, tries ownership-changing bodies, and sends PUT/PATCH bodies matching
+the attacking principal against the original row. It expects 404 for inaccessible
+rows and 403 for body ownership violations. Source and Go observations include
+initial database snapshots, so every denial must leave rows and sequences unchanged.
 
 Generated Go dependencies and checksums are pinned in this package; Go 1.26.5 is
 the qualification toolchain. No Go dependencies are installed into Sanka's Python

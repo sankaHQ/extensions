@@ -452,7 +452,9 @@ REPLAY_ENV = {"AUTH_READ_TOKEN": "sanka-replay-reader", "AUTH_WRITE_TOKEN": "san
 
 
 def security_cases(
-    cases: list[dict[str, Any]], kind: str = "bearer-read-write"
+    cases: list[dict[str, Any]],
+    kind: str = "bearer-read-write",
+    routes: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Exercise every supplied request as writer, unauthenticated and reader."""
     result = []
@@ -476,10 +478,15 @@ def security_cases(
             from .jwt_security import replay_roles
 
             roles = replay_roles(case, first=index == 0)
+        bodies: dict[str, Any] = {}
+        if routes and kind == "jwt-hs256-roles":
+            from .row_security import scoped_replay_roles
+
+            roles, bodies = scoped_replay_roles(case, roles, routes)
         for role, token, status in roles:
             result.append(
                 dict(
-                    case,
+                    case | ({"body": bodies[role]} if role in bodies else {}),
                     id=f"security.{index}.{role}",
                     expected_status=status,
                     headers=headers | ({"authorization": token} if token else {}),
