@@ -10,6 +10,7 @@ build/
 .ruff_cache/
 .coverage
 .DS_Store
+docs/superpowers/plans/
 
 # Fetched by scripts/fetch_typescript_bundle.py (pinned npm tarball); shipped inside the wheel.
 packages/sanka-ts-capture/src/sanka_ts_capture/node/typescript.js

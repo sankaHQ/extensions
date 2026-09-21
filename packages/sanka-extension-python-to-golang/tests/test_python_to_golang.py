@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from sanka_extension_python_to_golang.adapter import handle
 from sanka_extension_python_to_golang.capture import SOURCES, TARGETS, capture, configuration
+from sanka_extension_python_to_golang.replay import _write_source_files
 
 from sanka_extensions.code import ExtensionRequest
 
@@ -143,11 +144,18 @@ def test_unknown_behavior_blocks(tmp_path: Path, addition: str) -> None:
 
 def test_profiles_and_source_boundaries(tmp_path: Path) -> None:
     assert configuration({"source_framework": "flask"})["target_framework"] == "fiber"
+    assert (
+        configuration({"source_framework": "fastapi", "source_file": "app/main.py"})["source_file"]
+        == "app/main.py"
+    )
     for config in (
         {"source_framework": "django"},
         {"source_framework": "flask", "database_layer": "unknown"},
         {"source_framework": "flask", "target_framework": "unknown"},
         {"source_framework": "flask", "source_file": "../app.py"},
+        {"source_framework": "flask", "source_file": "/tmp/app.py"},
+        {"source_framework": "flask", "source_file": "app/./main.py"},
+        {"source_framework": "flask", "source_file": "app\\main.py"},
     ):
         with pytest.raises(ValueError):
             configuration(config)
@@ -157,6 +165,54 @@ def test_profiles_and_source_boundaries(tmp_path: Path) -> None:
     (tmp_path / "models.py").unlink()
     (tmp_path / "link.py").symlink_to(tmp_path / "app.py")
     assert handle(request(tmp_path)).outcome == "error"
+
+
+def test_nested_entrypoint_capture(tmp_path: Path) -> None:
+    entrypoint = tmp_path / "app" / "main.py"
+    entrypoint.parent.mkdir()
+    entrypoint.write_text(source("fastapi"))
+    config = configuration(
+        {
+            "source_framework": "fastapi",
+            "source_file": "app/main.py",
+            "target_framework": "fiber",
+        }
+    )
+
+    captured = capture(tmp_path, config)
+
+    assert captured["gaps"] == []
+    assert captured["source_inventory"] == {
+        "files": 1,
+        "python_files": 1,
+        "bytes": entrypoint.stat().st_size,
+    }
+
+
+def test_large_project_capture_has_one_bounded_gap(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(source("fastapi"))
+    package = tmp_path / "app"
+    package.mkdir()
+    for index in range(1_001):
+        (package / f"module_{index:04d}.py").write_text(f"VALUE = {index}\n")
+
+    captured = capture(tmp_path, configuration({"source_framework": "fastapi"}))
+
+    assert captured["source_inventory"]["files"] == 1_002
+    assert captured["source_inventory"]["python_files"] == 1_002
+    assert len(captured["gaps"]) == 1
+    assert captured["gaps"][0].startswith(
+        "project: 1001 additional Python modules require semantic capture: "
+    )
+    assert "app/module_0000.py" in captured["gaps"][0]
+    assert "app/module_0007.py" in captured["gaps"][0]
+    assert "module_0008.py" not in captured["gaps"][0]
+
+
+def test_nested_source_snapshot(tmp_path: Path) -> None:
+    _write_source_files(tmp_path, {"app/main.py": b"app = object()\n"})
+
+    assert (tmp_path / "app" / "main.py").read_bytes() == b"app = object()\n"
 
 
 @pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="set SANKA_GO_TESTS=1 for Go matrix")

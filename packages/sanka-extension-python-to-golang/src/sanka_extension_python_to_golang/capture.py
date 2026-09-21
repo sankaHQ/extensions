@@ -10,7 +10,7 @@ import json
 import os
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from textwrap import indent
 from typing import Any
 
@@ -21,6 +21,9 @@ from .routing import normalize_routes, project_tree
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
 VERSION = "0.1.0a2"
+MAX_SOURCE_BYTES = 256 * 1024 * 1024
+MAX_SOURCE_FILES = 20_000
+GAP_PATH_SAMPLES = 8
 PATH = re.compile(r"/[A-Za-z0-9_/-]*\Z")
 FLASK_INT_PATH = re.compile(r"(?P<prefix>/[A-Za-z0-9_/-]*)<int:(?P<name>[a-z][a-z0-9_]*)>\Z")
 FASTAPI_INT_PATH = re.compile(r"(?P<prefix>/[A-Za-z0-9_/-]*)\{(?P<name>[a-z][a-z0-9_]*)\}\Z")
@@ -50,6 +53,20 @@ def canonical(value: Any) -> str:
 
 def digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical(value).encode()).hexdigest()
+
+
+def _python_path(value: str, label: str) -> str:
+    path = PurePosixPath(value)
+    if (
+        not value
+        or "\\" in value
+        or path.is_absolute()
+        or path.as_posix() != value
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or not value.endswith(".py")
+    ):
+        raise ValueError(f"{label} must be a canonical relative Python path")
+    return value
 
 
 def configuration(raw: dict[str, Any]) -> dict[str, str]:
@@ -104,16 +121,10 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
             if key not in {"models_file", "schema_mode"} and value != default:
                 raise ValueError(f"only {key}={default} is qualified")
             result[key] = value
-        model_file = result["models_file"]
-        if (
-            Path(model_file).name != model_file
-            or not model_file.endswith(".py")
-            or model_file == result["source_file"]
-        ):
-            raise ValueError("models_file must be a distinct top-level Python filename")
-    filename = result["source_file"]
-    if Path(filename).name != filename or not filename.endswith(".py"):
-        raise ValueError("source_file must be a top-level Python filename")
+        model_file = _python_path(result["models_file"], "models_file")
+        if model_file == result["source_file"]:
+            raise ValueError("models_file must be distinct from source_file")
+    _python_path(result["source_file"], "source_file")
     return result
 
 
@@ -1066,6 +1077,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         gaps.append("project: " + str(error))
     ignored = {".git", ".venv", ".sanka", "__pycache__"}
     total = 0
+    unconsumed: list[str] = []
     for directory, names, filenames in os.walk(root, followlinks=False):
         names[:] = sorted(name for name in names if name not in ignored)
         if any((Path(directory) / name).is_symlink() for name in names):
@@ -1076,8 +1088,11 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             if source.is_symlink() or not source.is_file():
                 raise ValueError("only regular source files are supported")
             total += source.stat().st_size
-            if total > 10_000_000 or len(records) >= 1000:
-                raise ValueError("source exceeds experimental capture limits")
+            if total > MAX_SOURCE_BYTES or len(records) >= MAX_SOURCE_FILES:
+                raise ValueError(
+                    f"source exceeds capture limits ({MAX_SOURCE_FILES} files, "
+                    f"{MAX_SOURCE_BYTES} bytes)"
+                )
             content = source.read_bytes()
             records[relative.as_posix()] = hashlib.sha256(content).hexdigest()
             if (
@@ -1086,7 +1101,13 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 and relative.as_posix() not in modules
                 and source != root / config.get("models_file", "")
             ):
-                gaps.append(f"{relative}: additional Python modules require whole-project capture")
+                unconsumed.append(relative.as_posix())
+    if unconsumed:
+        samples = ", ".join(unconsumed[:GAP_PATH_SAMPLES])
+        gaps.append(
+            f"project: {len(unconsumed)} additional Python modules require semantic capture: "
+            f"{samples}"
+        )
     models = []
     allowed_imports = {key: set(value) for key, value in IMPORTS[framework].items()}
     if config["database_layer"] == "pgx":
@@ -1374,6 +1395,11 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     result = {
         "schema": "sanka.python-to-golang.capture/v1",
         "source_digest": digest(records),
+        "source_inventory": {
+            "files": len(records),
+            "python_files": sum(name.endswith(".py") for name in records),
+            "bytes": total,
+        },
         "configuration": config,
         "routes": sorted(routes, key=lambda item: item["path"]),
         "gaps": sorted(set(gaps)),
