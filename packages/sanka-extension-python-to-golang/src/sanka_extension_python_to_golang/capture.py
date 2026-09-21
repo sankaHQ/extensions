@@ -17,6 +17,7 @@ from typing import Any
 from .models import capture_models
 from .queries import capture_read
 from .routing import normalize_routes, project_tree
+from .topology import capture_fastapi_topology
 
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
@@ -1392,6 +1393,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         gaps.append(str(error))
     if not routes:
         gaps.append("no qualified endpoints")
+    topology = capture_fastapi_topology(root, filename) if framework == "fastapi" else None
+    if topology is not None:
+        gaps.extend(f"topology: {gap}" for gap in topology["gaps"])
     result = {
         "schema": "sanka.python-to-golang.capture/v1",
         "source_digest": digest(records),
@@ -1409,6 +1413,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
 
     if modules:
         result["source_modules"] = modules
+    if topology is not None:
+        result["fastapi_topology"] = topology
     if config["database_layer"] == "pgx":
         result["models"] = models
         result["scope"] = (

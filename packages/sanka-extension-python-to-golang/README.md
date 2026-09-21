@@ -89,6 +89,13 @@ regular files and 256 MiB of source deterministically. Python modules outside th
 qualified semantic graph produce one bounded gap with representative paths; they
 never disappear from the source digest or become generated placeholders.
 
+FastAPI plans also inventory a static application factory, lifespan expression,
+middleware registration order, installed exception handlers, nested APIRouter graph,
+route order, and application/router/include/decorator/parameter `Depends` and `Security`
+lists in their source order. Local and package imports are resolved without importing
+source. Dynamic router factories, prefixes, paths or dependency lists remain explicit
+topology gaps; topology capture alone does not enable lowering.
+
 A Flask factory may take no arguments, construct `app = Flask(__name__)`, register
 blueprints, and return the app, followed by `app = create_app()` at module scope.
 Factory configuration, hooks, nested router registration, custom dependencies,
