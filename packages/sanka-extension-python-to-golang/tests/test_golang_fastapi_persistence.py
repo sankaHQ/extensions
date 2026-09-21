@@ -3,6 +3,7 @@
 
 from pathlib import Path
 
+from sanka_extension_python_to_golang.capture import capture, configuration
 from sanka_extension_python_to_golang.persistence import capture_fastapi_persistence
 
 
@@ -214,3 +215,81 @@ async def create_widget(session: AsyncSession, widget: Widget):
         "refresh",
     ]
     assert captured["gaps"] == []
+
+
+def test_source_capture_includes_persistence_without_generic_file_gaps(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "app.py",
+        """from fastapi import FastAPI
+app = FastAPI()
+@app.get("/health")
+def health():
+    return {"ok": True}
+""",
+    )
+    _write(
+        tmp_path,
+        "schemas.py",
+        """from pydantic import BaseModel
+class Health(BaseModel):
+    ok: bool
+""",
+    )
+
+    first = capture(tmp_path, configuration({"source_framework": "fastapi"}))
+    second = capture(tmp_path, configuration({"source_framework": "fastapi"}))
+
+    assert first == second
+    assert first["fastapi_persistence"]["files"] == ["schemas.py"]
+    assert "persistence: captured contracts require Go lowering" in first["gaps"]
+    assert not any("additional Python modules" in gap for gap in first["gaps"])
+
+
+def test_dynamic_persistence_behavior_is_prefixed_capture_gap(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "app.py",
+        """from fastapi import FastAPI
+app = FastAPI()
+@app.get("/health")
+def health():
+    return {"ok": True}
+""",
+    )
+    _write(
+        tmp_path,
+        "schemas.py",
+        """from pydantic import BaseModel, Field
+class Input(BaseModel):
+    name: str = Field(validation_alias=build_alias())
+""",
+    )
+    _write(
+        tmp_path,
+        "alembic/versions/0001_dynamic.py",
+        """from alembic import op
+revision = "0001"
+down_revision = None
+branch_labels = None
+depends_on = None
+def upgrade():
+    op.execute(build_sql())
+def downgrade():
+    op.drop_table("widgets")
+""",
+    )
+    _write(
+        tmp_path,
+        "repositories.py",
+        """from sqlalchemy.ext.asyncio import AsyncSession
+async def stream_widgets(session: AsyncSession):
+    return await session.stream(build_query())
+""",
+    )
+
+    captured = capture(tmp_path, configuration({"source_framework": "fastapi"}))
+
+    assert any(gap.startswith("persistence: schemas.py:Input:") for gap in captured["gaps"])
+    assert any("dynamic migration operation" in gap for gap in captured["gaps"])
+    assert any("unsupported AsyncSession operation stream" in gap for gap in captured["gaps"])

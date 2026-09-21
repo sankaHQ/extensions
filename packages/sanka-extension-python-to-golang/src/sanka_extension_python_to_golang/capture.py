@@ -15,6 +15,7 @@ from textwrap import indent
 from typing import Any
 
 from .models import capture_models
+from .persistence import capture_fastapi_persistence
 from .queries import capture_read
 from .routing import normalize_routes, project_tree
 from .topology import capture_fastapi_topology
@@ -1103,6 +1104,16 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 and source != root / config.get("models_file", "")
             ):
                 unconsumed.append(relative.as_posix())
+    persistence = None
+    if framework == "fastapi":
+        try:
+            persistence = capture_fastapi_persistence(root)
+        except (OSError, SyntaxError, TypeError, ValueError) as error:
+            gaps.append("persistence: " + str(error))
+        if persistence is not None:
+            consumed = set(persistence["files"])
+            unconsumed = [name for name in unconsumed if name not in consumed]
+            gaps.extend(f"persistence: {gap}" for gap in persistence["gaps"])
     if unconsumed:
         samples = ", ".join(unconsumed[:GAP_PATH_SAMPLES])
         gaps.append(
@@ -1153,6 +1164,37 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             tree = _normalize_drf_serializers(tree, models, validations)
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("validation: " + str(error))
+    if persistence is not None:
+        lowered_schemas = {
+            value["validation"]["schema"]
+            for value in validations.values()
+            if value.get("validation", {}).get("kind") == "pydantic"
+        }
+        lowered_schema_files = {filename, *modules}
+        lowered_schemas.update(
+            model["name"]
+            for model in persistence["pydantic_models"]
+            if model["module"] in lowered_schema_files
+        )
+        lowered_models = {model["name"] for model in models}
+        requires_lowering = bool(
+            persistence["migrations"]
+            or persistence["repositories"]
+            or {
+                model["name"]
+                for model in persistence["pydantic_models"]
+            }
+            - lowered_schemas
+            or {
+                model["name"]
+                for model in persistence["sqlalchemy_models"]
+            }
+            - lowered_models
+        )
+        if requires_lowering:
+            gaps.append("persistence: captured contracts require Go lowering")
+        elif not persistence["gaps"]:
+            persistence = None
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     imports: set[str] = set()
     assignments: dict[str, ast.expr] = {}
@@ -1415,6 +1457,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         result["source_modules"] = modules
     if topology is not None:
         result["fastapi_topology"] = topology
+    if persistence is not None:
+        result["fastapi_persistence"] = persistence
     if config["database_layer"] == "pgx":
         result["models"] = models
         result["scope"] = (
