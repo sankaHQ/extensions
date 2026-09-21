@@ -9,6 +9,7 @@ import json
 import os
 import re
 import tempfile
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -32,6 +33,7 @@ from .replay import (
     _source_python,
     _write_source_files,
 )
+from .security import compare_headers, header_probe, security_cases, security_environment
 from .toolchain import ensure_go
 
 
@@ -128,6 +130,7 @@ with psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://',
             response = client.open(path, method=method, data=body, headers=headers, follow_redirects=False)
         else:
             response = client.request(method, path, content=body, headers=headers, follow_redirects=False)
+        observed_headers.append({key: response.headers.get(key, "") for key in header_names})
         raw = response.data if framework == 'flask' else response.content
         if response.status_code in (204, 205, 304) and raw:
             raise ValueError("bodyless response carries bytes")
@@ -278,6 +281,8 @@ def replay_writes(
         if scenario_bytes is not None
         else scenarios_for(root, captured)
     )
+    if captured.get("security"):
+        scenarios = validate_scenarios(cases_document(security_cases(scenarios)))
     target_url = os.environ.get("SANKA_GO_TARGET_TEST_DATABASE_URL", "")
     source_url = os.environ.get("SANKA_GO_SOURCE_TEST_DATABASE_URL", "")
     urls = [target_url] + ([source_url] if command == "verify" else [])
@@ -330,15 +335,18 @@ def replay_writes(
             "sanka_contract_probe_test.go",
             "sanka-cases.json",
             "sanka-observed.json",
+            "sanka-observed.headers.json",
             "sanka-fixture.json",
         ):
             if name in snapshot:
                 raise ValueError("candidate uses reserved replay filenames")
-        (candidate / "sanka_contract_probe_test.go").write_text(write_probe(captured))
+        (candidate / "sanka_contract_probe_test.go").write_text(
+            header_probe(write_probe(captured), captured)
+        )
         cases = candidate / "sanka-cases.json"
         cases.write_text(canonical(cases_document(scenarios)))
         executable, environment = ensure_go(root)
-        target_env = environment | {"DATABASE_URL": target_url}
+        target_env = environment | {"DATABASE_URL": target_url} | security_environment(captured)
         version = _run([executable, "version"], candidate, environment=environment).strip()
         # Compare actual connection identities before either fixture is reset.
         if command == "verify":
@@ -394,6 +402,7 @@ def replay_writes(
             "candidate": actual,
         }
         source_observed = None
+        source_headers = None
         if command == "verify":
             source = workspace / "source"
             source.mkdir()
@@ -415,8 +424,10 @@ def replay_writes(
                 ],
                 workspace,
                 timeout=60,
-                environment={"DATABASE_URL": source_url},
+                environment={"DATABASE_URL": source_url} | security_environment(captured),
             )
+            if captured.get("security"):
+                source_headers = json.loads(observed.with_suffix(".headers.json").read_text())
             source_observed = validate_observations(json.loads(observed.read_text()), scenarios)
             normalize_bodies(source_observed, captured)
             result["source"] = source_observed
@@ -425,6 +436,24 @@ def replay_writes(
                 "version": _run([str(source_python), "-I", "--version"], workspace).strip(),
             }
         result.update(compare(scenarios, actual, source_observed))
+        if captured.get("security"):
+            result["security_headers"] = compare_headers(
+                json.loads((candidate / "sanka-observed.headers.json").read_text()),
+                source_headers,
+                captured,
+                len(scenarios),
+            )
+            # Every denied request follows an observed request, including the first
+            # denial. Check each runtime independently, not just matching effects.
+            unchanged = all(
+                current["tables"] == previous["tables"]
+                and current["sequences"] == previous["sequences"]
+                for observations in (actual, source_observed or [])
+                for previous, current in pairwise(observations)
+                if current["status"] in (401, 403)
+            )
+            result["denied_writes_unchanged"] = unchanged
+            result["ok"] = result["ok"] and result["security_headers"]["ok"] and unchanged
         if (
             capture(root, config) != captured
             or _snapshot(output) != snapshot

@@ -12,6 +12,7 @@ from typing import Any
 from .capture import canonical
 from .database import render_database
 from .models import go_name
+from .security import render_security
 
 MODULES = {
     "fiber": "github.com/gofiber/fiber/v3",
@@ -415,6 +416,13 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             "    app.RedirectFixedPath = false"
         ),
     }[target]
+    if captured.get("security") and target in {"fiber", "gin"}:
+        setup += "\n    app.Use(securityMiddleware)"
+    returned = (
+        "securityMiddleware(app)"
+        if captured.get("security") and target in {"chi", "mux"}
+        else "app"
+    )
     return_type = "*fiber.App" if target == "fiber" else "http.Handler"
     http_import = "" if target == "fiber" else '"net/http"\n'
     database = has_reads or has_writes
@@ -461,7 +469,7 @@ func NewApp({arguments}) {return_type} {{
     {guard}
     {setup}
     {chr(10).join(registrations)}
-    return app
+    return {returned}
 }}
 {chr(10).join(helpers)}
 '''
@@ -494,6 +502,9 @@ func writeResponse(w http.ResponseWriter, status int, payload any) {
     if captured["configuration"]["database_layer"] == "pgx":
         result.update(render_database(captured))
     result.update(_runtime(target, database, captured["configuration"]["database_layer"] == "pgx"))
+    if captured.get("security"):
+        result["security.go"] = render_security(captured)
+        result[".env.example"] += "AUTH_READ_TOKEN=\nAUTH_WRITE_TOKEN=\n"
     if has_pagination:
         result["pagination.go"] = PAGINATION_SOURCE
     if has_pagination or any("filter" in route.get("read", {}) for route in captured["routes"]):

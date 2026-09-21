@@ -20,6 +20,7 @@ from .models import capture_models
 from .persistence import capture_fastapi_persistence
 from .queries import capture_read
 from .routing import normalize_routes, project_tree
+from .security import normalize_security
 from .topology import capture_fastapi_topology
 
 SOURCES = ("drf", "fastapi", "flask")
@@ -1157,8 +1158,10 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             gaps.append("models: " + str(error))
     lowered_repositories: set[tuple[str | None, str]] = set()
     application: dict[str, Any] = {}
+    security: dict[str, Any] = {}
     try:
         tree, application = normalize_application(tree, framework)
+        tree, security = normalize_security(tree, framework)
         if framework == "fastapi" and models:
             tree, lowered_repositories = normalize_async_persistence(tree)
         tree = normalize_routes(tree, framework)
@@ -1472,6 +1475,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
 
     if modules:
         result["source_modules"] = modules
+    if security:
+        result["security"] = security
     if application:
         result["application"] = application
     if topology is not None:

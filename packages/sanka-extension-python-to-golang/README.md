@@ -27,8 +27,39 @@ directory; output is `golang/` within that artifact directory.
 an entrypoint plus explicitly imported top-level Python modules (up to 32 files),
 and the selected models module for pgx. Unknown imports, decorators, configuration,
 request parameters, unsupported dynamic handlers, unreferenced Python modules, and
-source symlinks block generation. DRF endpoints require explicit public permission, no authentication,
-and JSON renderer declarations. Unsupported behavior blocks generation.
+source symlinks block generation. DRF endpoints require explicit public APIView permission,
+empty APIView authentication and JSON renderer declarations; the bounded security profile
+below wraps those views with an explicit access policy. Unsupported behavior blocks generation.
+
+### Explicit bearer middleware
+
+The converter recognizes a bounded environment-backed access policy in all three
+sources: FastAPI HTTP middleware, Flask `before_request` / `after_request`, or DRF
+`decorator_from_middleware` around every captured view. The exact supported source
+recipes are executable in [test_golang_security.py](tests/test_golang_security.py).
+They compare UTF-8 bearer bytes with `hmac.compare_digest`, explicitly trim space/tab
+around the Authorization value, and use separate `AUTH_READ_TOKEN` and
+`AUTH_WRITE_TOKEN` environment credentials. Missing, equal or non-ASCII credentials
+return 503; invalid or absent authorization returns 401 with `WWW-Authenticate:
+Bearer`; the reader credential cannot perform writes (403). Both credentials allow
+reads. Generated applications require operators to supply credentials; no credential
+values are captured or embedded in application defaults.
+
+Literal Cache-Control, X-Content-Type-Options, X-Frame-Options, Referrer-Policy and
+Strict-Transport-Security response assignments preserve framework hook order,
+including early denial behavior. No extra service/repository layers are added.
+JWT/OAuth, sessions, user identity/ownership permissions, arbitrary `Depends` policies,
+custom authentication code and unrecognized middleware still block generation.
+This profile does not qualify implicit HEAD/OPTIONS behavior or unmatched-path errors.
+
+Replay supplies synthetic credentials to isolated probe processes. For every existing
+scenario it runs the authorized writer case, absent and invalid authorization, and
+the reader case (403 on writes). Scenario files must omit Authorization; replay owns
+that header. It compares selected response headers through an extension-owned
+`sanka.go-security-headers/v1` sidecar without changing shared HTTP observation v1.
+Write verification compares rows and sequences after every request and checks that
+each denial leaves them unchanged. Source and candidate code execution still requires
+trusted fixtures; replay is not a security sandbox or production authorization audit.
 
 Generated Go dependencies and checksums are pinned in this package; Go 1.26.5 is
 the qualification toolchain. No Go dependencies are installed into Sanka's Python
@@ -36,7 +67,7 @@ environment. No services or repository interfaces are generated for these direct
 
 The current integration matrix compares successful JSON GET responses with the
 actual Python framework clients across all twelve source/target combinations.
-It does not establish default errors, HEAD/OPTIONS, redirects, middleware,
+It does not establish default errors, HEAD/OPTIONS, redirects, arbitrary middleware,
 content negotiation, deployment, or whole-backend parity.
 
 `test` runs Go tests and exercises every captured GET route in a temporary copy of
