@@ -49,7 +49,8 @@ and after replay and discard observations on drift.
 
 Resetting to the baseline is the extension's job: the generated target owns a
 migration tool (`migrate down` then `up`), and the source side recreates the
-captured tables from the captured `schema.sql` on a dedicated fixture database
+captured tables from `schema.sql` or its qualified native model definitions on a
+dedicated fixture database
 that the operator names explicitly (never an ambient `DATABASE_URL`).
 
 Bodyless response statuses must have no body. Framework-provided content types

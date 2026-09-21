@@ -186,9 +186,9 @@ import ("bytes"; "context"; "encoding/json"; "net/http/httptest"; "os"; "strings
 func TestSankaFixtureIdentity(t *testing.T) {
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second); defer cancel()
     pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL")); if err != nil { t.Fatal(err) }; defer pool.Close()
-    var server, database, schema string; var port int
-    if err := pool.QueryRow(ctx, "SELECT inet_server_addr()::text,inet_server_port(),current_database(),current_schema()").Scan(&server,&port,&database,&schema); err != nil { t.Fatal(err) }
-    data, err := json.Marshal([]any{server,port,database,schema}); if err != nil { t.Fatal(err) }
+    var started, database, schema string
+    if err := pool.QueryRow(ctx, "SELECT extract(epoch from pg_postmaster_start_time())::text,current_database(),current_schema()").Scan(&started,&database,&schema); err != nil { t.Fatal(err) }
+    data, err := json.Marshal([]any{started,database,schema}); if err != nil { t.Fatal(err) }
     if err := os.WriteFile("sanka-fixture.json", data, 0600); err != nil { t.Fatal(err) }
 }
 func TestSankaContractReplay(t *testing.T) {

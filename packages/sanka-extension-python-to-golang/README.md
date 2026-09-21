@@ -236,7 +236,8 @@ Requests run in order without TCP listeners. Responses, all captured table rows 
 sequence state are compared using the versioned shared observation contract. Bigint
 model values and sequence counters use decimal strings in observations. Source,
 candidate and scenario digests identify the evidence; source/candidate/scenario drift
-invalidates the run. The source Python environment can be selected with
+invalidates the run. Observation reports fail above 16 MiB rather than truncating
+evidence. The source Python environment can be selected with
 `SANKA_GO_SOURCE_PYTHON`, as for GET replay.
 
 Place an ordered `sanka-verify.json` in the source root to provide explicit scenarios:

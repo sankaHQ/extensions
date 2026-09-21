@@ -148,6 +148,18 @@ def test_public_write_verify(
             assert report["complete_backend"] is False
             # Replaying resets both populated fixtures, including identity state.
             if framework == "fastapi" and target == "fiber":
+                separator = "&" if "?" in target_url else "?"
+                alias = (
+                    target_url.replace("postgresql://", "postgresql+psycopg://", 1)
+                    + separator
+                    + "application_name=source-alias"
+                )
+                monkeypatch.setenv("SANKA_GO_SOURCE_TEST_DATABASE_URL", alias)
+                with pytest.raises(ValueError, match="same database schema"):
+                    replay(tmp_path, output, captured, "verify")
+                with psycopg.connect(target_url) as connection:
+                    assert connection.execute("SELECT count(*) FROM widgets").fetchone()[0] == 1
+                monkeypatch.setenv("SANKA_GO_SOURCE_TEST_DATABASE_URL", source_url)
                 repeated = replay(tmp_path, output, captured, "verify")
                 assert repeated["candidate"] == report["candidate"]
                 # Keep HTTP output identical while changing the persisted row.
