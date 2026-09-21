@@ -110,6 +110,129 @@ def injected_source(repository: str = "function") -> str:
     return ast.unparse(ast.fix_missing_locations(tree))
 
 
+def factory_source(repository: str = "class", annotation: str = "alias") -> str:
+    source = (
+        injected_source(repository)
+        .replace(
+            "import AsyncSession, create_async_engine",
+            "import AsyncSession, create_async_engine, async_sessionmaker",
+        )
+        .replace("async with AsyncSession(engine)", "async with sessions()")
+    )
+    source = source.replace(
+        "async def get_session():",
+        "sessions = async_sessionmaker(engine, expire_on_commit=False)\n\nasync def get_session():",
+    )
+    if annotation == "default":
+        return source
+    source = "from typing import Annotated\n" + source
+    dependency = "Annotated[AsyncSession, Depends(get_session)]"
+    if annotation == "alias":
+        source = source.replace("@app.post", f"SessionDep = {dependency}\n\n@app.post", 1)
+        dependency = "SessionDep"
+    return source.replace("session: AsyncSession=Depends(get_session)", f"session: {dependency}")
+
+
+@pytest.mark.parametrize("annotation", ["default", "inline", "alias"])
+@pytest.mark.parametrize("repository", ["direct", "function", "class"])
+def test_session_factory_and_annotations(tmp_path: Path, annotation: str, repository: str) -> None:
+    source = factory_source(repository, annotation)
+    sync = captured_source(tmp_path, "fastapi", text=native_fastapi_schema_source())
+    captured = captured_source(tmp_path, "fastapi", text=source)
+    assert captured["gaps"] == []
+    assert captured["routes"] == sync["routes"]
+    assert {k: v for k, v in render(captured).items() if k != "contract.json"} == {
+        k: v for k, v in render(sync).items() if k != "contract.json"
+    }
+    assert captured_source(tmp_path, "fastapi", text=source) == captured
+
+
+@pytest.mark.parametrize(
+    "before,after",
+    [
+        ("expire_on_commit=False", "expire_on_commit=custom()"),
+        ("expire_on_commit=False", "expire_on_commit=False, class_=CustomSession"),
+        ("sessions()", "sessions.begin()"),
+        ("sessions()", "sessions(bind=other_engine)"),
+        ("yield session", "yield session\n        await session.commit()"),
+        ("Depends(get_session)", "Depends(get_session, use_cache=False)"),
+        ("Depends(get_session)]", "Depends(get_session), custom()]"),
+        ("from typing import Annotated", "from counterfeit import Annotated"),
+        ("session: SessionDep", "session: SessionDep = Depends(get_session)"),
+        ("async def get_session():", "async def get_session(sessions=None):"),
+        (
+            "async def get_session():",
+            "sessions.configure(expire_on_commit=True)\nasync def get_session():",
+        ),
+    ],
+)
+def test_factory_and_annotation_changes_block(tmp_path: Path, before: str, after: str) -> None:
+    source = factory_source()
+    assert before in source
+    assert captured_source(tmp_path, "fastapi", text=source.replace(before, after))["gaps"]
+
+
+@pytest.mark.parametrize("policy", ["", ", expire_on_commit=True", ", expire_on_commit=False"])
+def test_owned_session_factory(tmp_path: Path, policy: str) -> None:
+    source = (
+        async_source(True)
+        .replace(
+            "import AsyncSession, create_async_engine",
+            "import AsyncSession, create_async_engine, async_sessionmaker",
+        )
+        .replace("async with AsyncSession(engine)", "async with sessions()")
+    )
+    # Helpers can precede the factory: their bodies run only when a request arrives.
+    source += f"\nsessions = async_sessionmaker(engine{policy})\n"
+    assert captured_source(tmp_path, "fastapi", text=source)["gaps"] == []
+
+
+def test_dependency_alias_must_precede_route(tmp_path: Path) -> None:
+    source = factory_source()
+    declaration = "SessionDep = Annotated[AsyncSession, Depends(get_session)]"
+    source = source.replace(declaration, "") + "\n" + declaration
+    assert captured_source(tmp_path, "fastapi", text=source)["gaps"]
+
+
+def test_dependency_alias_cannot_change_other_annotations(tmp_path: Path) -> None:
+    source = factory_source().replace("SessionDep", "int")
+    assert captured_source(tmp_path, "fastapi", text=source)["gaps"]
+
+
+def test_imported_session_factory_and_alias_are_hashed(tmp_path: Path) -> None:
+    tree = ast.parse(factory_source())
+    module = []
+    app = []
+    for node in tree.body:
+        if (
+            (
+                isinstance(node, ast.ImportFrom)
+                and node.module in {"typing", "os", "sqlalchemy.ext.asyncio", "sqlalchemy.pool"}
+            )
+            or (
+                isinstance(node, ast.Assign)
+                and ast.unparse(node.targets[0]) in {"engine", "sessions", "SessionDep"}
+            )
+            or (isinstance(node, ast.AsyncFunctionDef) and node.name == "get_session")
+        ):
+            module.append(node)
+        else:
+            app.append(node)
+    module.insert(0, ast.parse("from fastapi import Depends").body[0])
+    dependency = tmp_path / "database.py"
+    dependency.write_text(ast.unparse(ast.Module(body=module, type_ignores=[])))
+    app[:0] = ast.parse(
+        "from database import SessionDep\nfrom sqlalchemy.ext.asyncio import AsyncSession"
+    ).body
+    source = ast.unparse(ast.Module(body=app, type_ignores=[]))
+    captured = captured_source(tmp_path, "fastapi", text=source)
+    assert captured["gaps"] == []
+    dependency.write_text(dependency.read_text() + "\n# changed source\n")
+    changed = captured_source(tmp_path, "fastapi", text=source)
+    assert changed["gaps"] == []
+    assert captured != changed
+
+
 @pytest.mark.parametrize("target", TARGETS)
 @pytest.mark.parametrize("repository", ["direct", "function", "class"])
 def test_injected_sessions_reuse_crud(tmp_path: Path, target: str, repository: str) -> None:

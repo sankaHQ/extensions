@@ -135,6 +135,17 @@ Provider side effects, extra dependency options, inherited repositories, unconsu
 nested transactions and arbitrary orchestration remain unsupported. Commits must occur
 explicitly within the operation, never in dependency teardown.
 
+Session dependencies also accept `session: Annotated[AsyncSession, Depends(get_session)]`
+or a module-level alias of that exact annotation, imported from `typing`.
+The session parameter remains the last positional parameter. Dependency aliases must
+follow their provider declaration and precede their routes; extra metadata and
+default values remain blocked. Explicit imports from flat local modules are supported.
+An `async_sessionmaker(engine)` factory may replace `AsyncSession(engine)` scopes,
+optionally with a literal `expire_on_commit=True` or `False`. Only calls without
+arguments qualify; factory reconfiguration, custom session classes, bind overrides
+and automatic-commit `factory.begin()` scopes remain blocked. Existing explicit
+commit and refresh requirements still apply.
+
 Replay executes the original async Python source and awaits
 engine cleanup; normalization is used only for static contract checking.
 

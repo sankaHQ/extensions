@@ -7,6 +7,147 @@ import ast
 import copy
 
 
+def _session_declarations(tree: ast.Module) -> None:
+    """Resolve only static factories and Annotated dependencies into the existing recipe."""
+    imports = {
+        (node.module, alias.name, alias.asname, node.level)
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    annotated = ("typing", "Annotated", None, 0) in imports
+    factories = ("sqlalchemy.ext.asyncio", "async_sessionmaker", None, 0) in imports
+    aliases: dict[str, ast.expr] = {}
+    discarded: list[ast.stmt] = []
+    available: set[str] = set()
+    available_before: dict[int, set[str]] = {}
+    for node in tree.body:
+        available_before[id(node)] = available.copy()
+        if isinstance(node, ast.ImportFrom):
+            available.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            available.add(node.name)
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            value = node.value
+            if (
+                factories
+                and isinstance(value, ast.Call)
+                and ast.unparse(value.func) == "async_sessionmaker"
+            ):
+                if (
+                    ast.unparse(value)
+                    not in {
+                        "async_sessionmaker(engine)",
+                        "async_sessionmaker(engine, expire_on_commit=False)",
+                        "async_sessionmaker(engine, expire_on_commit=True)",
+                    }
+                    or not {"engine", "async_sessionmaker"} <= available
+                ):
+                    raise ValueError(
+                        "session factory requires engine and a literal expiration policy"
+                    )
+                references = {id(target)}
+                for scope in ast.walk(tree):
+                    if not isinstance(scope, ast.AsyncWith):
+                        continue
+                    for item in scope.items:
+                        call = item.context_expr
+                        if (
+                            isinstance(call, ast.Call)
+                            and isinstance(call.func, ast.Name)
+                            and call.func.id == target.id
+                            and not call.args
+                            and not call.keywords
+                        ):
+                            references.add(id(call.func))
+                            item.context_expr = ast.parse("AsyncSession(engine)", mode="eval").body
+                if len(references) == 1 or any(
+                    (
+                        isinstance(item, ast.Name)
+                        and item.id == target.id
+                        and id(item) not in references
+                    )
+                    or (isinstance(item, ast.arg) and item.arg == target.id)
+                    for item in ast.walk(tree)
+                ):
+                    raise ValueError("session factory must only create unmodified scoped sessions")
+                discarded.append(node)
+            elif (
+                annotated
+                and isinstance(value, ast.Subscript)
+                and ast.unparse(value.value) == "Annotated"
+            ):
+                if (
+                    not {item.id for item in ast.walk(value) if isinstance(item, ast.Name)}
+                    <= available
+                ):
+                    raise ValueError("dependency alias must follow its imports and provider")
+                aliases[target.id] = value
+                discarded.append(node)
+            available.add(target.id)
+    consumed: set[str] = set()
+    for node in tree.body:
+        if (
+            not isinstance(node, ast.AsyncFunctionDef)
+            or not node.decorator_list
+            or not node.args.args
+        ):
+            continue
+        arg = node.args.args[-1]
+        annotation = arg.annotation
+        alias = (
+            annotation.id if isinstance(annotation, ast.Name) and annotation.id in aliases else None
+        )
+        if (
+            (alias or isinstance(annotation, ast.Subscript))
+            and annotation is not None
+            and not {item.id for item in ast.walk(annotation) if isinstance(item, ast.Name)}
+            <= available_before[id(node)]
+        ):
+            raise ValueError("session annotation must follow its imports and dependency")
+        if alias:
+            annotation = aliases[alias]
+            consumed.add(alias)
+        if not (
+            annotated
+            and isinstance(annotation, ast.Subscript)
+            and ast.unparse(annotation.value) == "Annotated"
+        ):
+            continue
+        if (
+            arg.arg != "session"
+            or node.args.defaults
+            or not isinstance(annotation.slice, ast.Tuple)
+            or len(annotation.slice.elts) != 2
+            or ast.unparse(annotation.slice.elts[0]) != "AsyncSession"
+        ):
+            raise ValueError(
+                "session annotation requires exactly AsyncSession and Depends(provider)"
+            )
+        arg.annotation = ast.Name(id="AsyncSession", ctx=ast.Load())
+        node.args.defaults = [copy.deepcopy(annotation.slice.elts[1])]
+    if consumed != aliases.keys():
+        raise ValueError("unused dependency aliases require additional capture")
+    tree.body = [node for node in tree.body if node not in discarded]
+    if any(isinstance(node, ast.Name) and node.id in aliases for node in ast.walk(tree)):
+        raise ValueError("dependency aliases must only annotate qualified session parameters")
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            node.names = [
+                alias
+                for alias in node.names
+                if (node.module, alias.name, alias.asname, node.level)
+                not in {
+                    ("typing", "Annotated", None, 0),
+                    ("sqlalchemy.ext.asyncio", "async_sessionmaker", None, 0),
+                }
+            ]
+    tree.body = [node for node in tree.body if not isinstance(node, ast.ImportFrom) or node.names]
+
+
 def _inline_repository(helper: ast.AsyncFunctionDef, call: ast.Call, first: str) -> list[ast.stmt]:
     args = helper.args
     if (
@@ -202,6 +343,7 @@ def normalize_async_persistence(tree: ast.Module) -> tuple[ast.Module, set[tuple
             if symbol in declared:
                 raise ValueError("async persistence symbols must not be reassigned")
             declared.add(symbol)
+    _session_declarations(tree)
     lowered = _injected_sessions(tree)
     imports = [node for node in tree.body if isinstance(node, ast.ImportFrom)]
     names = {
