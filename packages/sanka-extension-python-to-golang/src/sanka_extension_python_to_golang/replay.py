@@ -16,6 +16,7 @@ from urllib.parse import urlencode, urlsplit
 
 from .capture import canonical, capture, digest
 from .render import render
+from .security import compare_headers, header_probe, security_cases, security_environment
 from .toolchain import ensure_go
 
 SOURCE_PROBE = """
@@ -64,13 +65,21 @@ elif framework == "fastapi":
 else:
     client = module.app.test_client()
 observed = []
-for path in json.loads(routes):
-    response = client.get(path, follow_redirects=False)
+observed_headers = []
+header_names = json.loads(os.environ.get("SANKA_GO_REPLAY_HEADERS", "[]"))
+for case in json.loads(routes):
+    path = case if isinstance(case, str) else case["path"]
+    response = client.get(path,
+        headers={} if isinstance(case, str) else case.get("headers", {}), follow_redirects=False)
+    observed_headers.append({key: response.headers.get(key, "") for key in header_names})
     body = response.data if framework == "flask" else response.content
     observed.append({"path": path, "status": response.status_code,
         "media_type": response.headers.get("Content-Type", "").split(";")[0],
         "body": json.loads(body)})
 Path(destination).write_text(json.dumps(observed, allow_nan=False))
+if header_names:
+    Path(destination).with_suffix(".headers.json").write_text(json.dumps(
+        {"schema": "sanka.go-security-headers/v1", "responses": observed_headers}))
 if use_database == "1":
     if framework == "drf":
         from django.db import connections
@@ -128,7 +137,7 @@ def _run(
         raise ValueError(f"replay process failed: {error}") from error
     if result.returncode:
         details = (result.stdout + result.stderr)[-4000:]
-        if environment and "DATABASE_URL" in environment:
+        if environment and ("DATABASE_URL" in environment or "AUTH_READ_TOKEN" in environment):
             # Database exceptions may quote credentials or connection parameters.
             details = "database replay failed (subprocess output withheld)"
         raise ValueError("replay process failed: " + details)
@@ -159,7 +168,12 @@ def _source_python() -> str:
     return str(executable)
 
 
-def _probe(target: str, paths: list[str], database: bool = False) -> str:
+def _probe(
+    target: str,
+    paths: list[str],
+    database: bool = False,
+    request_headers: list[dict[str, str]] | None = None,
+) -> str:
     request = (
         """response, err := app.Test(request)
         if err != nil { t.Fatal(err) }
@@ -168,10 +182,10 @@ def _probe(target: str, paths: list[str], database: bool = False) -> str:
         response.Body.Close()
         if err != nil { t.Fatal(err) }"""
         if target == "fiber"
-        else """recorder := httptest.NewRecorder()
-        app.ServeHTTP(recorder, request)
-        status, mediaType := recorder.Code, recorder.Header().Get("Content-Type")
-        body := recorder.Body.Bytes()"""
+        else """response := httptest.NewRecorder()
+        app.ServeHTTP(response, request)
+        status, mediaType := response.Code, response.Header().Get("Content-Type")
+        body := response.Body.Bytes()"""
     )
     io_import = '"io"' if target == "fiber" else ""
     setup = "app := NewApp()"
@@ -185,6 +199,7 @@ def _probe(target: str, paths: list[str], database: bool = False) -> str:
     defer pool.Close()
     if err := pool.Ping(ctx); err != nil { t.Fatal("test database unavailable") }
     app := NewApp(pool)"""
+    serialized_headers = canonical(request_headers or [{} for _ in paths])
     return f"""package backend
 import ("testing"; "net/http/httptest"; "encoding/json"; "os"; "strings";
 {database_import} {io_import})
@@ -192,8 +207,12 @@ func TestSankaContractReplay(t *testing.T) {{
     {setup}
     paths := []string{{{",".join(canonical(path) for path in paths)}}}
     observed := []map[string]any{{}}
-    for _, path := range paths {{
+    var requestHeaders []map[string]string
+    if err := json.Unmarshal([]byte({canonical(serialized_headers)}), &requestHeaders);
+        err != nil {{ t.Fatal(err) }}
+    for index, path := range paths {{
         request := httptest.NewRequest("GET", path, nil)
+        for key, value := range requestHeaders[index] {{ request.Header.Set(key,value) }}
         {request}
         if len(body) > 1048576 || !json.Valid(body) {{
             t.Fatal("invalid or oversized JSON response")
@@ -330,6 +349,8 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
                 )
         target_environment = {"DATABASE_URL": target_url}
         source_environment = {"DATABASE_URL": source_url}
+    source_environment.update(security_environment(captured))
+    target_environment.update(security_environment(captured))
     expected_files = render(captured)
     for name in ("go.mod", "go.sum", "contract.json"):
         if snapshot.get(name) != expected_files[name].encode():
@@ -358,6 +379,12 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             "offset=2147483648",
         )
     )
+    requests: list[dict[str, Any]] = [{"path": path} for path, _ in cases]
+    if captured.get("security"):
+        requests = security_cases(
+            [{"path": path, "method": "GET", "expected_status": status} for path, status in cases]
+        )
+        cases = [(case["path"], case["expected_status"]) for case in requests]
     paths = [path for path, _ in cases]
     with tempfile.TemporaryDirectory(prefix="sanka-go-replay-") as temporary:
         workspace = Path(temporary)
@@ -372,11 +399,20 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             for name in (
                 "sanka_contract_probe_test.go",
                 "sanka-observed.json",
+                "sanka-observed.headers.json",
             )
         ):
             raise ValueError("candidate uses reserved replay filenames")
         (candidate / "sanka_contract_probe_test.go").write_text(
-            _probe(config["target_framework"], paths, database)
+            header_probe(
+                _probe(
+                    config["target_framework"],
+                    paths,
+                    database,
+                    [case.get("headers", {}) for case in requests],
+                ),
+                captured,
+            )
         )
         executable, go_environment = ensure_go(root)
         target_environment.update(go_environment)
@@ -408,6 +444,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
                 for item, (path, status) in zip(actual, cases, strict=True)
             ),
         }
+        source_headers = None
         if command == "verify":
             # Execute the exact captured source snapshot, not an import through PYTHONPATH.
             source_directory = workspace / "source"
@@ -429,7 +466,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
                     _client_lifecycle(SOURCE_PROBE),
                     config["source_framework"],
                     str(source),
-                    canonical(paths),
+                    canonical(requests),
                     str(observed),
                     model_file,
                     "1" if database else "0",
@@ -442,10 +479,20 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
                 "executable": source_python,
                 "version": _run([str(source_python), "-I", "--version"], workspace).strip(),
             }
+            if captured.get("security"):
+                source_headers = json.loads(observed.with_suffix(".headers.json").read_text())
             expected = json.loads(observed.read_text())
             result.update(
                 source=expected, ok=result["ok"] and canonical(actual) == canonical(expected)
             )
+        if captured.get("security"):
+            result["security_headers"] = compare_headers(
+                json.loads((candidate / "sanka-observed.headers.json").read_text()),
+                source_headers,
+                captured,
+                len(cases),
+            )
+            result["ok"] = result["ok"] and result["security_headers"]["ok"]
         if database:
             result["database_scope"] = (
                 "read-only GET responses against explicitly supplied fixtures; "
