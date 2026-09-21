@@ -123,17 +123,13 @@ def prepare_write_fixture(root: Path, framework: str, target: str) -> tuple[Path
     return output, captured
 
 
-def test_write_fixture_capture_is_stable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_write_fixture_capture_is_stable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     output, captured = prepare_write_fixture(tmp_path, "fastapi", "fiber")
     assert capture(tmp_path, captured["configuration"]) == captured
     scenarios = json.loads((tmp_path / "sanka-verify.json").read_text())
     scenarios["scenarios"][0]["id"] = "changed-after-capture"
     (tmp_path / "sanka-verify.json").write_text(json.dumps(scenarios))
-    monkeypatch.setenv(
-        "SANKA_GO_TARGET_TEST_DATABASE_URL", "postgresql://fixture@localhost/target"
-    )
+    monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", "postgresql://fixture@localhost/target")
     with pytest.raises(ValueError, match="source changed before replay"):
         replay(tmp_path, output, captured, "test")
 
