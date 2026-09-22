@@ -15,7 +15,7 @@ from textwrap import indent
 from typing import Any
 
 from .application import normalize_application
-from .async_persistence import normalize_async_persistence
+from .async_persistence import normalize_async_persistence, normalize_workflow_calls
 from .models import capture_models
 from .persistence import capture_fastapi_persistence
 from .queries import capture_read
@@ -1522,11 +1522,13 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     security: dict[str, Any] = {}
     try:
         tree, application = normalize_application(tree, framework)
+        tree, lowered_repositories = normalize_workflow_calls(tree)
         tree, security = normalize_security(tree, framework)
         if framework == "drf" and security.get("native"):
             allowed_imports["rest_framework.permissions"].add("IsAuthenticated")
         if framework == "fastapi" and models:
-            tree, lowered_repositories = normalize_async_persistence(tree)
+            tree, async_repositories = normalize_async_persistence(tree)
+            lowered_repositories |= async_repositories
         tree = normalize_routes(tree, framework)
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("routing: " + str(error))
@@ -1592,11 +1594,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         try:
             transaction = _transaction_write(candidate, framework, models)
             if transaction is not None:
-                if (
-                    candidate.name not in integrity_handlers
-                    or candidate.name in row_scopes
-                    or candidate.name in validations
-                ):
+                if candidate.name not in integrity_handlers or candidate.name in validations:
                     raise ValueError(
                         "transactions require an outer integrity handler "
                         "and explicit nested validation"

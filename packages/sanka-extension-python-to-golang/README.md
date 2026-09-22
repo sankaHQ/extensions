@@ -447,8 +447,8 @@ three Python sources and four Go targets. PostgreSQL cases require the documente
 isolated fixture and run in CI; local compilation alone does not prove parity.
 
 Nested transactions, conditional workflows beyond the explicit missing-record guard
-and partial-field assignments, async business transactions, custom service calls,
-row-scoped transaction authorization, and external effects still block capture.
+and partial-field assignments, arbitrary service calls, and external effects still block capture. The bounded async,
+service delegation and row-policy profiles below extend this contract.
 SQLAlchemy lookups of a previously loaded model after an intervening deletion also
 block capture until its identity-map behavior is modeled, including cascading and
 SET NULL deletion effects. A model or module binding cannot shadow `LookupError`. No service/repository scaffolding is added for inline source orchestration.
@@ -860,3 +860,40 @@ compares HTTP responses, headers, all captured tables and sequences on isolated
 PostgreSQL fixtures. A candidate that lets a write escape the transaction must fail
 verification. These fixture results do not qualify arbitrary application workflows
 or concurrent writers, triggers and model hooks outside the captured profile.
+
+### Business workflows through services
+
+Explicit transaction handlers may delegate through plain local service and repository
+functions, including imported modules. Each wrapper must return the next function
+with the same complete positional parameter list; async callers must await async helpers.
+The terminal function owns the complete qualified validation, transaction, exception
+mapping and response snapshot. Calls must be acyclic and at most eight functions deep.
+Defaults, rebinding, arbitrary per-operation helper calls, extra side effects and
+custom workflow classes remain unsupported. Static expansion preserves the source
+module hashes and deterministic generated architecture; replay executes the original
+modules. No additional service or repository interfaces are generated for delegation alone.
+
+FastAPI supports the same mixed operations inside an explicit
+`async with AsyncSession(engine)` and `async with session.begin()` pair.
+`get`, `delete` and `flush` must be awaited; `add` is synchronous. The existing
+pinned async engine/factory contract applies. Missing-row exceptions escape the
+transaction before the outer 404 response, and response snapshots precede commit.
+Nested transactions, concurrent writers, implicit commits and external effects
+remain outside this profile.
+
+Native signed-token transactions can scope every step to verified tenant or subject
+claims through explicit missing-or-inaccessible guards. Create/update input guards
+must precede the transaction, and update body policies must match row policies.
+Generated lookups and mutations bind identity as SQL parameters; ownership-changing
+inputs return 403 before persistence. Foreign keys in scoped writes must reference
+an earlier scoped record rather than accept an unchecked relationship ID.
+
+The service-workflow fixture exercises a multi-module project through all five
+extension lifecycle commands, including async FastAPI, across all four Go targets.
+A separate PostgreSQL matrix checks tenant denial, mixed-write rollback, partial
+null/absent behavior and recovery. Cross-identity probes run before successful
+mutations. Additional row-denial probes require the changed claim to guard an
+input-key lookup of an existing record; lookups of newly created records do not
+imply denial. Rolled-back creates may advance sequences; verification compares those
+values between source and target and requires unchanged rows after 404/409.
+These are bounded fixture contracts, not general business-logic or cutover qualification.
