@@ -364,8 +364,6 @@ def test_native_values_postgres_replay(
     import os
     import uuid
 
-    if os.getenv("SANKA_GO_TESTS") != "1" or not os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN"):
-        pytest.skip("requires explicitly configured PostgreSQL fixtures and Go")
     import psycopg
     from psycopg import sql
     from sanka_extension_python_to_golang.adapter import handle
@@ -380,7 +378,6 @@ def test_native_values_postgres_replay(
     if asynchronous:
         source_text = injected_source("class", source_text)
     models = (tmp_path / "models.py").read_text()
-    output = generate(tmp_path, framework, target, app_source=source_text, model_text=models)
     body = {
         "name": "12345678-1234-5678-9ABC-123456789ABC",
         "count": "12345678901234567890.1234",
@@ -455,6 +452,11 @@ def test_native_values_postgres_replay(
         },
     ]
     (tmp_path / "sanka-verify.json").write_text(json.dumps({"scenarios": scenarios}))
+    output = generate(tmp_path, framework, target, app_source=source_text, model_text=models)
+    planned = json.loads((tmp_path / ".sanka/go/plan.json").read_text())["capture"]
+    assert capture(tmp_path, planned["configuration"]) == planned
+    if os.getenv("SANKA_GO_TESTS") != "1" or not os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN"):
+        pytest.skip("requires explicitly configured PostgreSQL fixtures and Go")
     dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
     schemas = ["native_values_" + uuid.uuid4().hex for _ in range(2)]
     with psycopg.connect(dsn, autocommit=True) as admin:
