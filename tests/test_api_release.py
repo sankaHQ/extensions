@@ -74,3 +74,21 @@ def test_publication_requires_landed_tag_and_both_consumer_jobs() -> None:
 
 def test_full_catalog_keeps_existing_packages() -> None:
     assert json.loads((ROOT / "marketplace.json").read_text()) == CATALOG
+
+
+def test_release_gates_packaged_go_database_cli_corpus() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/api-release.yml").read_text())
+    job = workflow["jobs"]["qualify"]
+    assert "postgres" in job["services"]
+    step = next(
+        step
+        for step in job["steps"]
+        if step.get("name") == "Qualify packaged Go backends through the installed CLI"
+    )
+    assert step["if"] == "matrix.target == 'go'"
+    assert step["env"]["SANKA_GO_CLI_TESTS"] == "1"
+    assert "test_golang_cli.py" in step["run"]
+    assert any(
+        "go-project-acceptance.json" in str(step.get("with", {}).get("path", ""))
+        for step in job["steps"]
+    )

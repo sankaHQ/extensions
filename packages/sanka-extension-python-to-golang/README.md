@@ -991,7 +991,7 @@ The native profile requires the existing explicit response projection and stable
 validation error handler. Native DRF handlers must read `validated_data` after validation;
 mixing raw request values with coerced fields remains a capture gap. Custom validators,
 decimal contexts, aliases, rounding
-policies, and native date/time/JSON request schemas remain capture gaps. Existing
+policies and custom native field hooks remain capture gaps. Existing
 explicit wire-validation profiles remain supported. The generated native helpers
 use Go's standard library and are emitted only for native rich-field contracts.
 
@@ -1026,3 +1026,34 @@ qualification. `test` executes the Go candidate; `verify` also compares the
 captured Python source. PostgreSQL write verification additionally compares rows
 and sequences in independent resettable fixture schemas. Neither command marks
 arbitrary application behavior or production deployment as qualified.
+
+
+## Native dates, timestamps and JSON
+
+The native DRF serializer profile additionally accepts `DateField(input_formats=['iso-8601'])`,
+`DateTimeField(input_formats=['iso-8601'], default_timezone=timezone.utc)`, and `JSONField`.
+The explicit UTC policy avoids guessing the application's active Django timezone.
+The FastAPI profile accepts `date`, Pydantic `AwareDatetime`, and `JsonValue` on flat
+request models. Nullable fields and partial schemas retain the existing presence contract.
+These declarations use the same stable error handlers and explicit response projections
+as the other qualified native fields; custom formats, timezone policies, validators,
+serializers and typed nested request models remain capture gaps.
+
+Generated parsers retain source-specific calendar/week-date acceptance, numeric timestamp
+coercion, microsecond truncation/rounding and timezone offsets. Dates remain calendar
+values; persisted timestamp responses use the captured UTC microsecond projection.
+Native JSON supports finite fractional numbers and arbitrary-precision integers in
+nested objects/arrays. SQLAlchemy `none_as_null` and Django SQL NULL retain their
+captured storage semantics, independently of JSON null. This does not widen the existing
+explicit strict JSON validator's integer-only contract.
+
+The release qualification job installs the candidate wheels through the pinned public
+CLI marketplace, then runs packaged DRF, Flask, synchronous FastAPI and injected async
+FastAPI projects against Fiber, chi, mux and Gin. It checks all five CLI commands,
+repeated-plan hashes, rejected unreviewed apply, generated-file hashes, source preservation,
+and ordered HTTP/database observations for invalid input, create, PATCH, replacement,
+delete and recreation. The retained `go-project-acceptance.json` records each source/target
+pair and its evidence. The CLI fixture explicitly supplies both `--to` and
+`target_framework`; it does not claim that older CLI versions forward `--to` automatically.
+The marketplace listener and disposable PostgreSQL schemas run only in the explicitly
+enabled qualification job. No original source tests or production application are executed.

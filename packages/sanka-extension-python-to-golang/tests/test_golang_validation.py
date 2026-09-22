@@ -461,14 +461,16 @@ func TestSchemaParity(t *testing.T) {
     if err := json.Unmarshal(data, &cases); err != nil { t.Fatal(err) }
     for _, c := range cases {
         item, seen, err := decodeWidget([]byte(c.Body), c.Partial)
-        if (err == nil) != c.Valid { t.Fatalf("partial=%v %s: %v", c.Partial, c.Body, err) }
+        if (err == nil) != c.Valid {
+            t.Errorf("partial=%v %s: %v", c.Partial, c.Body, err); continue
+        }
         if err != nil { continue }
         encoded, err := json.Marshal(item); if err != nil { t.Fatal(err) }
         var actual map[string]any
         if err := json.Unmarshal(encoded, &actual); err != nil { t.Fatal(err) }
         for key := range actual { if !seen[key] { delete(actual, key) } }
         if !reflect.DeepEqual(actual, c.Expected) {
-            t.Fatalf("%s: got %#v want %#v", c.Body, actual, c.Expected)
+            t.Errorf("%s: got %#v want %#v", c.Body, actual, c.Expected)
         }
     }
 }

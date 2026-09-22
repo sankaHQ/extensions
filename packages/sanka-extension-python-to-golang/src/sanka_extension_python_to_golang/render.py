@@ -1077,6 +1077,9 @@ def _write_helper(
                 "bool": "bool",
                 "UUIDValue": "UUIDValue",
                 "DecimalValue": "DecimalValue",
+                "DateValue": "DateValue",
+                "TimestampValue": "TimestampValue",
+                "JSONValue": "JSONValue",
             }[field["go_type"]]
             if validation_kind == "pydantic":
                 conversion = {
@@ -1085,6 +1088,9 @@ def _write_helper(
                     "int64": "value, err := pydanticInt(raw, 64)",
                     "bool": "value, err := pydanticBool(raw)",
                     "UUIDValue": "value, err := nativeUUID(raw, false)",
+                    "DateValue": "value, err := nativeDate(raw, false)",
+                    "TimestampValue": "value, err := nativeTimestamp(raw, false)",
+                    "JSONValue": "value, err := nativeJSON(raw)",
                     "DecimalValue": "",
                 }[field["go_type"]]
             else:
@@ -1094,6 +1100,9 @@ def _write_helper(
                     "int64": "value, err := drfInt(raw, 64)",
                     "bool": "value, err := drfBool(raw)",
                     "UUIDValue": "value, err := nativeUUID(raw, true)",
+                    "DateValue": "value, err := nativeDate(raw, true)",
+                    "TimestampValue": "value, err := nativeTimestamp(raw, true)",
+                    "JSONValue": "value, err := nativeJSON(raw)",
                     "DecimalValue": "",
                 }[field["go_type"]]
             if field["go_type"] == "DecimalValue":
@@ -1118,6 +1127,14 @@ def _write_helper(
         {target} = {value_type}(value)"""
                 if field["go_type"] == "int32":
                     code = code.replace(f"{target} = int32(value)", f"{target} = value")
+                if field["go_type"] == "JSONValue" and validation_kind == "pydantic":
+                    code = code.replace(
+                        'if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) { return item, nil, errInvalidWrite }',
+                        "",
+                    )
+                    if field["none_as_null"]:
+                        code += f'\n        if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {{ {target} = nil }}'
+
             decoding.append(
                 f"""if raw, ok := values[{name}]; ok {{
         {code}
@@ -1160,8 +1177,10 @@ def _write_helper(
                     null_guard = ""
             value = ("*" if field["nullable"] else "") + target
             guard = f"seen[{name}]" + (f" && {target} != nil" if field["nullable"] else "")
+            if not field["nullable"] and field["none_as_null"] and validation_kind == "pydantic":
+                guard += f" && {target} != nil"
             decoding.append(
-                f"if {guard} && !validJSON({value}) {{ return item, nil, errInvalidWrite }}"
+                f"if {guard} && !{'json.Valid' if validation_kind in {'pydantic', 'drf'} else 'validJSON'}({value}) {{ return item, nil, errInvalidWrite }}"
             )
     custom_constraints = write.get("constraints", {})
     constraints = dict(custom_constraints)

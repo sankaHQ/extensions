@@ -148,7 +148,159 @@ func (v *DecimalValue) ScanNumeric(value pgtype.Numeric) error {
 GO_NATIVE_VALUES = r"""// SPDX-License-Identifier: Apache-2.0
 package backend
 
-import ("bytes"; "encoding/json"; "fmt"; "math"; "math/big"; "regexp"; "strconv"; "strings"; "unicode")
+import ("bytes"; "encoding/json"; "fmt"; "math"; "math/big"; "regexp"; "strconv"; "strings"; "unicode"; "time"; "unicode/utf8")
+
+
+// Native temporal input follows each source parser. Storage stays UTC/microsecond.
+var nativeCalendar = regexp.MustCompile(`^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})$`)
+var nativeWeek = regexp.MustCompile(`^([0-9]{4})-?W([0-9]{2})(?:-?([1-7]))?$`)
+func calendarDate(text string, drf bool) (time.Time, error) {
+    invalid := fmt.Errorf("invalid date")
+    if drf {
+        if m := nativeWeek.FindStringSubmatch(text); m != nil && nativeISODate.MatchString(text) {
+            year, _ := strconv.Atoi(m[1]); week, _ := strconv.Atoi(m[2]); day := 1
+            if m[3] != "" { day, _ = strconv.Atoi(m[3]) }
+            jan := time.Date(year, 1, 4, 0, 0, 0, 0, time.UTC)
+            monday := (int(jan.Weekday()) + 6) % 7
+            result := jan.AddDate(0, 0, -monday + (week-1)*7 + day-1)
+            y, w := result.ISOWeek()
+            if year < 1 || y != year || w != week || result.Year() > 9999 { return time.Time{}, invalid }
+            return result, nil
+        }
+        if len(text) == 8 && !strings.Contains(text, "-") { text = text[:4] + "-" + text[4:6] + "-" + text[6:] }
+    }
+    if drf { text = strings.Map(decimalDigit, strings.TrimSuffix(text, "\n")) }
+    m := nativeCalendar.FindStringSubmatch(text)
+    if m == nil || (!drf && (len(m[2]) != 2 || len(m[3]) != 2)) { return time.Time{}, invalid }
+    year, _ := strconv.Atoi(m[1]); month, _ := strconv.Atoi(m[2]); day, _ := strconv.Atoi(m[3])
+    result := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+    if year < 1 || result.Year() != year || int(result.Month()) != month || result.Day() != day { return time.Time{}, invalid }
+    return result, nil
+}
+var nativeClock = regexp.MustCompile(`^([0-9]{2})(?::?([0-9]{2}))?(?::?([0-9]{2}))?(?:[.,]([0-9]+))?$`)
+var nativeZone = regexp.MustCompile(`^([+-])([0-9]{2})(?::?([0-9]{2}))?(?::?([0-9]{2}))?(?:[.,]([0-9]+))?$`)
+var nativeISODate = regexp.MustCompile(`^[0-9]{4}(?:-[0-9]{2}-[0-9]{2}|[0-9]{4}|-W[0-9]{2}(?:-[1-7])?|W[0-9]{2}[1-7]?)$`)
+var nativeDjangoTime = regexp.MustCompile(`^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})[T ]([0-9]{1,2}):([0-9]{1,2})(?::([0-9]{1,2})(?:[.,]([0-9]{1,12}))?)?\s*(Z|[+-][0-9]{2}(?::?[0-9]{2})?)?$`)
+var nativeEpoch = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$`)
+func temporalTime(raw []byte, drf, allowNaive bool) (time.Time, error) {
+    invalid := fmt.Errorf("invalid timestamp")
+    var text string
+    stringInput := json.Unmarshal(raw, &text) == nil
+    if !stringInput { text = string(bytes.TrimSpace(raw)) }
+    if !drf && (nativeEpoch.MatchString(text) || (!stringInput && len(text) > 0 && (text[0] == '-' || (text[0] >= '0' && text[0] <= '9')))) {
+        number, err := strconv.ParseFloat(text, 64)
+        if err != nil || math.IsInf(number, 0) { return time.Time{}, invalid }
+        seconds := math.Floor(number)
+        fraction := math.Abs(number - math.Trunc(number))
+        if stringInput {
+            if math.Abs(number) > 20000000000 { number /= 1000 }
+            seconds = math.Floor(number); fraction = number - seconds
+        } else {
+            originalSeconds := seconds
+            if math.Abs(seconds) > 20000000000 {
+                seconds = math.Floor(seconds/1000)
+                fraction = (originalSeconds-seconds*1000)/1000 + fraction/1000
+            } else if math.Abs(number) > 20000000000 { fraction /= 1000 }
+        }
+        if seconds < -62135596800 || seconds > 253402300799 { return time.Time{}, invalid }
+        result := time.Unix(int64(seconds), int64(math.Round(fraction*1e6))*1000).UTC()
+        if result.Year() < 1 || result.Year() > 9999 { return time.Time{}, invalid }
+        return result, nil
+    }
+    if !stringInput { return time.Time{}, invalid }
+    if drf {
+        if day, err := calendarDate(text, true); err == nil { return day, nil }
+    }
+    if drf {
+        fallback := strings.Map(decimalDigit, strings.TrimSuffix(text, "\n"))
+        if m := nativeDjangoTime.FindStringSubmatch(fallback); m != nil {
+            nums := make([]int, 6)
+            for i := range nums { nums[i], _ = strconv.Atoi(m[i+1]) }
+            fraction := ""
+            if m[7] != "" { fraction = "." + m[7] }
+            text = fmt.Sprintf("%04d-%02d-%02dT%02d:%02d:%02d%s%s", nums[0], nums[1], nums[2], nums[3], nums[4], nums[5], fraction, m[8])
+        }
+    }
+    var day time.Time
+    clock := ""
+    // A date portion can be calendar/basic/week form in the DRF ISO parser.
+    for _, size := range []int{10, 8, 7} {
+        if len(text) <= size { continue }
+        if drf && !nativeISODate.MatchString(text[:size]) { continue }
+        candidate, err := calendarDate(text[:size], drf)
+        if err != nil { continue }
+        sep, width := utf8.DecodeRuneInString(text[size:])
+        if !drf && sep != 'T' && sep != 't' && sep != ' ' && sep != '_' { continue }
+        day, clock = candidate, text[size+width:]; break
+    }
+    if clock == "" { return time.Time{}, invalid }
+    zone := time.UTC
+    zoneFraction := 0
+    zoneText := ""
+    if strings.HasSuffix(clock, "Z") || (!drf && strings.HasSuffix(clock, "z")) {
+        zoneText = "Z"; clock = clock[:len(clock)-1]
+    } else if at := strings.IndexAny(clock, "+-"); at >= 0 {
+        zoneText, clock = clock[at:], clock[:at]
+    }
+    if zoneText == "" && !drf && !allowNaive { return time.Time{}, invalid }
+    if zoneText != "" && zoneText != "Z" {
+        m := nativeZone.FindStringSubmatch(zoneText)
+        if m == nil || (!drf && (m[3] == "" || m[4] != "" || m[5] != "")) { return time.Time{}, invalid }
+        hour, _ := strconv.Atoi(m[2]); minute, _ := strconv.Atoi(m[3]); second, _ := strconv.Atoi(m[4])
+        offset := hour*3600 + minute*60 + second
+        if offset >= 86400 || (!drf && (hour > 23 || minute > 59)) { return time.Time{}, invalid }
+        if strings.Contains(zoneText, ":") && ((m[4] != "" && strings.Count(zoneText, ":") != 2) || (m[4] == "" && strings.Count(zoneText, ":") != 1)) { return time.Time{}, invalid }
+        if m[5] != "" && offset != 0 { fraction := m[5] + "000000"; zoneFraction, _ = strconv.Atoi(fraction[:6]) }
+        if m[1] == "-" { offset = -offset; zoneFraction = -zoneFraction }
+        zone = time.FixedZone("", offset)
+    }
+    m := nativeClock.FindStringSubmatch(clock)
+    if m == nil || (!drf && (m[2] == "" || !strings.Contains(clock, ":"))) { return time.Time{}, invalid }
+    if strings.Contains(clock, ":") && ((m[3] != "" && strings.Count(clock, ":") != 2) || (m[3] == "" && strings.Count(clock, ":") != 1)) { return time.Time{}, invalid }
+    if !drf && m[4] != "" && m[3] == "" { return time.Time{}, invalid }
+    hour, _ := strconv.Atoi(m[1]); minute, _ := strconv.Atoi(m[2]); second, _ := strconv.Atoi(m[3])
+    if hour > 23 || minute > 59 || second > 59 { return time.Time{}, invalid }
+    fraction := m[4] + "000000"; micros, _ := strconv.Atoi(fraction[:6])
+    result := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, second, micros*1000, zone).Add(-time.Duration(zoneFraction)*time.Microsecond)
+    if result.UTC().Year() < 1 || result.UTC().Year() > 9999 { return time.Time{}, invalid }
+    return result, nil
+}
+func nativeTimestamp(raw []byte, drf bool) (TimestampValue, error) {
+    value, err := temporalTime(raw, drf, false)
+    if err != nil { return "", err }
+    return TimestampValue(value.UTC().Format(timestampLayout)), nil
+}
+func nativeDate(raw []byte, drf bool) (DateValue, error) {
+    var text string
+    if json.Unmarshal(raw, &text) == nil {
+        if value, err := calendarDate(text, drf); err == nil { return DateValue(value.Format("2006-01-02")), nil }
+    }
+    if !drf {
+        value, err := temporalTime(raw, false, true)
+        if err == nil && value.Hour() == 0 && value.Minute() == 0 && value.Second() == 0 && value.Nanosecond() == 0 { return DateValue(value.Format("2006-01-02")), nil }
+    }
+    return "", fmt.Errorf("invalid date")
+}
+func nativeJSON(raw []byte) (JSONValue, error) {
+    // Preserve arbitrary integer precision; JSON fractional values use Python's float64 input.
+    decoder := json.NewDecoder(bytes.NewReader(raw)); decoder.UseNumber()
+    var value any
+    if err := decoder.Decode(&value); err != nil { return nil, err }
+    var convert func(any) (any, error)
+    convert = func(item any) (any, error) {
+        switch v := item.(type) {
+        case json.Number:
+            if strings.ContainsAny(string(v), ".eE") { return strconv.ParseFloat(string(v), 64) }
+        case []any:
+            for i := range v { child, err := convert(v[i]); if err != nil { return nil, err }; v[i] = child }
+        case map[string]any:
+            for k := range v { child, err := convert(v[k]); if err != nil { return nil, err }; v[k] = child }
+        }
+        return item, nil
+    }
+    value, err := convert(value); if err != nil { return nil, err }
+    return json.Marshal(value)
+}
 
 func decimalDigit(char rune) rune {
     if char < 128 { return char }
