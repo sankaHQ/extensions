@@ -424,24 +424,34 @@ requires 409 responses to leave table rows unchanged. Sequence allocations may
 advance on failed inserts. The integration corpus exercises parent/child CRUD,
 unique and foreign-key failures, reassignment, restricted and cascading deletion,
 and subsequent ID allocation across the source/target matrix. These are individual
-CRUD operations. Explicit ordered-create business transactions are also qualified:
+CRUD operations. Explicit business transactions are also qualified:
 Django `transaction.atomic()` or SQLAlchemy `Session(engine)` with `session.begin()`,
-strictly validated nested input objects, and two or more ordered creates. SQLAlchemy
-must explicitly flush each create. Later creates may reference an earlier generated
-primary key through a captured foreign key. The response must snapshot the final
-record inside the scope and be returned after the scope commits, with the existing
-outer integrity-conflict handler. All generated statements use one pgx transaction.
+strictly validated nested input objects, and two or more ordered operations. Supported
+operations are creates, primary-key lookups, full replacements, partial updates and
+deletes. SQLAlchemy must explicitly flush each mutation. Primary and foreign-key
+bindings may reference earlier live records. The response must snapshot the final
+live record or a literal JSON object inside the scope and be returned after commit.
+All generated statements use one pgx transaction.
 
-Each input object needs at least one writable field; generated foreign keys are
-excluded from client input. Explicit ordered replay scenarios are required. Tests
+Lookups must explicitly raise `LookupError("not found")` for missing records, caught
+outside the scope with the source's 404 JSON response. This rolls back earlier creates,
+updates and deletes. The existing outer integrity-conflict handler preserves 409s.
+Partial updates require an explicit lookup key; omitted fields stay unchanged, null
+is accepted only for nullable fields, and an empty update performs no UPDATE.
+
+Generated key bindings are excluded from client input. A lookup whose key comes
+from an earlier operation accepts an empty input object. Explicit ordered replay scenarios are required. Tests
 combine authorization, permission checks, response middleware, related schemas,
 validation, successful writes, whole-transaction rollback, and recovery across all
 three Python sources and four Go targets. PostgreSQL cases require the documented
 isolated fixture and run in CI; local compilation alone does not prove parity.
 
-Mixed create/update/delete orchestration, nested transactions, conditional workflows,
-async business transactions, custom service calls, and external effects still block
-capture. No service/repository scaffolding is added for inline source orchestration.
+Nested transactions, conditional workflows beyond the explicit missing-record guard
+and partial-field assignments, async business transactions, custom service calls,
+row-scoped transaction authorization, and external effects still block capture.
+SQLAlchemy lookups of a previously loaded model after an intervening deletion also
+block capture until its identity-map behavior is modeled, including cascading and
+SET NULL deletion effects. A model or module binding cannot shadow `LookupError`. No service/repository scaffolding is added for inline source orchestration.
 
 After reviewing the generated SQL, set `DATABASE_URL` and run
 `go run ./cmd/migrate up` from the generated directory. Migrations are embedded,
@@ -840,3 +850,13 @@ and compares actual source/target HTTP responses. See the
 [examples](https://github.com/sankaHQ/sanka-examples) for source setup, reviewed-plan
 checks, target toolchains and supported behavior. Database/write scenarios remain
 outside that example qualification; broader package fixtures are tested separately.
+
+The representative backend fixture in `tests/test_golang_mixed_transactions.py`
+combines CRUD, filtered reads, authentication, write permissions, response middleware
+and four multi-record workflows. Its ordered scenarios cover successful relocation,
+missing-record rollback after writes, unique/foreign-key conflicts, partial null/absent
+updates, rollback of deletion, empty updates and recovery. Every source/target pair
+compares HTTP responses, headers, all captured tables and sequences on isolated
+PostgreSQL fixtures. A candidate that lets a write escape the transaction must fail
+verification. These fixture results do not qualify arbitrary application workflows
+or concurrent writers, triggers and model hooks outside the captured profile.

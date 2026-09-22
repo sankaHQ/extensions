@@ -456,6 +456,16 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             "if err != nil {",
             "if err != nil {\n            if isIntegrityConflict(err) { " + conflict + " }\n",
         )
+    if any(
+        step.get("operation") in {"replace", "patch"}
+        for route in captured["routes"]
+        for step in route.get("write", {}).get("transaction", [])
+    ):
+        helpers.append("""func transactionUpdateError(err error) error {
+    if errors.Is(err, pgx.ErrNoRows) { return errors.New("transaction record disappeared during update") }
+    return err
+}
+""")
     setup = {
         "fiber": (
             "app := fiber.New(fiber.Config{DisableHeadAutoRegister: true, BodyLimit: 1048576, "
@@ -505,6 +515,12 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         imports.extend(['"bytes"', '"encoding/json"', '"io"'])
     if has_writes and target in {"chi", "mux"}:
         imports.append('"encoding/json"')
+    if any(
+        step.get("operation") == "patch"
+        for route in captured["routes"]
+        for step in route.get("write", {}).get("transaction", [])
+    ):
+        imports.extend(['"fmt"', '"strings"'])
     if has_patch:
         imports.extend(['"fmt"', '"strconv"', '"strings"'])
     elif has_replace or has_delete:
@@ -831,7 +847,7 @@ def _delete_helper(index: int, write: dict[str, Any], model: dict[str, Any]) -> 
 def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str, Any]]) -> str:
     by_name = {model["name"]: model for model in models}
     steps = write["transaction"]
-    result_type = write["model"]
+    result_type = "json.RawMessage" if "literal_response" in write else write["model"]
     failure = f"return {result_type}{{}}, errInvalidWrite"
     decoders = []
     decoding = []
@@ -839,16 +855,28 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
     for number, step in enumerate(steps):
         model = by_name[step["model"]]
         fields = model["fields"]
-        input_model = dict(
-            model, fields=[field for field in fields if field["name"] not in step["references"]]
-        )
+        operation = step.get("operation", "create")
+        primary = next(field for field in fields if field["primary_key"])
+        input_fields = [
+            dict(field, auto=False) if field["primary_key"] and operation != "create" else field
+            for field in fields
+            if field["name"] not in step["references"]
+            and not (field["primary_key"] and step.get("lookup_reference"))
+            and (operation not in {"lookup", "delete"} or field["primary_key"])
+        ]
+        input_model = dict(model, fields=input_fields)
         decoder_name = f"decodeTransaction{index}Step{number}"
         decoders.append(_write_helper(index, {}, input_model, True, decoder_only=decoder_name))
+        seen = f"seen{number}" if operation == "patch" else "_"
         decoding.append(
-            f"item{number}, _, err := {decoder_name}(values[{canonical(step['input'])}], false)\n    if err != nil {{ {failure} }}"
+            f"item{number}, {seen}, err := {decoder_name}(values[{canonical(step['input'])}], {str(operation == 'patch').lower()})\n    if err != nil {{ {failure} }}"
         )
+        if operation == "patch" and not step.get("lookup_reference"):
+            decoding.append(f"if !{seen}[{canonical(primary['name'])}] {{ {failure} }}")
         for field in fields:
             reference = step["references"].get(field["name"])
+            if field["primary_key"] and step.get("lookup_reference"):
+                reference = step["lookup_reference"]
             if reference:
                 source = f"saved{reference['step']}.{go_name(reference['field'])}"
                 statements.append(
@@ -857,15 +885,55 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
         writable = [field for field in fields if not field["auto"]]
         columns = ", ".join('"' + field["name"] + '"' for field in writable)
         returning = ", ".join('"' + field["name"] + '"' for field in fields)
-        placeholders = ", ".join(f"${i}" for i in range(1, len(writable) + 1))
-        arguments = ", ".join(f"item{number}." + go_name(field["name"]) for field in writable)
         destinations = ", ".join(f"&saved{number}." + go_name(field["name"]) for field in fields)
-        query = f'INSERT INTO "{model["table"]}" ({columns}) VALUES ({placeholders}) RETURNING {returning}'
+        key = f"item{number}.{go_name(primary['name'])}"
+        if operation == "create":
+            placeholders = ", ".join(f"${i}" for i in range(1, len(writable) + 1))
+            arguments = ", ".join(f"item{number}." + go_name(field["name"]) for field in writable)
+            query = f'INSERT INTO "{model["table"]}" ({columns}) VALUES ({placeholders}) RETURNING {returning}'
+            statements.append(
+                f"if err := tx.QueryRow(ctx, {canonical(query)}, {arguments}).Scan({destinations}); err != nil {{ return err }}"
+            )
+            continue
+        select = f'SELECT {returning} FROM "{model["table"]}" WHERE "{primary["name"]}" = $1'
         statements.append(
-            f"if err := tx.QueryRow(ctx, {canonical(query)}, {arguments}).Scan({destinations}); err != nil {{ return err }}"
+            f"if err := tx.QueryRow(ctx, {canonical(select)}, {key}).Scan({destinations}); err != nil {{ return err }}"
         )
+        if operation == "lookup":
+            continue
+        if operation == "delete":
+            query = f'DELETE FROM "{model["table"]}" WHERE "{primary["name"]}" = $1'
+            statements.append(
+                f"if _, err := tx.Exec(ctx, {canonical(query)}, {key}); err != nil {{ return err }}"
+            )
+            continue
+        if operation == "replace":
+            sets = ", ".join(f'"{field["name"]}" = ${i}' for i, field in enumerate(writable, 1))
+            arguments = ", ".join(f"item{number}." + go_name(field["name"]) for field in writable)
+            query = f'UPDATE "{model["table"]}" SET {sets} WHERE "{primary["name"]}" = ${len(writable) + 1} RETURNING {returning}'
+            statements.append(
+                f"if err := tx.QueryRow(ctx, {canonical(query)}, {arguments}, {key}).Scan({destinations}); err != nil {{ return transactionUpdateError(err) }}"
+            )
+        else:
+            statements.append(f"sets{number} := []string{{}}; args{number} := []any{{}}")
+            for field in writable:
+                column = canonical('"' + field["name"] + '" = $%d')
+                statements.append(
+                    f"if {seen}[{canonical(field['name'])}] {{ args{number} = append(args{number}, item{number}.{go_name(field['name'])}); sets{number} = append(sets{number}, fmt.Sprintf({column}, len(args{number}))) }}"
+                )
+            query = f'UPDATE "{model["table"]}" SET %s WHERE "{primary["name"]}" = $%d RETURNING {returning}'
+            statements.append(f"""if len(sets{number}) > 0 {{
+            args{number} = append(args{number}, {key})
+            query := fmt.Sprintf({canonical(query)}, strings.Join(sets{number}, ", "), len(args{number}))
+            if err := tx.QueryRow(ctx, query, args{number}...).Scan({destinations}); err != nil {{ return transactionUpdateError(err) }}
+        }}""")
     declarations = "\n    ".join(f"var saved{i} {step['model']}" for i, step in enumerate(steps))
     allowed = ", ".join(canonical(step["input"]) + ": {}" for step in steps)
+    response = (
+        f"json.RawMessage({canonical(canonical(write['literal_response']))})"
+        if "literal_response" in write
+        else f"saved{len(steps) - 1}"
+    )
     helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte) ({result_type}, error) {{
     var values map[string]json.RawMessage
     decoder := json.NewDecoder(bytes.NewReader(body))
@@ -882,7 +950,7 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
         {chr(10).join(statements)}
         return nil
     }})
-    return saved{len(steps) - 1}, err
+    return {response}, err
 }}
 """
     return "\n".join(decoders) + helper

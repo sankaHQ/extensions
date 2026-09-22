@@ -2,7 +2,7 @@
 
 This is the qualification contract for the first single-database write profile. Fiber, chi, mux,
 and Gin use it for the bounded flat-model POST/PUT/PATCH/DELETE recipe documented by the extension.
-The extension also captures bounded relational CRUD and explicit ordered-create scopes.
+The extension also captures bounded relational CRUD and explicit mixed-operation scopes.
 Arbitrary handlers and business workflows remain outside this contract.
 
 Use the pinned pgx `BeginFunc` primitive for a single unit of work. All statements
@@ -65,7 +65,7 @@ pass alone is not database-parity evidence.
 ## Captured business transactions
 
 `test_golang_business_transactions.py` exercises explicit synchronous source scopes
-containing two or more ordered creates, with strict nested input validation before
+containing two or more ordered operations, with strict nested input validation before
 the scope. Generated-key dependencies must match captured foreign keys. SQLAlchemy
 flushes each create; the source snapshots its final response before exiting the scope
 and returns it only after commit. An outer integrity handler preserves conflict status.
@@ -77,7 +77,13 @@ for invalid input, success, a later write failure, deferred-constraint commit fa
 and recovery. A deliberately non-atomic candidate must fail table parity even when
 its HTTP status agrees. Authorization failures must leave rows and sequences unchanged.
 
-This does not lower mixed create/update/delete workflows, nested savepoints, async
-business transactions, branches, service calls or external effects. Explicit ordered
+`test_golang_mixed_transactions.py` additionally qualifies creates, primary-key
+lookups, full and partial updates, and deletes in one source scope. Missing records
+raise inside the scope and map to an explicit outer 404 handler. Both 404 and 409
+failures must leave all captured tables unchanged; sequence gaps remain allowed.
+Literal response objects retain their own types rather than inheriting model types.
+
+This does not lower nested savepoints, async business transactions, arbitrary
+branches, service calls, row-scoped authorization or external effects. Explicit ordered
 `sanka-verify.json` scenarios are required. The same PostgreSQL fixture opt-in and
 CI qualification rules above apply; skipped database cases provide no parity evidence.
