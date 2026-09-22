@@ -62,10 +62,14 @@ def _within(root: Path, value: str) -> Path:
     return path
 
 
-def _source_hash(root: Path) -> str:
+def _source_hash(root: Path, *, output: Path | None = None) -> str:
     records = {}
     for directory, names, files in os.walk(root):
-        names[:] = sorted(n for n in names if not n.startswith(".") and n != "__pycache__")
+        names[:] = sorted(
+            n
+            for n in names
+            if not n.startswith(".") and n != "__pycache__" and Path(directory) / n != output
+        )
         for name in sorted(files):
             path = Path(directory) / name
             if path.suffix == ".py" or name in {"pyproject.toml", "requirements.txt"}:
@@ -882,7 +886,7 @@ def _reviewed_plan(request: ExtensionRequest) -> tuple[dict[str, Any], str]:
         or _hash(plan) != digest
     ):
         raise ValueError("apply requires the current reviewed core and extension plan hashes")
-    if plan["source_hash"] != _source_hash(root):
+    if plan["source_hash"] != _source_hash(root, output=_within(root, plan["output"])):
         raise ValueError("source changed after plan; scan and review again")
     return plan, digest
 
@@ -1038,6 +1042,16 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
         )
     except ReplayError as error:
         return failure_response(request, code="SANKA_EXTENSION_REPLAY_INVALID", message=str(error))
+    except ModuleNotFoundError as error:
+        return failure_response(
+            request,
+            code="SANKA_SOURCE_DEPENDENCY_MISSING",
+            message=(
+                f"Missing source dependency {error.name!r} in {sys.executable}. "
+                "Create the project's .venv with the same Python version as the extension "
+                "and install its requirements, including Django and Django REST framework."
+            ),
+        )
     except Exception as error:
         return failure_response(
             request, code="SANKA_EXTENSION_EXECUTION_FAILED", message=str(error)
