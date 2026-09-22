@@ -437,6 +437,22 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         w.Header().Set("Content-Type", "application/json")
         _, _ = w.Write([]byte({body}))
     }}{suffix}""")
+    has_integrity = any(
+        route.get("write", {}).get("integrity_conflict") for route in captured["routes"]
+    )
+    for index, route in enumerate(captured["routes"]):
+        if not route.get("write", {}).get("integrity_conflict"):
+            continue
+        if target == "fiber":
+            conflict = f'return c.Status(409).JSON(fiber.Map{{{canonical(error_key)}: "integrity conflict"}})'
+        elif target == "gin":
+            conflict = f'c.JSON(409, gin.H{{{canonical(error_key)}: "integrity conflict"}}); return'
+        else:
+            conflict = f'writeResponse(w, 409, map[string]string{{{canonical(error_key)}: "integrity conflict"}}); return'
+        registrations[index] = registrations[index].replace(
+            "if err != nil {",
+            "if err != nil {\n            if isIntegrityConflict(err) { " + conflict + " }\n",
+        )
     setup = {
         "fiber": (
             "app := fiber.New(fiber.Config{DisableHeadAutoRegister: true, BodyLimit: 1048576, "
@@ -475,6 +491,13 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                 '"github.com/jackc/pgx/v5"',
             ]
         )
+    if has_integrity:
+        imports.append('"github.com/jackc/pgx/v5/pgconn"')
+        helpers.append("""func isIntegrityConflict(err error) bool {
+    var databaseError *pgconn.PgError
+    return errors.As(err, &databaseError) && len(databaseError.Code) == 5 && databaseError.Code[:2] == "23"
+}
+""")
     if has_body_writes:
         imports.extend(['"bytes"', '"encoding/json"', '"io"'])
     if has_writes and target in {"chi", "mux"}:

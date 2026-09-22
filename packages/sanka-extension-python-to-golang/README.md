@@ -397,10 +397,34 @@ The existing full-field projection and explicit route requirements still apply.
 Generated pgx queries bind both the parent key and limit. Replay checks multiple
 parent keys, including an absent parent. Joins and object projections remain blocked.
 
-Sources containing foreign keys and write routes remain blocked until multi-table
-HTTP scenarios and integrity-error responses are captured. The integration suite
-checks relational schema behavior, database transaction rollback, and read parity;
-this does not qualify arbitrary multi-table business operations.
+Foreign-key schemas may use the existing scalar CRUD recipes when every write
+handler explicitly catches `IntegrityError` outside its ORM scope and returns
+409 with `{"error": "integrity conflict"}` (DRF/Flask) or
+`{"detail": "integrity conflict"}` (FastAPI). Import the exception directly from
+`django.db` or `sqlalchemy.exc`. For example, enclose the entire qualified
+FastAPI write body in `try`, followed by:
+
+```python
+except IntegrityError:
+    raise HTTPException(status_code=409, detail="integrity conflict")
+```
+
+Only this exact response contract is lowered. Broader exception catches, retries,
+`finally`/`else` behavior, and catches inside the transaction remain blocked.
+The generated handler classifies PostgreSQL integrity errors after pgx transaction
+cleanup, including deferred failures at commit. Other database errors retain the
+existing failure response. Database cascades remain database operations; no ORM
+object relationship behavior is added.
+
+Relational write verification requires explicit ordered `sanka-verify.json`
+scenarios: create parents before children, exercise invalid references and deletion
+effects, and include recovery after failures. Replay resets independent fixtures,
+compares every captured table and sequence after every request, and independently
+requires 409 responses to leave table rows unchanged. Sequence allocations may
+advance on failed inserts. The integration corpus exercises parent/child CRUD,
+unique and foreign-key failures, reassignment, restricted and cascading deletion,
+and subsequent ID allocation across the source/target matrix. These are individual
+CRUD operations; arbitrary multi-table business transaction capture remains separate.
 
 After reviewing the generated SQL, set `DATABASE_URL` and run
 `go run ./cmd/migrate up` from the generated directory. Migrations are embedded,
