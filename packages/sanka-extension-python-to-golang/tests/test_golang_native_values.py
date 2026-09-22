@@ -478,7 +478,9 @@ def test_native_values_postgres_replay(
             )
             report_path = tmp_path / ".sanka/go/verify.json"
             report = json.loads(report_path.read_text()) if report_path.exists() else {}
-            assert result.outcome == "success", (result.error, report)
+            if result.outcome != "success":
+                print(json.dumps(report, sort_keys=True))
+            assert result.outcome == "success", result.error
             assert result.data["source"] == result.data["candidate"]
             observed = {row["id"]: row for row in result.data["candidate"]}
             assert observed["create"]["body"]["count"] == "12345678901234567890.1234"
