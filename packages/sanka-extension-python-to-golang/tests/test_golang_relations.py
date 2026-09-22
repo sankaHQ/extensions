@@ -169,7 +169,7 @@ def test_relational_database_parity(
         app_source=related_read_source(framework),
     )
     environment = os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"}
-    binary = tmp_path / "migrate"
+    binary = tmp_path / ".sanka" / "migrate-relations"
 
     def build() -> None:
         result = subprocess.run(
