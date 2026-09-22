@@ -12,7 +12,12 @@ import sys
 import venv
 from pathlib import Path
 
-from sanka_extension_drf_to_fastapi.project_environment import _BOOTSTRAP
+from sanka_extension_drf_to_fastapi.project_environment import (
+    _BOOTSTRAP,
+    MINIMUM_PYTHON,
+    PROJECT_PYTHON_PLACEHOLDER,
+    python_mismatch_responses,
+)
 from sanka_extensions.code import ExtensionRequest, encode_request
 
 
@@ -170,3 +175,74 @@ def test_incomplete_project_environment_returns_protocol_error(tmp_path: Path) -
     response = json.loads(result.stdout)
     assert response["request_id"] == "quickstart"
     assert "uv venv --python 3.12" in response["error"]["message"]
+
+
+def _mismatch_configuration(python_version: list[int], minimum_python: list[int]) -> str:
+    request = ExtensionRequest(
+        request_id="mismatch",
+        command="scan",
+        project_root="/project",
+        artifact_root="/project/.sanka",
+        extension_id="sanka/drf-to-fastapi",
+        extension_version="0.1.0a9",
+        manifest_digest="0" * 64,
+        fingerprint={},
+        configuration={},
+        prior_artifacts=(),
+        reviewed_plan_hash=None,
+    )
+    return json.dumps(
+        {
+            "extension_paths": [],
+            "python_version": python_version,
+            "minimum_python": minimum_python,
+            **python_mismatch_responses(request, "3.14"),
+        }
+    )
+
+
+def _bootstrap_mismatch(configuration: str) -> tuple[int, str]:
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", _BOOTSTRAP, configuration],
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+    return result.returncode, result.stdout
+
+
+def test_python_mismatch_recommends_reinstalling_the_cli_on_the_project_python() -> None:
+    project_python = f"{sys.version_info.major}.{sys.version_info.minor}"
+    code, output = _bootstrap_mismatch(_mismatch_configuration([3, 99], list(MINIMUM_PYTHON)))
+    assert code == 1
+    document = json.loads(output)
+    message = json.dumps(document)
+    assert "SANKA_SOURCE_PYTHON_MISMATCH" in message
+    assert PROJECT_PYTHON_PLACEHOLDER not in message
+    assert f"uses Python {project_python}" in message
+    assert "built with Python 3.14" in message
+    assert f"uv tool install --python {project_python} --force sanka-cli" in message
+    assert "sanka extension remove sanka/drf-to-fastapi" in message
+    assert "sanka extension add sanka/drf-to-fastapi" in message
+
+
+def test_python_below_minimum_recommends_recreating_the_project_venv() -> None:
+    project_python = f"{sys.version_info.major}.{sys.version_info.minor}"
+    code, output = _bootstrap_mismatch(_mismatch_configuration([3, 99], [3, 99]))
+    assert code == 1
+    message = json.dumps(json.loads(output))
+    assert "SANKA_SOURCE_PYTHON_MISMATCH" in message
+    assert f"uses Python {project_python}" in message
+    assert "requires Python 3.12 or newer" in message
+    assert "uv venv --python 3.14 .venv" in message
+    assert "uv tool install" not in message
+
+
+def test_matching_python_skips_the_mismatch_document() -> None:
+    configuration = json.loads(_mismatch_configuration(list(sys.version_info[:2]), [3, 12]))
+    configuration["extension_paths"] = ["/nonexistent extension path"]
+    code, output = _bootstrap_mismatch(json.dumps(configuration))
+    # The bootstrap proceeds to import the extension, which this isolated
+    # interpreter cannot find; the mismatch document must not be written.
+    assert code != 0
+    assert "SANKA_SOURCE_PYTHON_MISMATCH" not in output
