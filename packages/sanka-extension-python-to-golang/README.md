@@ -974,3 +974,26 @@ pagination, and async injected repositories through public ordered replay. Nativ
 checks compare actual Python and Go error responses without listening servers.
 PostgreSQL checks require isolated source/target fixture databases and compare HTTP,
 rows and sequences; skipped database tests do not establish database parity.
+
+### Native UUID and decimal request fields
+
+Qualified DRF `Serializer` and FastAPI Pydantic CRUD handlers can use native UUID
+fields and decimals with explicit precision and scale matching the database.
+The capture preserves typed validated values, nullable fields, and PATCH presence;
+FastAPI dependency-injected async sessions and qualified repositories use the same
+contract. UUID formats follow each source validator, including DRF's integer
+inputs. Decimal validation and database coercion use exact decimal digits, with
+Pydantic's default decimal-context validation and DRF's signed-zero response
+behavior preserved. Pydantic decimals retain their original coefficient and exponent
+until PostgreSQL applies the column scale and range rules. ORM defaults do not make a required serializer field optional.
+
+The native profile requires the existing explicit response projection and stable
+validation error handler. Custom validators, decimal contexts, aliases, rounding
+policies, and native date/time/JSON request schemas remain capture gaps. Existing
+explicit wire-validation profiles remain supported. The generated native helpers
+use Go's standard library and are emitted only for native rich-field contracts.
+
+Qualification includes differential serializer/Go decoder tests and PostgreSQL
+replay fixtures for DRF, synchronous FastAPI and async FastAPI on Fiber, chi, mux,
+and Gin, including HTTP errors, exact numeric values, null/absent updates, deletes,
+and table/sequence effects. Database tests require the documented fixture DSN.

@@ -397,7 +397,13 @@ END; $$;""",
         for model in reversed(models):
             sql.append(f'DROP TABLE "{model["table"]}";')
     return {
-        **render_values(models),
+        **render_values(
+            models,
+            native=any(
+                route.get("write", {}).get("validation", {}).get("kind") in {"pydantic", "drf"}
+                for route in captured.get("routes", [])
+            ),
+        ),
         "models.go": "// SPDX-License-Identifier: Apache-2.0\npackage backend\n\n"
         + "\n\n".join(definitions)
         + "\n",

@@ -377,13 +377,29 @@ def _normalize_native_pydantic(
             "native Pydantic models require the qualified stable validation error handler"
         )
     apps[0].value = ast.Call(func=ast.Name(id="FastAPI", ctx=ast.Load()), args=[], keywords=[])
+    declared_imports: set[str] = set()
+    for declaration in tree.body:
+        if isinstance(declaration, ast.ImportFrom):
+            declared_imports.update(alias.asname or alias.name for alias in declaration.names)
+        elif isinstance(declaration, ast.ClassDef):
+            required = {
+                item.id
+                for item in ast.walk(declaration)
+                if isinstance(item, ast.Name)
+                and isinstance(item.ctx, ast.Load)
+                and item.id in {"BaseModel", "Field", "UUID", "Decimal"}
+            }
+            if required - declared_imports:
+                raise ValueError("native schema imports must precede their declarations")
     classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
     matched: dict[str, tuple[list[dict[str, Any]], bool, dict[str, dict[str, int]]]] = {}
     for name, candidate in classes.items():
         if name in {"int", "str", "bool", "dict", "list", "set", "type", "len"}:
             raise ValueError("schema names must not shadow builtins")
         for model in models:
-            fields = [field for field in model["fields"] if not field["auto"]]
+            fields = [
+                dict(field, native_input=True) for field in model["fields"] if not field["auto"]
+            ]
             for partial in (False, True):
                 lines = [f"class {name}(BaseModel):"]
                 for field in fields:
@@ -392,7 +408,13 @@ def _normalize_native_pydantic(
                         "bool": "bool",
                         "int32": "int",
                         "int64": "int",
-                    }[field["go_type"]]
+                        "UUIDValue": "UUID",
+                        "DecimalValue": "Decimal",
+                    }.get(field["go_type"])
+                    if kind is None:
+                        raise ValueError(
+                            "native Pydantic field type requires additional qualification"
+                        )
                     if field["nullable"]:
                         kind += " | None"
                     if field["go_type"] in {"int32", "int64"}:
@@ -402,6 +424,13 @@ def _normalize_native_pydantic(
                             f" = Field(default=None, ge={low}, le={high})"
                             if partial or field["nullable"]
                             else f" = Field(ge={low}, le={high})"
+                        )
+                    elif field["go_type"] == "DecimalValue":
+                        precision, scale = field["sql_type"][8:-1].split(",")
+                        default = (
+                            " = Field("
+                            + ("default=None, " if partial or field["nullable"] else "")
+                            + f"max_digits={precision}, decimal_places={scale})"
                         )
                     else:
                         default = " = None" if partial or field["nullable"] else ""
@@ -413,11 +442,13 @@ def _normalize_native_pydantic(
                         declaration.target, ast.Name
                     ):
                         continue
-                    field = next((f for f in fields if f["name"] == declaration.target.id), None)
+                    declared_field = next(
+                        (f for f in fields if f["name"] == declaration.target.id), None
+                    )
                     value = declaration.value
                     if (
-                        field is None
-                        or field["go_type"] in {"int32", "int64"}
+                        declared_field is None
+                        or declared_field["go_type"] in {"int32", "int64"}
                         or not isinstance(value, ast.Call)
                     ):
                         continue
@@ -569,7 +600,11 @@ def _normalize_pydantic(
                                 "bool": "bool",
                                 "int32": "int",
                                 "int64": "int",
-                            }[field["go_type"]]
+                            }.get(field["go_type"])
+                            if kind is None:
+                                raise ValueError(
+                                    "strict rich schemas require additional qualification"
+                                )
                             if field["nullable"]:
                                 kind += " | None"
                             options = ["default=None"] if partial or field["nullable"] else []
@@ -665,8 +700,10 @@ def _normalize_drf_serializers(
     if len(native_imports) + len(strict_imports) != 1:
         raise ValueError("use one explicit DRF serializer import style")
     native = bool(native_imports)
+    native_declared = False
     for node in tree.body:
         if node in native_imports:
+            native_declared = True
             continue
         if isinstance(node, ast.ImportFrom) and node.module == "rest_framework.serializers":
             if node.level or any(a.asname or a.name not in schema_imports for a in node.names):
@@ -676,10 +713,16 @@ def _normalize_drf_serializers(
             imports.update(a.name for a in node.names)
             continue
         if isinstance(node, ast.ClassDef):
+            if native and not native_declared:
+                raise ValueError("serializer imports must precede their declarations")
             if not native and imports != schema_imports:
                 raise ValueError("serializer imports must precede their declarations")
             for model in models:
-                fields = [field for field in model["fields"] if not field["auto"]]
+                fields = [
+                    dict(field, native_input=native)
+                    for field in model["fields"]
+                    if not field["auto"]
+                ]
                 if native:
                     lines = [f"class {node.name}(serializers.Serializer):"]
                     for field in fields:
@@ -703,6 +746,12 @@ def _normalize_drf_serializers(
                             field_type = "IntegerField"
                         elif field["go_type"] == "bool":
                             field_type = "BooleanField"
+                        elif field["go_type"] == "UUIDValue":
+                            field_type = "UUIDField"
+                        elif field["go_type"] == "DecimalValue":
+                            precision, scale = field["sql_type"][8:-1].split(",")
+                            options.extend([f"max_digits={precision}", f"decimal_places={scale}"])
+                            field_type = "DecimalField"
                         else:
                             break
                         lines.append(
@@ -1138,11 +1187,12 @@ def _sqlalchemy_write(
     framework: str,
     method: str,
     models: list[dict[str, Any]],
+    native_input: bool = False,
 ) -> dict[str, Any]:
     if isinstance(node, ast.AsyncFunctionDef):
         raise ValueError("async database writes require additional capture")
     for model in models:
-        fields = model["fields"]
+        fields = [dict(field, native_input=native_input) for field in model["fields"]]
         writable = [field for field in fields if not field["auto"]]
         response = (
             "{"
@@ -1306,6 +1356,7 @@ def _drf_write(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     method: str,
     models: list[dict[str, Any]],
+    native_input: bool = False,
 ) -> dict[str, Any]:
     if isinstance(node, ast.AsyncFunctionDef):
         raise ValueError("async DRF writes require additional capture")
@@ -1314,7 +1365,9 @@ def _drf_write(
             field["primary_key"] and not field["auto"] for field in model["fields"]
         )
         fields = [
-            dict(field, auto=True) if immutable_primary and field["primary_key"] else field
+            dict(field, native_input=native_input, auto=True)
+            if immutable_primary and field["primary_key"]
+            else dict(field, native_input=native_input)
             for field in model["fields"]
         ]
         writable = [field for field in fields if not field["auto"]]
@@ -1570,15 +1623,6 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     missing_handlers: set[str] = set()
     try:
         integrity_handlers, missing_handlers = _normalize_integrity(tree, framework)
-        if any(
-            field["go_type"].endswith("Value") for model in models for field in model["fields"]
-        ) and any(
-            isinstance(node, ast.ImportFrom)
-            and node.module in {"pydantic", "rest_framework"}
-            and any(alias.name in {"BaseModel", "serializers"} for alias in node.names)
-            for node in tree.body
-        ):
-            raise ValueError("rich fields require explicit wire validation and serialization")
         tree = _normalize_native_pydantic(tree, models, framework, validations)
         tree = _normalize_pydantic(tree, models, framework, validations)
         if framework == "drf":
@@ -1893,9 +1937,22 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                     raise ValueError("transactions require POST and explicit database imports")
                 payload = transactions[name]
             elif method in {"POST", "PUT", "PATCH", "DELETE"} and framework in {"flask", "fastapi"}:
-                payload = _sqlalchemy_write(function, framework, method, models)
+                payload = _sqlalchemy_write(
+                    function,
+                    framework,
+                    method,
+                    models,
+                    validations.get(name, {}).get("validation", {}).get("kind")
+                    in {"pydantic", "drf"},
+                )
             elif method in {"POST", "PUT", "PATCH", "DELETE"} and framework == "drf":
-                payload = _drf_write(function, method, models)
+                payload = _drf_write(
+                    function,
+                    method,
+                    models,
+                    validations.get(name, {}).get("validation", {}).get("kind")
+                    in {"pydantic", "drf"},
+                )
             else:
                 payload = _payload(function, framework, models)
             if name in missing_handlers and name not in transactions:

@@ -21,6 +21,8 @@ PYDANTIC_FIELD_OPTIONS = {
     "le",
     "lt",
     "max_length",
+    "max_digits",
+    "decimal_places",
     "min_length",
     "multiple_of",
     "pattern",

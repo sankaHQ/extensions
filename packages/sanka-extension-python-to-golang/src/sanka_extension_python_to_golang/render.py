@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from importlib.resources import files
 from typing import Any
@@ -19,6 +20,13 @@ MODULES = {
     "mux": "github.com/gorilla/mux",
     "gin": "github.com/gin-gonic/gin",
 }
+
+
+def _go_literal(value: Any) -> str:
+    """Quote generated Go values without JSON-only surrogate-pair escapes."""
+    return json.dumps(
+        value, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+    )
 
 
 def _runtime(target: str, database: bool, database_configured: bool) -> dict[str, str]:
@@ -192,7 +200,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
     has_pagination = any("pagination" in route.get("read", {}) for route in captured["routes"])
     has_detail_reads = any("lookup" in route.get("read", {}) for route in captured["routes"])
     for index, route in enumerate(captured["routes"]):
-        path = canonical(route["path"])
+        path = _go_literal(route["path"])
         if "write" in route:
             model = next(
                 item for item in captured["models"] if item["name"] == route["write"]["model"]
@@ -245,18 +253,18 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             if target == "fiber":
                 lookup = ""
                 if lookup_field:
-                    lookup = f"""rawID, parseErr := {_parse_lookup(lookup_field, f"c.Params({canonical(lookup_field['name'])})")}
-        if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
+                    lookup = f"""rawID, parseErr := {_parse_lookup(lookup_field, f"c.Params({_go_literal(lookup_field['name'])})")}
+        if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{_go_literal(error_key)}: "invalid lookup"}}) }}
         lookup := {lookup_field["go_type"]}(rawID)"""
                 registrations.append(f"""app.{method}({path}, func(c fiber.Ctx) error {{
         {lookup}
         item, err := writeRow{index}(c.Context(), pool, c.Body(){argument})
         if err != nil {{
             if errors.Is(err, errInvalidWrite) {{
-                return c.Status({invalid_status}).JSON(fiber.Map{{{canonical(error_key)}: "invalid request body"}})
+                return c.Status({invalid_status}).JSON(fiber.Map{{{_go_literal(error_key)}: "invalid request body"}})
             }}
             if errors.Is(err, pgx.ErrNoRows) {{
-                return c.Status(404).JSON(fiber.Map{{{canonical(error_key)}: "not found"}})
+                return c.Status(404).JSON(fiber.Map{{{_go_literal(error_key)}: "not found"}})
             }}
             return c.Status(500).JSON(fiber.Map{{"error": "database write failed"}})
         }}
@@ -265,8 +273,8 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             elif target == "gin":
                 lookup = ""
                 if lookup_field:
-                    lookup = f"""rawID, parseErr := {_parse_lookup(lookup_field, f"c.Param({canonical(lookup_field['name'])})")}
-        if parseErr != nil {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid lookup"}}); return }}
+                    lookup = f"""rawID, parseErr := {_parse_lookup(lookup_field, f"c.Param({_go_literal(lookup_field['name'])})")}
+        if parseErr != nil {{ c.JSON(400, gin.H{{{_go_literal(error_key)}: "invalid lookup"}}); return }}
         lookup := {lookup_field["go_type"]}(rawID)"""
                 registrations.append(f"""app.{method.upper()}({path}, func(c *gin.Context) {{
         {lookup}
@@ -275,13 +283,13 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             status := 400
             var tooLarge *http.MaxBytesError
             if errors.As(readErr, &tooLarge) {{ status = 413 }}
-            c.JSON(status, gin.H{{{canonical(error_key)}: "invalid request body"}})
+            c.JSON(status, gin.H{{{_go_literal(error_key)}: "invalid request body"}})
             return
         }}
         item, err := writeRow{index}(c.Request.Context(), pool, body{argument})
         if err != nil {{
-            if errors.Is(err, errInvalidWrite) {{ c.JSON({invalid_status}, gin.H{{{canonical(error_key)}: "invalid request body"}}); return }}
-            if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{canonical(error_key)}: "not found"}}); return }}
+            if errors.Is(err, errInvalidWrite) {{ c.JSON({invalid_status}, gin.H{{{_go_literal(error_key)}: "invalid request body"}}); return }}
+            if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{_go_literal(error_key)}: "not found"}}); return }}
             c.JSON(500, gin.H{{"error": "database write failed"}})
             return
         }}
@@ -295,17 +303,17 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                         f":{lookup_field['name']}", f"{{{lookup_field['name']}}}"
                     )
                     parameter = (
-                        f"chi.URLParam(r, {canonical(lookup_field['name'])})"
+                        f"chi.URLParam(r, {_go_literal(lookup_field['name'])})"
                         if target == "chi"
-                        else f"mux.Vars(r)[{canonical(lookup_field['name'])}]"
+                        else f"mux.Vars(r)[{_go_literal(lookup_field['name'])}]"
                     )
                     lookup = f"""rawID, parseErr := {_parse_lookup(lookup_field, parameter)}
-        if parseErr != nil {{ writeResponse(w, 400, map[string]string{{{canonical(error_key)}: "invalid lookup"}}); return }}
+        if parseErr != nil {{ writeResponse(w, 400, map[string]string{{{_go_literal(error_key)}: "invalid lookup"}}); return }}
         lookup := {lookup_field["go_type"]}(rawID)"""
                 registration = (
-                    f'app.MethodFunc("{route["method"]}", {canonical(registered_path)},'
+                    f'app.MethodFunc("{route["method"]}", {_go_literal(registered_path)},'
                     if target == "chi"
-                    else f"app.HandleFunc({canonical(registered_path)},"
+                    else f"app.HandleFunc({_go_literal(registered_path)},"
                 )
                 suffix = ")" if target == "chi" else f').Methods("{route["method"]}")'
                 registrations.append(f"""{registration} func(w http.ResponseWriter, r *http.Request) {{
@@ -315,13 +323,13 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             status := 400
             var tooLarge *http.MaxBytesError
             if errors.As(readErr, &tooLarge) {{ status = 413 }}
-            writeResponse(w, status, map[string]string{{{canonical(error_key)}: "invalid request body"}})
+            writeResponse(w, status, map[string]string{{{_go_literal(error_key)}: "invalid request body"}})
             return
         }}
         item, err := writeRow{index}(r.Context(), pool, body{argument})
         if err != nil {{
-            if errors.Is(err, errInvalidWrite) {{ writeResponse(w, {invalid_status}, map[string]string{{{canonical(error_key)}: "invalid request body"}}); return }}
-            if errors.Is(err, pgx.ErrNoRows) {{ writeResponse(w, 404, map[string]string{{{canonical(error_key)}: "not found"}}); return }}
+            if errors.Is(err, errInvalidWrite) {{ writeResponse(w, {invalid_status}, map[string]string{{{_go_literal(error_key)}: "invalid request body"}}); return }}
+            if errors.Is(err, pgx.ErrNoRows) {{ writeResponse(w, 404, map[string]string{{{_go_literal(error_key)}: "not found"}}); return }}
             writeResponse(w, 500, map[string]string{{"error": "database write failed"}})
             return
         }}
@@ -404,7 +412,8 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             fields = (
                 "map[string]string{"
                 + ",".join(
-                    canonical(k) + ":" + canonical(v) for k, v in sorted(route["identity"].items())
+                    _go_literal(k) + ":" + _go_literal(v)
+                    for k, v in sorted(route["identity"].items())
                 )
                 + "}"
             )
@@ -433,7 +442,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         _, _ = w.Write(body)
     }}{suffix}""")
             continue
-        body = canonical(canonical(route["body"]))
+        body = _go_literal(canonical(route["body"]))
         if target == "fiber":
             registrations.append(f"""app.Get({path}, func(c fiber.Ctx) error {{
         c.Set("Content-Type", "application/json")
@@ -459,11 +468,13 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         if not route.get("write", {}).get("integrity_conflict"):
             continue
         if target == "fiber":
-            conflict = f'return c.Status(409).JSON(fiber.Map{{{canonical(error_key)}: "integrity conflict"}})'
+            conflict = f'return c.Status(409).JSON(fiber.Map{{{_go_literal(error_key)}: "integrity conflict"}})'
         elif target == "gin":
-            conflict = f'c.JSON(409, gin.H{{{canonical(error_key)}: "integrity conflict"}}); return'
+            conflict = (
+                f'c.JSON(409, gin.H{{{_go_literal(error_key)}: "integrity conflict"}}); return'
+            )
         else:
-            conflict = f'writeResponse(w, 409, map[string]string{{{canonical(error_key)}: "integrity conflict"}}); return'
+            conflict = f'writeResponse(w, 409, map[string]string{{{_go_literal(error_key)}: "integrity conflict"}}); return'
         registrations[index] = registrations[index].replace(
             "if err != nil {",
             "if err != nil {\n            if isIntegrityConflict(err) { " + conflict + " }\n",
@@ -635,11 +646,11 @@ func rowPrincipal(ctx context.Context) (map[string]string, error) {
         # Qualified write policies use the source's operation error envelope.
         app = result["app.go"]
         if target == "fiber":
-            denial = f'if errors.Is(err, errScopeDenied) {{ return c.Status(403).JSON(fiber.Map{{{canonical(error_key)}: "permission denied"}}) }}'
+            denial = f'if errors.Is(err, errScopeDenied) {{ return c.Status(403).JSON(fiber.Map{{{_go_literal(error_key)}: "permission denied"}}) }}'
         elif target == "gin":
-            denial = f'if errors.Is(err, errScopeDenied) {{ c.JSON(403, gin.H{{{canonical(error_key)}: "permission denied"}}); return }}'
+            denial = f'if errors.Is(err, errScopeDenied) {{ c.JSON(403, gin.H{{{_go_literal(error_key)}: "permission denied"}}); return }}'
         else:
-            denial = f'if errors.Is(err, errScopeDenied) {{ writeResponse(w, 403, map[string]string{{{canonical(error_key)}: "permission denied"}}); return }}'
+            denial = f'if errors.Is(err, errScopeDenied) {{ writeResponse(w, 403, map[string]string{{{_go_literal(error_key)}: "permission denied"}}); return }}'
         if has_writes:
             app = app.replace(
                 "if errors.Is(err, errInvalidWrite)",
@@ -655,7 +666,7 @@ def _scope_parts(operation: dict[str, Any], start: int, failure: str) -> tuple[s
         return "", "", ""
     guard = f"principal, scopeErr := rowPrincipal(ctx)\n    if scopeErr != nil {{ {failure} }}"
     predicates = " AND ".join(f'"{field}" = ${number}' for number, field in enumerate(scope, start))
-    arguments = ", " + ", ".join(f"principal[{canonical(claim)}]" for claim in scope.values())
+    arguments = ", " + ", ".join(f"principal[{_go_literal(claim)}]" for claim in scope.values())
     return guard, predicates, arguments
 
 
@@ -691,7 +702,7 @@ def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str
     if related:
         signature = f", lookup {related['go_type']}"
     parameter = "".join(
-        f", queryValue(rawQuery, {canonical(item['parameter'])}, {canonical(item['default'])})"
+        f", queryValue(rawQuery, {_go_literal(item['parameter'])}, {_go_literal(item['default'])})"
         for item in filters
     )
     if related:
@@ -701,16 +712,16 @@ def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str
     page = ""
     values = str(read["limit"]) + parameter
     if pagination:
-        page = f"""limit, err := pageValue(queryValue(rawQuery, "limit", {canonical(pagination["limit"])}), 4, 1, 1000)
+        page = f"""limit, err := pageValue(queryValue(rawQuery, "limit", {_go_literal(pagination["limit"])}), 4, 1, 1000)
     if err != nil {{ return nil, err }}
-    offset, err := pageValue(queryValue(rawQuery, "offset", {canonical(pagination["offset"])}), 10, 0, 2147483647)
+    offset, err := pageValue(queryValue(rawQuery, "offset", {_go_literal(pagination["offset"])}), 10, 0, 2147483647)
     if err != nil {{ return nil, err }}"""
         values = "limit, offset" + parameter
     values += scoped_values
     return f"""func readRows{index}({arguments}) ([]byte, error) {{
     {page}
     {guard}
-    rows, err := pool.Query(ctx, {canonical(query)}, {values})
+    rows, err := pool.Query(ctx, {_go_literal(query)}, {values})
     if err != nil {{ return nil, err }}
     defer rows.Close()
     items := make([]{model["name"]}, 0)
@@ -740,42 +751,42 @@ def _detail_read_registration(
     error_key: str,
 ) -> str:
     field = next(item for item in model["fields"] if item["name"] == route["read"]["lookup"])
-    name = canonical(field["name"])
+    name = _go_literal(field["name"])
     reader = "readRows" if route["read"].get("many") else "readRow"
     path = route["path"]
     if target == "fiber":
-        return f"""app.Get({canonical(path)}, func(c fiber.Ctx) error {{
+        return f"""app.Get({_go_literal(path)}, func(c fiber.Ctx) error {{
         rawID, parseErr := {_parse_lookup(field, f"c.Params({name})")}
-        if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
+        if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{_go_literal(error_key)}: "invalid lookup"}}) }}
         body, err := {reader}{index}(c.Context(), pool, {field["go_type"]}(rawID))
         c.Set("Content-Type", "application/json")
-        if errors.Is(err, pgx.ErrNoRows) {{ return c.Status(404).JSON(fiber.Map{{{canonical(error_key)}: "not found"}}) }}
+        if errors.Is(err, pgx.ErrNoRows) {{ return c.Status(404).JSON(fiber.Map{{{_go_literal(error_key)}: "not found"}}) }}
         if err != nil {{ return c.Status(500).Send([]byte(`{{"error":"database read failed"}}`)) }}
         return c.Send(body)
     }})"""
     if target == "gin":
-        return f"""app.GET({canonical(path)}, func(c *gin.Context) {{
+        return f"""app.GET({_go_literal(path)}, func(c *gin.Context) {{
         rawID, parseErr := {_parse_lookup(field, f"c.Param({name})")}
-        if parseErr != nil {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid lookup"}}); return }}
+        if parseErr != nil {{ c.JSON(400, gin.H{{{_go_literal(error_key)}: "invalid lookup"}}); return }}
         body, err := {reader}{index}(c.Request.Context(), pool, {field["go_type"]}(rawID))
-        if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{canonical(error_key)}: "not found"}}); return }}
+        if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{_go_literal(error_key)}: "not found"}}); return }}
         if err != nil {{ c.Data(500, "application/json", []byte(`{{"error":"database read failed"}}`)); return }}
         c.Data(200, "application/json", body)
     }})"""
     registered_path = path.replace(f":{field['name']}", f"{{{field['name']}}}")
     parameter = f"chi.URLParam(r, {name})" if target == "chi" else f"mux.Vars(r)[{name}]"
     registration = (
-        f'app.MethodFunc("GET", {canonical(registered_path)},'
+        f'app.MethodFunc("GET", {_go_literal(registered_path)},'
         if target == "chi"
-        else f"app.HandleFunc({canonical(registered_path)},"
+        else f"app.HandleFunc({_go_literal(registered_path)},"
     )
     suffix = ")" if target == "chi" else ').Methods("GET")'
     return f"""{registration} func(w http.ResponseWriter, r *http.Request) {{
         rawID, parseErr := {_parse_lookup(field, parameter)}
         w.Header().Set("Content-Type", "application/json")
-        if parseErr != nil {{ w.WriteHeader(400); _ = json.NewEncoder(w).Encode(map[string]string{{{canonical(error_key)}: "invalid lookup"}}); return }}
+        if parseErr != nil {{ w.WriteHeader(400); _ = json.NewEncoder(w).Encode(map[string]string{{{_go_literal(error_key)}: "invalid lookup"}}); return }}
         body, err := {reader}{index}(r.Context(), pool, {field["go_type"]}(rawID))
-        if errors.Is(err, pgx.ErrNoRows) {{ w.WriteHeader(404); _ = json.NewEncoder(w).Encode(map[string]string{{{canonical(error_key)}: "not found"}}); return }}
+        if errors.Is(err, pgx.ErrNoRows) {{ w.WriteHeader(404); _ = json.NewEncoder(w).Encode(map[string]string{{{_go_literal(error_key)}: "not found"}}); return }}
         if err != nil {{ w.WriteHeader(500); _, _ = w.Write([]byte(`{{"error":"database read failed"}}`)); return }}
         _, _ = w.Write(body)
     }}{suffix}"""
@@ -793,7 +804,7 @@ def _detail_read_helper(index: int, read: dict[str, Any], model: dict[str, Any])
     return f"""func readRow{index}(ctx context.Context, pool *pgxpool.Pool, lookup {lookup["go_type"]}) ([]byte, error) {{
     {guard}
     var item {model["name"]}
-    if err := pool.QueryRow(ctx, {canonical(query)}, lookup{values}).Scan({destinations}); err != nil {{ return nil, err }}
+    if err := pool.QueryRow(ctx, {_go_literal(query)}, lookup{values}).Scan({destinations}); err != nil {{ return nil, err }}
     return json.Marshal(item)
 }}
 """
@@ -811,49 +822,49 @@ def _delete_registration(
         source
     ]
     field = next(item for item in model["fields"] if item["name"] == route["write"]["lookup"])
-    name = canonical(field["name"])
+    name = _go_literal(field["name"])
     status = route["status"]
     path = route["path"]
     if target == "fiber":
         header = (
-            f'c.Set("Content-Type", {canonical(content_type)})'
+            f'c.Set("Content-Type", {_go_literal(content_type)})'
             if content_type
             else 'c.Response().Header.Del("Content-Type"); c.Response().Header.SetNoDefaultContentType(true)'
         )
-        return f"""app.Delete({canonical(path)}, func(c fiber.Ctx) error {{
+        return f"""app.Delete({_go_literal(path)}, func(c fiber.Ctx) error {{
         rawID, parseErr := {_parse_lookup(field, f"c.Params({name})")}
-        if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
+        if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{_go_literal(error_key)}: "invalid lookup"}}) }}
         err := deleteRow{index}(c.Context(), pool, {field["go_type"]}(rawID))
-        if errors.Is(err, pgx.ErrNoRows) {{ return c.Status(404).JSON(fiber.Map{{{canonical(error_key)}: "not found"}}) }}
+        if errors.Is(err, pgx.ErrNoRows) {{ return c.Status(404).JSON(fiber.Map{{{_go_literal(error_key)}: "not found"}}) }}
         if err != nil {{ return c.Status(500).JSON(fiber.Map{{"error": "database write failed"}}) }}
         {header}
         return c.Status({status}).Send(nil)
     }})"""
     if target == "gin":
-        return f"""app.DELETE({canonical(path)}, func(c *gin.Context) {{
+        return f"""app.DELETE({_go_literal(path)}, func(c *gin.Context) {{
         rawID, parseErr := {_parse_lookup(field, f"c.Param({name})")}
-        if parseErr != nil {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid lookup"}}); return }}
+        if parseErr != nil {{ c.JSON(400, gin.H{{{_go_literal(error_key)}: "invalid lookup"}}); return }}
         err := deleteRow{index}(c.Request.Context(), pool, {field["go_type"]}(rawID))
-        if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{canonical(error_key)}: "not found"}}); return }}
+        if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{_go_literal(error_key)}: "not found"}}); return }}
         if err != nil {{ c.JSON(500, gin.H{{"error": "database write failed"}}); return }}
-        c.Header("Content-Type", {canonical(content_type)})
+        c.Header("Content-Type", {_go_literal(content_type)})
         c.Status({status})
     }})"""
     registered_path = path.replace(f":{field['name']}", f"{{{field['name']}}}")
     parameter = f"chi.URLParam(r, {name})" if target == "chi" else f"mux.Vars(r)[{name}]"
     registration = (
-        f'app.MethodFunc("DELETE", {canonical(registered_path)},'
+        f'app.MethodFunc("DELETE", {_go_literal(registered_path)},'
         if target == "chi"
-        else f"app.HandleFunc({canonical(registered_path)},"
+        else f"app.HandleFunc({_go_literal(registered_path)},"
     )
     suffix = ")" if target == "chi" else ').Methods("DELETE")'
     return f"""{registration} func(w http.ResponseWriter, r *http.Request) {{
         rawID, parseErr := {_parse_lookup(field, parameter)}
-        if parseErr != nil {{ writeResponse(w, 400, map[string]string{{{canonical(error_key)}: "invalid lookup"}}); return }}
+        if parseErr != nil {{ writeResponse(w, 400, map[string]string{{{_go_literal(error_key)}: "invalid lookup"}}); return }}
         err := deleteRow{index}(r.Context(), pool, {field["go_type"]}(rawID))
-        if errors.Is(err, pgx.ErrNoRows) {{ writeResponse(w, 404, map[string]string{{{canonical(error_key)}: "not found"}}); return }}
+        if errors.Is(err, pgx.ErrNoRows) {{ writeResponse(w, 404, map[string]string{{{_go_literal(error_key)}: "not found"}}); return }}
         if err != nil {{ writeResponse(w, 500, map[string]string{{"error": "database write failed"}}); return }}
-        {f'w.Header().Set("Content-Type", {canonical(content_type)})' if content_type else ""}
+        {f'w.Header().Set("Content-Type", {_go_literal(content_type)})' if content_type else ""}
         w.WriteHeader({status})
     }}{suffix}"""
 
@@ -867,7 +878,7 @@ def _delete_helper(index: int, write: dict[str, Any], model: dict[str, Any]) -> 
     return f"""func deleteRow{index}(ctx context.Context, pool *pgxpool.Pool, lookup {lookup["go_type"]}) error {{
     {guard}
     return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
-        result, err := tx.Exec(ctx, {canonical(query)}, lookup{values})
+        result, err := tx.Exec(ctx, {_go_literal(query)}, lookup{values})
         if err != nil {{ return err }}
         if result.RowsAffected() == 0 {{ return pgx.ErrNoRows }}
         return nil
@@ -908,13 +919,13 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
         if operation in {"create", "replace", "patch"}:
             for field, claim in step.get("scope", {}).items():
                 body_guards.append(
-                    f"if {seen}[{canonical(field)}] && item{number}.{go_name(field)} != principal[{canonical(claim)}] {{ return {result_type}{{}}, errScopeDenied }}"
+                    f"if {seen}[{_go_literal(field)}] && item{number}.{go_name(field)} != principal[{_go_literal(claim)}] {{ return {result_type}{{}}, errScopeDenied }}"
                 )
         decoding.append(
-            f"item{number}, {seen}, err := {decoder_name}(values[{canonical(step['input'])}], {str(operation == 'patch').lower()})\n    if err != nil {{ {failure} }}"
+            f"item{number}, {seen}, err := {decoder_name}(values[{_go_literal(step['input'])}], {str(operation == 'patch').lower()})\n    if err != nil {{ {failure} }}"
         )
         if operation == "patch" and not step.get("lookup_reference"):
-            decoding.append(f"if !{seen}[{canonical(primary['name'])}] {{ {failure} }}")
+            decoding.append(f"if !{seen}[{_go_literal(primary['name'])}] {{ {failure} }}")
         for field in fields:
             reference = step["references"].get(field["name"])
             if field["primary_key"] and step.get("lookup_reference"):
@@ -938,7 +949,7 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
             arguments = ", ".join(f"item{number}." + go_name(field["name"]) for field in writable)
             query = f'INSERT INTO "{model["table"]}" ({columns}) VALUES ({placeholders}) RETURNING {returning}'
             statements.append(
-                f"if err := tx.QueryRow(ctx, {canonical(query)}, {arguments}).Scan({destinations}); err != nil {{ return err }}"
+                f"if err := tx.QueryRow(ctx, {_go_literal(query)}, {arguments}).Scan({destinations}); err != nil {{ return err }}"
             )
             continue
         _, predicate, scope_values = _scope_parts(step, 2, "")
@@ -947,14 +958,14 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
             f'SELECT {returning} FROM "{model["table"]}" WHERE "{primary["name"]}" = $1{predicate}'
         )
         statements.append(
-            f"if err := tx.QueryRow(ctx, {canonical(select)}, {key}{scope_values}).Scan({destinations}); err != nil {{ return err }}"
+            f"if err := tx.QueryRow(ctx, {_go_literal(select)}, {key}{scope_values}).Scan({destinations}); err != nil {{ return err }}"
         )
         if operation == "lookup":
             continue
         if operation == "delete":
             query = f'DELETE FROM "{model["table"]}" WHERE "{primary["name"]}" = $1{predicate}'
             statements.append(
-                f"if _, err := tx.Exec(ctx, {canonical(query)}, {key}{scope_values}); err != nil {{ return err }}"
+                f"if _, err := tx.Exec(ctx, {_go_literal(query)}, {key}{scope_values}); err != nil {{ return err }}"
             )
             continue
         if operation == "replace":
@@ -964,32 +975,32 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
             predicate = " AND " + predicate if predicate else ""
             query = f'UPDATE "{model["table"]}" SET {sets} WHERE "{primary["name"]}" = ${len(writable) + 1}{predicate} RETURNING {returning}'
             statements.append(
-                f"if err := tx.QueryRow(ctx, {canonical(query)}, {arguments}, {key}{scope_values}).Scan({destinations}); err != nil {{ return transactionUpdateError(err) }}"
+                f"if err := tx.QueryRow(ctx, {_go_literal(query)}, {arguments}, {key}{scope_values}).Scan({destinations}); err != nil {{ return transactionUpdateError(err) }}"
             )
         else:
             statements.append(f"sets{number} := []string{{}}; args{number} := []any{{}}")
             for field in writable:
-                column = canonical('"' + field["name"] + '" = $%d')
+                column = _go_literal('"' + field["name"] + '" = $%d')
                 statements.append(
-                    f"if {seen}[{canonical(field['name'])}] {{ args{number} = append(args{number}, item{number}.{go_name(field['name'])}); sets{number} = append(sets{number}, fmt.Sprintf({column}, len(args{number}))) }}"
+                    f"if {seen}[{_go_literal(field['name'])}] {{ args{number} = append(args{number}, item{number}.{go_name(field['name'])}); sets{number} = append(sets{number}, fmt.Sprintf({column}, len(args{number}))) }}"
                 )
             query = f'UPDATE "{model["table"]}" SET %s WHERE "{primary["name"]}" = $%d'
             scope_append = []
             for field, claim in step.get("scope", {}).items():
                 scope_append.append(
-                    f"args{number} = append(args{number}, principal[{canonical(claim)}]); query += fmt.Sprintf({canonical(' AND ' + chr(34) + field + chr(34) + ' = $%d')}, len(args{number}))"
+                    f"args{number} = append(args{number}, principal[{_go_literal(claim)}]); query += fmt.Sprintf({_go_literal(' AND ' + chr(34) + field + chr(34) + ' = $%d')}, len(args{number}))"
                 )
             statements.append(f"""if len(sets{number}) > 0 {{
             args{number} = append(args{number}, {key})
-            query := fmt.Sprintf({canonical(query)}, strings.Join(sets{number}, ", "), len(args{number}))
+            query := fmt.Sprintf({_go_literal(query)}, strings.Join(sets{number}, ", "), len(args{number}))
             {chr(10).join(scope_append)}
-            query += {canonical(" RETURNING " + returning)}
+            query += {_go_literal(" RETURNING " + returning)}
             if err := tx.QueryRow(ctx, query, args{number}...).Scan({destinations}); err != nil {{ return transactionUpdateError(err) }}
         }}""")
     declarations = "\n    ".join(f"var saved{i} {step['model']}" for i, step in enumerate(steps))
-    allowed = ", ".join(canonical(step["input"]) + ": {}" for step in steps)
+    allowed = ", ".join(_go_literal(step["input"]) + ": {}" for step in steps)
     response = (
-        f"json.RawMessage({canonical(canonical(write['literal_response']))})"
+        f"json.RawMessage({_go_literal(canonical(write['literal_response']))})"
         if "literal_response" in write
         else f"saved{len(steps) - 1}"
     )
@@ -1031,19 +1042,19 @@ def _write_helper(
     columns = ", ".join('"' + field["name"] + '"' for field in writable)
     returning = ", ".join('"' + field["name"] + '"' for field in fields)
     destinations = ", ".join("&saved." + go_name(field["name"]) for field in fields)
-    accepted = ", ".join(canonical(field["name"]) + ": {}" for field in writable)
+    accepted = ", ".join(_go_literal(field["name"]) + ": {}" for field in writable)
     validation_kind = write.get("validation", {}).get("kind", "strict")
     decoding = []
     required = []
     for field in writable:
-        name = canonical(field["name"])
+        name = _go_literal(field["name"])
         target = "item." + go_name(field["name"])
         null_guard = ""
         if not field["nullable"] and not (
             field["go_type"] == "JSONValue" and not field["none_as_null"]
         ):
             null_guard = ' || bytes.Equal(bytes.TrimSpace(raw), []byte("null"))'
-            if "default" not in field:
+            if "default" not in field or validation_kind in {"pydantic", "drf"}:
                 required.append(
                     f"if !partial && !seen[{name}] {{ return item, nil, errInvalidWrite }}"
                 )
@@ -1055,6 +1066,8 @@ def _write_helper(
                 "int32": "int32",
                 "int64": "int64",
                 "bool": "bool",
+                "UUIDValue": "UUIDValue",
+                "DecimalValue": "DecimalValue",
             }[field["go_type"]]
             if validation_kind == "pydantic":
                 conversion = {
@@ -1062,6 +1075,8 @@ def _write_helper(
                     "int32": "number, err := pydanticInt(raw, 32)\n            value := int32(number)",
                     "int64": "value, err := pydanticInt(raw, 64)",
                     "bool": "value, err := pydanticBool(raw)",
+                    "UUIDValue": "value, err := nativeUUID(raw, false)",
+                    "DecimalValue": "",
                 }[field["go_type"]]
             else:
                 conversion = {
@@ -1069,7 +1084,12 @@ def _write_helper(
                     "int32": "number, err := drfInt(raw, 32)\n            value := int32(number)",
                     "int64": "value, err := drfInt(raw, 64)",
                     "bool": "value, err := drfBool(raw)",
+                    "UUIDValue": "value, err := nativeUUID(raw, true)",
+                    "DecimalValue": "",
                 }[field["go_type"]]
+            if field["go_type"] == "DecimalValue":
+                precision, scale = field["sql_type"][8:-1].split(",")
+                conversion = f"value, err := nativeDecimal(raw, {precision}, {scale}, {'true' if validation_kind == 'drf' else 'false'})"
             if field["nullable"]:
                 null_value = 'bytes.Equal(bytes.TrimSpace(raw), []byte("null"))'
                 if validation_kind == "drf" and field["go_type"] == "bool":
@@ -1105,18 +1125,21 @@ def _write_helper(
     }}"""
             )
         if "default" in field:
-            default = canonical(field["default"])
+            default = _go_literal(field["default"])
             if field["nullable"]:
                 assignment = f"value := {field['go_type']}({default}); {target} = &value"
             else:
                 assignment = f"{target} = {default}"
             decoding.append(f"if !partial && !seen[{name}] {{ {assignment} }}")
-        if field["go_type"] == "DecimalValue":
+        if field["go_type"] == "DecimalValue" and validation_kind != "pydantic":
             precision, scale = field["sql_type"][8:-1].split(",")
             value = ("*" if field["nullable"] else "") + target
             guard = f"seen[{name}]" + (f" && {target} != nil" if field["nullable"] else "")
+            decimal_text = f"string({value})"
+            if validation_kind == "drf":
+                decimal_text = f'strings.TrimPrefix({decimal_text}, "-")'
             decoding.append(
-                f"if {guard} && !validDecimal(string({value}), {precision}, {scale}) {{ return item, nil, errInvalidWrite }}"
+                f"if {guard} && !validDecimal({decimal_text}, {precision}, {scale}) {{ return item, nil, errInvalidWrite }}"
             )
         if field["go_type"] == "JSONValue":
             if not field["none_as_null"]:
@@ -1157,7 +1180,7 @@ def _write_helper(
                 value = f"len([]rune({value}))"
             tests.append(f"{value} {'<' if key in {'ge', 'min_length'} else '>'} {bound}")
         if tests:
-            guard = f"seen[{canonical(field['name'])}]"
+            guard = f"seen[{_go_literal(field['name'])}]"
             if field["nullable"]:
                 guard += f" && {target} != nil"
             decoding.append(
@@ -1189,13 +1212,30 @@ def _write_helper(
     scope = write.get("scope", {})
     guard, _, _ = _scope_parts(write, 1, f"return {model['name']}{{}}, scopeErr")
     body_guard = "\n    ".join(
-        f"if seen[{canonical(field)}] && item.{go_name(field)} != principal[{canonical(claim)}] {{ return {model['name']}{{}}, errScopeDenied }}"
+        f"if seen[{_go_literal(field)}] && item.{go_name(field)} != principal[{_go_literal(claim)}] {{ return {model['name']}{{}}, errScopeDenied }}"
         for field, claim in scope.items()
     )
-    seen_name = "seen" if scope else "_"
+    # Django returns the assigned Decimal without a database refresh. Preserve
+    # its signed zero in the response while PostgreSQL stores ordinary zero.
+    assigned_decimals = [
+        f for f in writable if validation_kind == "drf" and f["go_type"] == "DecimalValue"
+    ]
+    assigned_response = "\n    ".join(
+        f"if seen[{_go_literal(f['name'])}] {{ saved.{go_name(f['name'])} = item.{go_name(f['name'])} }}"
+        for f in assigned_decimals
+    )
+    seen_name = "seen" if scope or assigned_decimals else "_"
+    argument_values = {}
+    for field in writable:
+        value = "item." + go_name(field["name"])
+        if validation_kind == "pydantic" and field["go_type"] == "DecimalValue":
+            # Send the original Decimal as numeric text, as psycopg does. Let
+            # PostgreSQL enforce scale/range instead of hiding database errors.
+            value = f"(*string)({value})" if field["nullable"] else f"string({value})"
+        argument_values[field["name"]] = value
     if operation == "create":
         placeholders = ", ".join(f"${number}" for number in range(1, len(writable) + 1))
-        arguments = ", ".join("item." + go_name(field["name"]) for field in writable)
+        arguments = ", ".join(argument_values[field["name"]] for field in writable)
         query = f'INSERT INTO "{model["table"]}" ({columns}) VALUES ({placeholders}) RETURNING {returning}'
         helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte) ({model["name"]}, error) {{
     {guard}
@@ -1204,8 +1244,9 @@ def _write_helper(
     {body_guard}
     var saved {model["name"]}
     err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
-        return tx.QueryRow(ctx, {canonical(query)}, {arguments}).Scan({destinations})
+        return tx.QueryRow(ctx, {_go_literal(query)}, {arguments}).Scan({destinations})
     }})
+    {assigned_response}
     return saved, err
 }}
 """
@@ -1214,7 +1255,7 @@ def _write_helper(
         sets = ", ".join(
             f'"{field["name"]}" = ${number}' for number, field in enumerate(writable, 1)
         )
-        arguments = ", ".join("item." + go_name(field["name"]) for field in writable)
+        arguments = ", ".join(argument_values[field["name"]] for field in writable)
         query = (
             f'UPDATE "{model["table"]}" SET {sets} WHERE "{lookup["name"]}" = ${len(writable) + 1} '
             f"RETURNING {returning}"
@@ -1229,8 +1270,9 @@ def _write_helper(
     {body_guard}
     var saved {model["name"]}
     err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
-        return tx.QueryRow(ctx, {canonical(query)}, {arguments}, lookup{scope_values}).Scan({destinations})
+        return tx.QueryRow(ctx, {_go_literal(query)}, {arguments}, lookup{scope_values}).Scan({destinations})
     }})
+    {assigned_response}
     return saved, err
 }}
 """
@@ -1238,11 +1280,11 @@ def _write_helper(
         lookup = next(field for field in fields if field["name"] == write["lookup"])
         cases = []
         for field in writable:
-            name = canonical(field["name"])
+            name = _go_literal(field["name"])
             cases.append(
                 f"""if seen[{name}] {{
-            values = append(values, item.{go_name(field["name"])})
-            sets = append(sets, fmt.Sprintf({canonical('"' + field["name"] + '" = $%d')}, len(values)))
+            values = append(values, {argument_values[field["name"]]})
+            sets = append(sets, fmt.Sprintf({_go_literal('"' + field["name"] + '" = $%d')}, len(values)))
         }}"""
             )
         select = f'SELECT {returning} FROM "{model["table"]}" WHERE "{lookup["name"]}" = $1'
@@ -1266,12 +1308,13 @@ def _write_helper(
         values := []any{{{initial_values.removeprefix(", ")}}}
         {chr(10).join(cases)}
         if len(sets) == 0 {{
-            return tx.QueryRow(ctx, {canonical(select)}, lookup{scope_values}).Scan({destinations})
+            return tx.QueryRow(ctx, {_go_literal(select)}, lookup{scope_values}).Scan({destinations})
         }}
         values = append(values, lookup)
-        query := fmt.Sprintf({canonical(update)}, strings.Join(sets, ", "), len(values))
+        query := fmt.Sprintf({_go_literal(update)}, strings.Join(sets, ", "), len(values))
         return tx.QueryRow(ctx, query, values...).Scan({destinations})
     }})
+    {assigned_response}
     return saved, err
 }}
 """
