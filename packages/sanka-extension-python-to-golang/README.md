@@ -1057,3 +1057,7 @@ pair and its evidence. The CLI fixture explicitly supplies both `--to` and
 `target_framework`; it does not claim that older CLI versions forward `--to` automatically.
 The marketplace listener and disposable PostgreSQL schemas run only in the explicitly
 enabled qualification job. No original source tests or production application are executed.
+
+Boundary probes separately verify that accepted extreme timestamps and PostgreSQL-invalid
+JSON preserve lookup ordering and committed rows/sequences. These probes qualify storage
+behavior, not parity of framework-specific unhandled-500 response bodies.

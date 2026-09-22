@@ -1090,7 +1090,7 @@ def _write_helper(
                     "UUIDValue": "value, err := nativeUUID(raw, false)",
                     "DateValue": "value, err := nativeDate(raw, false)",
                     "TimestampValue": "value, err := nativeTimestamp(raw, false)",
-                    "JSONValue": "value, err := nativeJSON(raw)",
+                    "JSONValue": "value, err := nativeJSON(raw, false)",
                     "DecimalValue": "",
                 }[field["go_type"]]
             else:
@@ -1102,7 +1102,7 @@ def _write_helper(
                     "UUIDValue": "value, err := nativeUUID(raw, true)",
                     "DateValue": "value, err := nativeDate(raw, true)",
                     "TimestampValue": "value, err := nativeTimestamp(raw, true)",
-                    "JSONValue": "value, err := nativeJSON(raw)",
+                    "JSONValue": "value, err := nativeJSON(raw, true)",
                     "DecimalValue": "",
                 }[field["go_type"]]
             if field["go_type"] == "DecimalValue":
@@ -1177,11 +1177,10 @@ def _write_helper(
                     null_guard = ""
             value = ("*" if field["nullable"] else "") + target
             guard = f"seen[{name}]" + (f" && {target} != nil" if field["nullable"] else "")
-            if not field["nullable"] and field["none_as_null"] and validation_kind == "pydantic":
-                guard += f" && {target} != nil"
-            decoding.append(
-                f"if {guard} && !{'json.Valid' if validation_kind in {'pydantic', 'drf'} else 'validJSON'}({value}) {{ return item, nil, errInvalidWrite }}"
-            )
+            if validation_kind not in {"pydantic", "drf"}:
+                decoding.append(
+                    f"if {guard} && !validJSON({value}) {{ return item, nil, errInvalidWrite }}"
+                )
     custom_constraints = write.get("constraints", {})
     constraints = dict(custom_constraints)
     if validation_kind == "drf":
@@ -1243,16 +1242,18 @@ def _write_helper(
         f"if seen[{_go_literal(field)}] && item.{go_name(field)} != principal[{_go_literal(claim)}] {{ return {model['name']}{{}}, errScopeDenied }}"
         for field, claim in scope.items()
     )
-    # Django returns the assigned Decimal without a database refresh. Preserve
-    # its signed zero in the response while PostgreSQL stores ordinary zero.
-    assigned_decimals = [
-        f for f in writable if validation_kind == "drf" and f["go_type"] == "DecimalValue"
+    # Django returns assigned values without refreshing. Preserve decimal signed
+    # zero and JSON float types that PostgreSQL may normalize during storage.
+    assigned_fields = [
+        f
+        for f in writable
+        if validation_kind == "drf" and f["go_type"] in {"DecimalValue", "JSONValue"}
     ]
     assigned_response = "\n    ".join(
         f"if seen[{_go_literal(f['name'])}] {{ saved.{go_name(f['name'])} = item.{go_name(f['name'])} }}"
-        for f in assigned_decimals
+        for f in assigned_fields
     )
-    seen_name = "seen" if scope or assigned_decimals else "_"
+    seen_name = "seen" if scope or assigned_fields else "_"
     argument_values = {}
     for field in writable:
         value = "item." + go_name(field["name"])
@@ -1261,6 +1262,45 @@ def _write_helper(
             # PostgreSQL enforce scale/range instead of hiding database errors.
             value = f"(*string)({value})" if field["nullable"] else f"string({value})"
         argument_values[field["name"]] = value
+    temporal = [
+        f for f in fields if validation_kind == "pydantic" and f["go_type"] == "TimestampValue"
+    ]
+    result_declarations = "\n    ".join(
+        f"var returned{go_name(f['name'])} nativeTimestampResult" for f in temporal
+    )
+    returning_destinations = ", ".join(
+        ("&returned" if field in temporal else "&saved.") + go_name(field["name"])
+        for field in fields
+    )
+    projected = []
+    if temporal:
+        result_declarations += "\n    wrote := false"
+    for field in temporal:
+        name = go_name(field["name"])
+        assign = f"saved.{name} = value"
+        if field["nullable"]:
+            assign = f"saved.{name} = &value"
+        conversion = f"var value TimestampValue; if projectionErr := value.ScanTimestamptz(returned{name}.Timestamptz); projectionErr != nil {{ return saved, projectionErr }}; {assign}"
+        if field["nullable"]:
+            conversion = (
+                f"if !returned{name}.Valid {{ saved.{name} = nil }} else {{ {conversion} }}"
+            )
+        projected.append("{ " + conversion + " }")
+    project_native = ""
+    if projected:
+        project_native = "if err == nil && wrote { " + "; ".join(projected) + " }"
+    mark_write = "wrote = true" if temporal else ""
+    lookup_before_write = ""
+    if (
+        operation != "create"
+        and validation_kind in {"pydantic", "drf"}
+        and any(f["go_type"] in {"TimestampValue", "JSONValue"} for f in writable)
+    ):
+        _, predicate, bindings = _scope_parts(write, 2, "")
+        query = f'SELECT {returning} FROM "{model["table"]}" WHERE "{write["lookup"]}" = $1'
+        if predicate:
+            query += " AND " + predicate
+        lookup_before_write = f"if lookupErr := tx.QueryRow(ctx, {_go_literal(query)}, lookup{bindings}).Scan({destinations}); lookupErr != nil {{ return lookupErr }}"
     if operation == "create":
         placeholders = ", ".join(f"${number}" for number in range(1, len(writable) + 1))
         arguments = ", ".join(argument_values[field["name"]] for field in writable)
@@ -1271,10 +1311,13 @@ def _write_helper(
     if err != nil {{ return {model["name"]}{{}}, err }}
     {body_guard}
     var saved {model["name"]}
+    {result_declarations}
     err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
-        return tx.QueryRow(ctx, {_go_literal(query)}, {arguments}).Scan({destinations})
+        {mark_write}
+        return tx.QueryRow(ctx, {_go_literal(query)}, {arguments}).Scan({returning_destinations})
     }})
     {assigned_response}
+    {project_native}
     return saved, err
 }}
 """
@@ -1297,10 +1340,14 @@ def _write_helper(
     if err != nil {{ return {model["name"]}{{}}, err }}
     {body_guard}
     var saved {model["name"]}
+    {result_declarations}
     err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
-        return tx.QueryRow(ctx, {_go_literal(query)}, {arguments}, lookup{scope_values}).Scan({destinations})
+        {lookup_before_write}
+        {mark_write}
+        return tx.QueryRow(ctx, {_go_literal(query)}, {arguments}, lookup{scope_values}).Scan({returning_destinations})
     }})
     {assigned_response}
+    {project_native}
     return saved, err
 }}
 """
@@ -1331,7 +1378,9 @@ def _write_helper(
     if err != nil {{ return {model["name"]}{{}}, err }}
     {body_guard}
     var saved {model["name"]}
+    {result_declarations}
     err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
+        {lookup_before_write}
         sets := []string{{}}
         values := []any{{{initial_values.removeprefix(", ")}}}
         {chr(10).join(cases)}
@@ -1340,9 +1389,11 @@ def _write_helper(
         }}
         values = append(values, lookup)
         query := fmt.Sprintf({_go_literal(update)}, strings.Join(sets, ", "), len(values))
-        return tx.QueryRow(ctx, query, values...).Scan({destinations})
+        {mark_write}
+        return tx.QueryRow(ctx, query, values...).Scan({returning_destinations})
     }})
     {assigned_response}
+    {project_native}
     return saved, err
 }}
 """

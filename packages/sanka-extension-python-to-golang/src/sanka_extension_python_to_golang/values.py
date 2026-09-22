@@ -113,7 +113,7 @@ func (v *TimestampValue) UnmarshalJSON(raw []byte) error {
     return nil
 }
 func (v TimestampValue) TimestamptzValue() (pgtype.Timestamptz, error) {
-    parsed, err := time.Parse(timestampLayout, string(v))
+    parsed, err := time.Parse(time.RFC3339Nano, string(v))
     return pgtype.Timestamptz{Time: parsed, Valid: err == nil}, err
 }
 func (v *TimestampValue) ScanTimestamptz(value pgtype.Timestamptz) error {
@@ -148,8 +148,12 @@ func (v *DecimalValue) ScanNumeric(value pgtype.Numeric) error {
 GO_NATIVE_VALUES = r"""// SPDX-License-Identifier: Apache-2.0
 package backend
 
-import ("bytes"; "encoding/json"; "fmt"; "math"; "math/big"; "regexp"; "strconv"; "strings"; "unicode"; "time"; "unicode/utf8")
+import ("bytes"; "encoding/json"; "fmt"; "math"; "math/big"; "regexp"; "strconv"; "strings"; "unicode"; "time"; "unicode/utf8"; "github.com/jackc/pgx/v5/pgtype")
 
+
+// Scan the RETURNING value before projecting it, so a source post-commit
+// UTC overflow cannot turn into a rolled-back candidate write.
+type nativeTimestampResult struct { pgtype.Timestamptz }
 
 // Native temporal input follows each source parser. Storage stays UTC/microsecond.
 var nativeCalendar = regexp.MustCompile(`^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})$`)
@@ -212,7 +216,10 @@ func temporalTime(raw []byte, drf, allowNaive bool) (time.Time, error) {
         if day, err := calendarDate(text, true); err == nil { return day, nil }
     }
     if drf {
-        fallback := strings.Map(decimalDigit, strings.TrimSuffix(text, "\n"))
+        fallback := strings.Map(func(r rune) rune {
+            if unicode.IsSpace(r) || (r >= 0x1c && r <= 0x1f) { return ' ' }
+            return decimalDigit(r)
+        }, strings.TrimSuffix(text, "\n"))
         if m := nativeDjangoTime.FindStringSubmatch(fallback); m != nil {
             nums := make([]int, 6)
             for i := range nums { nums[i], _ = strconv.Atoi(m[i+1]) }
@@ -262,12 +269,15 @@ func temporalTime(raw []byte, drf, allowNaive bool) (time.Time, error) {
     if hour > 23 || minute > 59 || second > 59 { return time.Time{}, invalid }
     fraction := m[4] + "000000"; micros, _ := strconv.Atoi(fraction[:6])
     result := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, second, micros*1000, zone).Add(-time.Duration(zoneFraction)*time.Microsecond)
-    if result.UTC().Year() < 1 || result.UTC().Year() > 9999 { return time.Time{}, invalid }
+    if drf && (result.UTC().Year() < 1 || result.UTC().Year() > 9999) { return time.Time{}, invalid }
     return result, nil
 }
 func nativeTimestamp(raw []byte, drf bool) (TimestampValue, error) {
     value, err := temporalTime(raw, drf, false)
     if err != nil { return "", err }
+    if value.UTC().Year() < 1 || value.UTC().Year() > 9999 {
+        return TimestampValue(value.Format("2006-01-02T15:04:05.000000Z07:00")), nil
+    }
     return TimestampValue(value.UTC().Format(timestampLayout)), nil
 }
 func nativeDate(raw []byte, drf bool) (DateValue, error) {
@@ -281,25 +291,39 @@ func nativeDate(raw []byte, drf bool) (DateValue, error) {
     }
     return "", fmt.Errorf("invalid date")
 }
-func nativeJSON(raw []byte) (JSONValue, error) {
-    // Preserve arbitrary integer precision; JSON fractional values use Python's float64 input.
-    decoder := json.NewDecoder(bytes.NewReader(raw)); decoder.UseNumber()
-    var value any
-    if err := decoder.Decode(&value); err != nil { return nil, err }
-    var convert func(any) (any, error)
-    convert = func(item any) (any, error) {
-        switch v := item.(type) {
-        case json.Number:
-            if strings.ContainsAny(string(v), ".eE") { return strconv.ParseFloat(string(v), 64) }
-        case []any:
-            for i := range v { child, err := convert(v[i]); if err != nil { return nil, err }; v[i] = child }
-        case map[string]any:
-            for k := range v { child, err := convert(v[k]); if err != nil { return nil, err }; v[k] = child }
-        }
-        return item, nil
+func nativeJSON(raw []byte, drf bool) (JSONValue, error) {
+    if !json.Valid(raw) { return nil, fmt.Errorf("invalid JSON") }
+    // Keep string/key escapes intact, including surrogates rejected by PostgreSQL.
+    // Decoding them through Go strings would silently replace them with U+FFFD.
+    var out bytes.Buffer
+    for i := 0; i < len(raw); {
+        start := i
+        if raw[i] == '"' {
+            i++
+            for i < len(raw) {
+                if raw[i] == '\\' { i += 2; continue }
+                if raw[i] == '"' { i++; break }; i++
+            }
+        } else if raw[i] == '-' || (raw[i] >= '0' && raw[i] <= '9') {
+            for i < len(raw) && strings.ContainsRune("0123456789+-.eE", rune(raw[i])) { i++ }
+            token := string(raw[start:i])
+            if strings.ContainsAny(token, ".eE") {
+                number, err := strconv.ParseFloat(token, 64)
+                if math.IsInf(number, 0) {
+                    if drf { return nil, fmt.Errorf("nonfinite JSON") }
+                    // Pydantic accepts this value; let PostgreSQL reject it after
+                    // the handler's lookup, as Python's JSON binding does.
+                    return JSONValue("Infinity"), nil
+                }
+                if err != nil { return nil, err }
+                text := strconv.FormatFloat(number, 'g', -1, 64)
+                if !strings.ContainsAny(text, ".eE") { text += ".0" }
+                out.WriteString(text); continue
+            }
+        } else { i++ }
+        out.Write(raw[start:i])
     }
-    value, err := convert(value); if err != nil { return nil, err }
-    return json.Marshal(value)
+    return out.Bytes(), nil
 }
 
 func decimalDigit(char rune) rune {

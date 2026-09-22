@@ -224,8 +224,15 @@ def test_native_temporal_decoder(tmp_path: Path, framework, target):
         1e20,
         1e-7,
     ]
-    values["name"] += ["2024-W094", "2024W09-4", "-0.0000005"]
+    values["name"] += [
+        "2024-W094",
+        "2024W09-4",
+        "-0.0000005",
+        "0001-01-01T00:00:00+01:00",
+        "9999-12-31T00:00:00-23:00",
+    ]
     values["count"] += ["+1", ".5", "-.5", "1.", "-0.0000005", "1e3"]
+    values["count"] += ["2024-2-9 1:2:3\u00a0Z"]
     cases = []
     for partial in (False, True):
         for field, inputs in values.items():
@@ -239,11 +246,14 @@ def test_native_temporal_decoder(tmp_path: Path, framework, target):
                 try:
                     expected = dict(body)
                     expected["name"] = validators["name"](body["name"]).isoformat()
-                    expected["count"] = (
-                        validators["count"](body["count"])
-                        .astimezone(UTC)
-                        .isoformat(timespec="microseconds")
-                    )
+                    validated_time = validators["count"](body["count"])
+                    try:
+                        expected["count"] = validated_time.astimezone(UTC).isoformat(
+                            timespec="microseconds"
+                        )
+                    except OverflowError:
+                        # Validation succeeds; UTC projection fails only after persistence.
+                        expected["count"] = validated_time.isoformat(timespec="microseconds")
                     if "note" in body:
                         expected["note"] = validators["note"](body["note"])
                 except Exception:
@@ -285,7 +295,7 @@ def temporal_project(root: Path, framework: str, target: str) -> dict:
         "name": "2024-02-29",
         "count": "2024-02-29T12:34:56.123456+07:00",
         "enabled": True,
-        "note": {"nested": [None, 1.25, True, 2**64]},
+        "note": {"nested": [None, 1.0, 1.25, True, 2**64 + 1]},
     }
     scenarios = [
         {
@@ -340,6 +350,25 @@ def temporal_project(root: Path, framework: str, target: str) -> dict:
             "expected_status": 201,
         },
     ]
+    if framework == "fastapi":
+        scenarios.extend(
+            [
+                {
+                    "id": "missing-overflow-time",
+                    "method": "PATCH",
+                    "path": "/widgets/999",
+                    "body": {"count": "0001-01-01T00:00:00+01:00"},
+                    "expected_status": 404,
+                },
+                {
+                    "id": "missing-surrogate-json",
+                    "method": "PATCH",
+                    "path": "/widgets/999",
+                    "body": {"note": {chr(0xD800): 1, chr(0xD801): 2}},
+                    "expected_status": 404,
+                },
+            ]
+        )
     (root / "sanka-verify.json").write_text(json.dumps({"scenarios": scenarios}))
     return {
         "source_framework": framework,
@@ -406,6 +435,9 @@ def test_native_temporal_postgres(tmp_path, monkeypatch, framework, target):
             assert observed["null"]["body"]["note"] is None
             assert observed["absent"]["body"] == observed["null"]["body"]
             assert observed["recreate"]["body"]["id"] == "2"
+            if framework == "fastapi":
+                assert_native_storage_boundaries(tmp_path, source, target_url)
+
         finally:
             for name in schemas:
                 admin.execute(
@@ -455,13 +487,18 @@ def test_native_json_null_decoder(tmp_path, none_as_null, nullable):
         source = source.replace("data.get('note')", "data['note']").replace(
             'data.get("note")', 'data["note"]'
         )
-    (tmp_path / "models.py").write_text(model)
-    (tmp_path / "app.py").write_text(source)
+    (tmp_path / "models.py").write_text(model.replace("note", "count_extra"))
+    (tmp_path / "app.py").write_text(source.replace("note", "count_extra"))
     result = capture(
         tmp_path, configuration({"source_framework": "fastapi", "database_layer": "pgx"})
     )
     assert result["gaps"] == []
-    body = {"name": "2024-02-29", "count": "2024-02-29T12:34:56Z", "enabled": True, "note": None}
+    body = {
+        "name": "2024-02-29",
+        "count": "2024-02-29T12:34:56Z",
+        "enabled": True,
+        "count_extra": None,
+    }
     expected = body | {"count": "2024-02-29T12:34:56.000000+00:00"}
     assert_go_decoder_parity(
         tmp_path,
@@ -478,3 +515,171 @@ def test_native_drf_timezone_import_must_precede_schema(tmp_path):
     assert capture(tmp_path, configuration({"source_framework": "drf", "database_layer": "pgx"}))[
         "gaps"
     ]
+
+
+def test_native_json_preserves_storage_rejections(tmp_path):
+    if os.getenv("SANKA_GO_TESTS") != "1":
+        pytest.skip("requires native Go")
+    import subprocess
+
+    from sanka_extension_python_to_golang.render import render
+
+    output = tmp_path / "candidate"
+    for name, contents in render(temporal_capture(tmp_path, "fastapi")).items():
+        path = output / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents)
+    (output / "json_storage_test.go").write_text(r"""package backend
+import ("encoding/json"; "testing")
+func TestNativeJSONStorage(t *testing.T) {
+    for _, raw := range []string{`"\ud800"`, `{"\ud800":1,"\ud801":2}`, `{"k":["\ud800"]}`, `{"x":1.0}`, `{"x":18446744073709551617}`} {
+        value, err := nativeJSON([]byte(raw), false)
+        if err != nil || string(value) != raw { t.Errorf("%s became %s: %v", raw, value, err) }
+    }
+    for _, drf := range []bool{false, true} {
+        value, err := nativeJSON([]byte(`{"x":1e400}`), drf)
+        if drf && err == nil { t.Fatal("DRF must reject nonfinite values") }
+        if !drf && (err != nil || json.Valid(value)) { t.Fatalf("Pydantic value must reach database rejection: %s %v", value, err) }
+    }
+}
+""")
+    result = subprocess.run(
+        ["go", "test", "-mod=readonly", "-p=2", "-run", "TestNativeJSONStorage", "."],
+        cwd=output,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def assert_native_storage_boundaries(root, source_url, target_url):
+    """Unexpected projection/storage errors must preserve source commit/sequence behavior."""
+    import subprocess
+    import sys
+
+    body = {"name": "2024-03-10", "count": "0001-01-01T00:00:00+01:00", "enabled": True}
+    cases = [
+        json.dumps(body),
+        json.dumps(body | {"name": "2024-03-11", "count": "9999-12-31T23:59:59-01:00"}),
+        json.dumps(
+            body
+            | {
+                "name": "2024-03-12",
+                "count": "2024-01-01T00:00:00Z",
+                "note": {chr(0xD800): 1, chr(0xD801): 2},
+            }
+        ),
+        json.dumps(
+            body | {"name": "2024-03-13", "count": "2024-01-01T00:00:00Z", "note": 0}
+        ).replace('"note": 0', '"note": 1e400'),
+    ]
+    output = root / ".sanka/go/golang"
+    (output / "storage-cases.json").write_text(json.dumps(cases))
+    source_probe = r"""
+import json, os, sys
+from pathlib import Path
+import psycopg
+from fastapi.testclient import TestClient
+sys.path.insert(0, sys.argv[1])
+from backend.main import app
+snapshots = []
+with TestClient(app, raise_server_exceptions=False) as client, psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://'), autocommit=True) as db:
+    for raw in json.loads(Path(sys.argv[2]).read_text()):
+        missing = client.patch('/widgets/999', content=raw, headers={'content-type': 'application/json'})
+        print(json.dumps({'stage': 'missing', 'status': missing.status_code}), flush=True)
+        assert missing.status_code == 404, missing.status_code
+        response = client.post('/widgets', content=raw, headers={'content-type': 'application/json'})
+        print(json.dumps({'stage': 'create', 'status': response.status_code}), flush=True)
+        assert response.status_code == 500, response.status_code
+        rows = db.execute("SELECT coalesce(jsonb_agg(jsonb_build_array(id::text,name::text,count::text,note::text) ORDER BY id),'[]') FROM widgets").fetchone()[0]
+        seq = db.execute("SELECT last_value::text,is_called FROM widgets_id_seq").fetchone()
+        snapshots.append({'rows': rows, 'sequence': list(seq)})
+Path(sys.argv[3]).write_text(json.dumps(snapshots))
+"""
+    source = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            source_probe,
+            str(root / "src"),
+            str(output / "storage-cases.json"),
+            str(output / "storage-source.json"),
+        ],
+        env=os.environ | {"DATABASE_URL": source_url},
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    # Never print DB exception output containing credentials.
+    assert source.returncode == 0, "source storage-boundary probe failed: " + source.stdout
+    (output / "storage_boundaries_test.go").write_text(r"""package backend
+import ("context"; "encoding/json"; "errors"; "os"; "testing"; "github.com/jackc/pgx/v5/pgxpool"; "github.com/jackc/pgx/v5")
+func TestNativeStorageBoundaries(t *testing.T) {
+    ctx := context.Background()
+    pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL")); if err != nil { t.Fatal(err) }; defer pool.Close()
+    data, err := os.ReadFile("storage-cases.json"); if err != nil { t.Fatal(err) }
+    var cases []string; if err := json.Unmarshal(data, &cases); err != nil { t.Fatal(err) }
+    snapshots := []map[string]any{}
+    for _, raw := range cases {
+        if _, err := writeRow1(ctx, pool, []byte(raw), 999); !errors.Is(err, pgx.ErrNoRows) { t.Fatal("missing row must be checked before binding native values") }
+        _, err := writeRow0(ctx, pool, []byte(raw))
+        if err == nil || errors.Is(err, errInvalidWrite) { t.Fatalf("source storage/projection error moved into validation: %v", err) }
+        var rows []byte
+        if err := pool.QueryRow(ctx, "SELECT coalesce(jsonb_agg(jsonb_build_array(id::text,name::text,count::text,note::text) ORDER BY id),'[]') FROM widgets").Scan(&rows); err != nil { t.Fatal(err) }
+        var last string; var called bool
+        if err := pool.QueryRow(ctx, "SELECT last_value::text,is_called FROM widgets_id_seq").Scan(&last,&called); err != nil { t.Fatal(err) }
+        snapshots = append(snapshots, map[string]any{"rows": json.RawMessage(rows), "sequence": []any{last,called}})
+    }
+    encoded, err := json.Marshal(snapshots); if err != nil { t.Fatal(err) }
+    if err := os.WriteFile("storage-target.json", encoded, 0600); err != nil { t.Fatal(err) }
+}
+""")
+    target = subprocess.run(
+        ["go", "test", "-mod=readonly", "-p=2", "-run", "TestNativeStorageBoundaries", "."],
+        cwd=output,
+        env=os.environ | {"DATABASE_URL": target_url, "GOMAXPROCS": "2"},
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert target.returncode == 0, "candidate storage-boundary probe failed"
+    observed = json.loads((output / "storage-source.json").read_text())
+    assert observed == json.loads((output / "storage-target.json").read_text())
+    assert [len(row["rows"]) for row in observed] == [2, 3, 3, 3]
+
+
+def test_multiple_native_timestamps_compile(tmp_path):
+    if os.getenv("SANKA_GO_TESTS") != "1":
+        pytest.skip("requires native Go")
+    temporal_capture(tmp_path, "fastapi")
+    source = (
+        temporal_source("fastapi")
+        .replace("name: date", "name: AwareDatetime")
+        .replace(
+            "item.name.isoformat()",
+            "item.name.astimezone(timezone.utc).isoformat(timespec='microseconds')",
+        )
+    )
+    model = temporal_models("fastapi").replace(
+        "name: Mapped[date] = mapped_column(Date, unique=True)",
+        "name: Mapped[datetime] = mapped_column(DateTime(timezone=True), unique=True)",
+    )
+    (tmp_path / "app.py").write_text(source)
+    (tmp_path / "models.py").write_text(model)
+    result = capture(
+        tmp_path, configuration({"source_framework": "fastapi", "database_layer": "pgx"})
+    )
+    assert result["gaps"] == []
+    body = {"name": "2024-02-29T00:00:00+07:00", "count": "2024-02-29T12:34:56Z", "enabled": True}
+    expected = body | {
+        "name": "2024-02-28T17:00:00.000000+00:00",
+        "count": "2024-02-29T12:34:56.000000+00:00",
+    }
+    assert_go_decoder_parity(
+        tmp_path,
+        result,
+        [{"body": json.dumps(body), "partial": False, "valid": True, "expected": expected}],
+        "decodeWidget_pydantic",
+    )
