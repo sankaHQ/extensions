@@ -65,13 +65,19 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 output = _safe(root, artifacts / "golang")
                 report = replay(root, output, captured, request.command)
                 report["plan_hash"] = plan_hash
+                report["qualification"] = {
+                    "candidate_executed": True,
+                    "source_compared": "source" in report,
+                    "original_tests_executed": False,
+                    "cutover_qualified": False,
+                }
                 destination = _safe(root, artifacts / f"{request.command}.json")
                 destination.write_text(canonical(report) + "\n")
                 if not report["ok"]:
                     return failure_response(
                         request,
                         code="SANKA_EXTENSION_PARITY_FAILED",
-                        message=f"GET contract checks failed; inspect {request.command}.json",
+                        message=f"Captured endpoint checks failed; inspect {request.command}.json",
                         details={"report": str(destination)},
                     )
                 return success_response(
@@ -79,7 +85,8 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                     data=report,
                     artifacts=[str(destination)],
                     limitations=[
-                        "Only captured GET contracts were exercised; not cutover readiness."
+                        "Only captured endpoint scenarios were exercised; "
+                        "original source tests were not run; not cutover readiness."
                     ],
                 )
             if request.command == "apply":

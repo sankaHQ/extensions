@@ -721,3 +721,63 @@ def test_native_schema_imports_must_precede_declaration(
 ) -> None:
     source = native_source(framework).replace(statement, "") + "\n" + statement + "\n"
     assert captured(tmp_path, framework, source=source)["gaps"]
+
+
+def test_native_serializer_rejects_raw_optional_input(tmp_path: Path) -> None:
+    import ast
+
+    source = ast.parse(native_source("drf"))
+
+    class RawInput(ast.NodeTransformer):
+        def visit_Attribute(self, node):
+            if ast.unparse(node) == "data.get":
+                return ast.copy_location(ast.parse("request.data.get", mode="eval").body, node)
+            return self.generic_visit(node)
+
+    text = ast.unparse(ast.fix_missing_locations(RawInput().visit(source)))
+    assert "request.data.get" in text
+    assert captured(tmp_path, "drf", source=text)["gaps"]
+
+
+def test_decimal_scan_retains_zero_scale(tmp_path: Path) -> None:
+    import os
+    import subprocess
+
+    from test_golang_schema import generate
+
+    if os.getenv("SANKA_GO_TESTS") != "1":
+        pytest.skip("requires native Go")
+    decimal_capture(tmp_path, "fastapi")
+    output = generate(
+        tmp_path,
+        "fastapi",
+        "fiber",
+        app_source=decimal_source("fastapi"),
+        model_text=(tmp_path / "models.py").read_text(),
+    )
+    assert '"count"::text' in (output / "app.go").read_text().replace('\\"', '"')
+    (output / "numeric_scale_test.go").write_text("""package backend
+import ("testing"; "github.com/jackc/pgx/v5/pgtype")
+func TestZeroScale(t *testing.T) {
+    for _, want := range []string{"0", "0.0000", "0.0000000000"} {
+        var value DecimalValue
+        codec := pgtype.NewMap()
+        err := codec.Scan(pgtype.TextOID, pgtype.TextFormatCode, []byte(want), &value)
+        if err != nil || string(value) != want { t.Fatalf("%s: %s %v", want, value, err) }
+        var nullable *DecimalValue
+        err = codec.Scan(pgtype.TextOID, pgtype.TextFormatCode, []byte(want), &nullable)
+        if err != nil || nullable == nil || string(*nullable) != want { t.Fatal(want, err) }
+        err = codec.Scan(pgtype.TextOID, pgtype.TextFormatCode, nil, &nullable)
+        if err != nil || nullable != nil { t.Fatal("NULL numeric", err) }
+    }
+}
+""")
+    result = subprocess.run(
+        ["go", "test", "-mod=readonly", "-p=2", "-run", "TestZeroScale", "./..."],
+        cwd=output,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        env=os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

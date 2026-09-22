@@ -803,6 +803,11 @@ def _normalize_drf_serializers(
                     ):
                         continue
                     remaining = ast.Module(body=node.body[3:], type_ignores=[])
+                    if kind == "drf" and any(
+                        isinstance(item, ast.Attribute) and ast.unparse(item) == "request.data"
+                        for item in ast.walk(remaining)
+                    ):
+                        raise ValueError("native serializer handlers must use validated_data only")
                     ValidatedData().visit(remaining)
                     node.body = (
                         ast.parse(_write_validation(fields, "request.data", partial, error)).body
@@ -1541,10 +1546,25 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 and source != root / config.get("models_file", "")
             ):
                 unconsumed.append(relative.as_posix())
+    # Only modules outside the statically imported graph can be source tests.
+    # They remain fingerprinted; their assertions are not translated or executed.
+    source_tests = sorted(
+        name
+        for name in unconsumed
+        if "versions" not in Path(name).parts
+        and "migrations" not in Path(name).parts
+        and (
+            "tests" in Path(name).parts[:-1]
+            or Path(name).name == "conftest.py"
+            or Path(name).name.startswith("test_")
+            or Path(name).name.endswith("_test.py")
+        )
+    )
+    unconsumed = [name for name in unconsumed if name not in source_tests]
     persistence = None
     if framework == "fastapi":
         try:
-            persistence = capture_fastapi_persistence(root)
+            persistence = capture_fastapi_persistence(root, excluded=frozenset(source_tests))
         except (OSError, SyntaxError, TypeError, ValueError) as error:
             gaps.append("persistence: " + str(error))
         if persistence is not None:
@@ -2039,12 +2059,25 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             "files": len(records),
             "python_files": sum(name.endswith(".py") for name in records),
             "bytes": total,
+            "module_roles": {
+                "application": sorted({filename, *modules}),
+                "models": [config["models_file"]] if config.get("models_file") in records else [],
+                "tests": source_tests,
+                "unclassified": sorted(
+                    name
+                    for name in records
+                    if name.endswith(".py")
+                    and name not in {filename, *modules, *source_tests}
+                    and name != config.get("models_file")
+                ),
+            },
         },
         "configuration": config,
         "routes": sorted(routes, key=lambda item: item["path"]),
         "gaps": sorted(set(gaps)),
         "scope": "literal public JSON GET endpoints",
         "complete_backend": False,
+        "generation_ready": not gaps,
     }
 
     if modules:

@@ -29,6 +29,15 @@ def _go_literal(value: Any) -> str:
     )
 
 
+def _projection(fields: list[dict[str, Any]]) -> str:
+    # pgx's binary numeric decoder discards scale for zero. PostgreSQL text
+    # preserves it for every read and RETURNING path, including nullable fields.
+    return ", ".join(
+        '"' + field["name"] + '"' + ("::text" if field["go_type"] == "DecimalValue" else "")
+        for field in fields
+    )
+
+
 def _runtime(target: str, database: bool, database_configured: bool) -> dict[str, str]:
     database_import = '"github.com/jackc/pgx/v5/pgxpool"' if database else ""
     database_field = "\n    databaseURL string" if database else ""
@@ -671,7 +680,7 @@ def _scope_parts(operation: dict[str, Any], start: int, failure: str) -> tuple[s
 
 
 def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str:
-    columns = ", ".join('"' + field["name"] + '"' for field in model["fields"])
+    columns = _projection(model["fields"])
     filters = read.get("filters", [read["filter"]] if "filter" in read else [])
     pagination = read.get("pagination")
     related = next(
@@ -795,7 +804,7 @@ def _detail_read_registration(
 def _detail_read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str:
     fields = model["fields"]
     lookup = next(field for field in fields if field["name"] == read["lookup"])
-    columns = ", ".join('"' + field["name"] + '"' for field in fields)
+    columns = _projection(fields)
     destinations = ", ".join("&item." + go_name(field["name"]) for field in fields)
     query = f'SELECT {columns} FROM "{model["table"]}" WHERE "{lookup["name"]}" = $1'
     guard, predicate, values = _scope_parts(read, 2, "return nil, scopeErr")
@@ -941,7 +950,7 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
             if not field["auto"] and not (operation != "create" and field["primary_key"])
         ]
         columns = ", ".join('"' + field["name"] + '"' for field in writable)
-        returning = ", ".join('"' + field["name"] + '"' for field in fields)
+        returning = _projection(fields)
         destinations = ", ".join(f"&saved{number}." + go_name(field["name"]) for field in fields)
         key = f"item{number}.{go_name(primary['name'])}"
         if operation == "create":
@@ -1040,7 +1049,7 @@ def _write_helper(
     fields = model["fields"]
     writable = [field for field in fields if not field["auto"]]
     columns = ", ".join('"' + field["name"] + '"' for field in writable)
-    returning = ", ".join('"' + field["name"] + '"' for field in fields)
+    returning = _projection(fields)
     destinations = ", ".join("&saved." + go_name(field["name"]) for field in fields)
     accepted = ", ".join(_go_literal(field["name"]) + ": {}" for field in writable)
     validation_kind = write.get("validation", {}).get("kind", "strict")

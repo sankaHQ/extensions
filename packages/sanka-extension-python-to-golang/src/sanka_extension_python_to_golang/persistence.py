@@ -531,7 +531,9 @@ def _repositories(path: Path, tree: ast.Module, gaps: list[str]) -> list[dict[st
     return result
 
 
-def capture_fastapi_persistence(root: Path) -> dict[str, Any] | None:
+def capture_fastapi_persistence(
+    root: Path, *, excluded: frozenset[str] = frozenset()
+) -> dict[str, Any] | None:
     """Capture conventional FastAPI persistence declarations from regular Python files."""
     files = []
     pydantic_models = []
@@ -545,6 +547,8 @@ def capture_fastapi_persistence(root: Path) -> dict[str, Any] | None:
         if any(part in IGNORED for part in relative_path.parts):
             continue
         relative = relative_path.as_posix()
+        if relative in excluded:
+            continue
         if path.is_symlink() or not path.is_file():
             gaps.append(f"{relative}: persistence source must be a regular file")
             continue

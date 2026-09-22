@@ -988,7 +988,9 @@ behavior preserved. Pydantic decimals retain their original coefficient and expo
 until PostgreSQL applies the column scale and range rules. ORM defaults do not make a required serializer field optional.
 
 The native profile requires the existing explicit response projection and stable
-validation error handler. Custom validators, decimal contexts, aliases, rounding
+validation error handler. Native DRF handlers must read `validated_data` after validation;
+mixing raw request values with coerced fields remains a capture gap. Custom validators,
+decimal contexts, aliases, rounding
 policies, and native date/time/JSON request schemas remain capture gaps. Existing
 explicit wire-validation profiles remain supported. The generated native helpers
 use Go's standard library and are emitted only for native rich-field contracts.
@@ -997,3 +999,30 @@ Qualification includes differential serializer/Go decoder tests and PostgreSQL
 replay fixtures for DRF, synchronous FastAPI and async FastAPI on Fiber, chi, mux,
 and Gin, including HTTP errors, exact numeric values, null/absent updates, deletes,
 and table/sequence effects. Database tests require the documented fixture DSN.
+
+
+### Packaged source projects and generation readiness
+
+`source_file` and `models_file` stay relative to the project root. Regular Python
+packages can live directly in the project or under a directory such as `src/`;
+imports resolve from the outermost regular package, as they do in isolated replay.
+Package initializers must remain declarative. Namespace-package execution,
+import cycles, shadowed framework modules and dynamic imports remain capture gaps.
+
+Scan includes `generation_ready` and `source_inventory.module_roles`, separating
+application modules, the configured model module, source tests and unclassified
+Python files. Unimported `tests/` files, `conftest.py`, `test_*.py` and `*_test.py`
+are inventoried as source tests. Imported helpers remain application code even
+when their filenames look like tests. Migration directories are never excluded by
+these test conventions. Every source test remains in the source fingerprint, so
+changing it invalidates the reviewed plan. Source assertions are not translated
+or executed; generated contract tests and source/target replay provide the stated
+qualification. Unclassified runtime behavior still blocks generation.
+
+A ready scan means the captured project can be generated, not that it is ready
+for production cutover. Test/verify reports include `qualification` flags for
+candidate execution, source comparison, original-test execution and cutover
+qualification. `test` executes the Go candidate; `verify` also compares the
+captured Python source. PostgreSQL write verification additionally compares rows
+and sequences in independent resettable fixture schemas. Neither command marks
+arbitrary application behavior or production deployment as qualified.

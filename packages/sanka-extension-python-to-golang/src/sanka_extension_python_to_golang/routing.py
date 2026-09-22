@@ -384,10 +384,23 @@ def _django(tree: ast.Module) -> ast.Module:
     return ast.fix_missing_locations(tree)
 
 
+def source_import_root(root: Path, filename: str) -> Path:
+    """Use the same regular-package root as the isolated source probe."""
+    directory = (root / filename).parent
+    if not (directory / "__init__.py").is_file():
+        return root
+    while directory != root and (directory / "__init__.py").is_file():
+        if directory.is_symlink() or (directory / "__init__.py").is_symlink():
+            raise ValueError("source packages must not be symlinks")
+        directory = directory.parent
+    return directory
+
+
 def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Module, list[str]]:
     """Inline an explicit package graph, retaining original files for replay."""
     if Path(filename).stem in RESERVED_MODULES:
         raise ValueError("source filename conflicts with runtime imports")
+    import_root = source_import_root(root, filename)
     visited: set[str] = set()
     active: set[str] = set()
     total_bytes = 0
@@ -398,7 +411,7 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
     def packages(name: str) -> None:
         nonlocal total_bytes
         for parent in reversed(Path(name).parents):
-            if parent == Path("."):
+            if not (root / parent).is_relative_to(import_root) or root / parent == import_root:
                 continue
             if (root / parent).is_symlink():
                 raise ValueError("source packages must not be symlinks")
@@ -425,7 +438,7 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
 
     def local_module(node: ast.ImportFrom, name: str) -> str | None:
         if node.level:
-            parents = list(Path(name).parent.parts)
+            parents = list((root / name).relative_to(import_root).parent.parts)
             if node.level > len(parents) or not node.module:
                 raise ValueError("relative imports must name a module inside the source package")
             parts = parents[: len(parents) - node.level + 1] + node.module.split(".")
@@ -436,14 +449,15 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
         if not all(part.isidentifier() for part in parts):
             raise ValueError("source imports require canonical module names")
         path = Path(*parts).with_suffix(".py")
-        candidate = root / path
-        if (root / Path(*parts) / "__init__.py").exists():
+        candidate = import_root / path
+        if (import_root / Path(*parts) / "__init__.py").exists():
             raise ValueError("import a declared symbol from its module, not a package initializer")
         if candidate.exists():
             if parts[0] in RESERVED_MODULES:
                 raise ValueError("source package conflicts with runtime imports")
-            packages(path.as_posix())
-            return path.as_posix()
+            relative = candidate.relative_to(root).as_posix()
+            packages(relative)
+            return relative
         if node.level:
             raise ValueError("relative source module is missing")
         return None
