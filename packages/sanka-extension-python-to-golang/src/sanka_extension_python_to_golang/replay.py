@@ -320,6 +320,10 @@ def request_paths(route: dict[str, Any]) -> list[str]:
 def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> dict[str, Any]:
     if captured["gaps"]:
         raise ValueError("cannot replay unsupported source behavior")
+    if captured.get("drf_project"):
+        from .drf_replay import replay_project
+
+        return replay_project(root, output, captured, command)
     if any("write" in route for route in captured["routes"]):
         from .write_replay import replay_writes
 

@@ -1064,3 +1064,49 @@ enabled qualification job. No original source tests or production application ar
 Boundary probes separately verify that accepted extreme timestamps and PostgreSQL-invalid
 JSON preserve lookup ordering and committed rows/sequences. These probes qualify storage
 behavior, not parity of framework-specific unhandled-500 response bodies.
+
+
+## Conventional Django project profile
+
+A bounded DRF 3.18 project can use `manage.py`, static settings, an installed app,
+`DefaultRouter`, `ModelViewSet`, and `ModelSerializer`. Configure the actual URL
+and model modules:
+
+```json
+{"source_framework":"drf","target_framework":"fiber","source_file":"shop_config/urls.py","models_file":"orders/models.py","database_layer":"pgx"}
+```
+
+This profile accepts a SQLite source and an empty PostgreSQL destination, using
+pgx and Goose on all four routers. It captures string choices/defaults, integer,
+boolean and decimal fields, unique fields, cascade foreign keys, and one explicit
+nested serializer. Nested writes require the captured atomic parent/children
+create and aggregate-limit rollback recipe; updates preserve the captured nested
+ignore behavior. Unknown settings, hooks, queryset overrides and schema drift
+remain blockers. One initial schema migration must match the model declarations.
+The executable contract is in `tests/test_golang_drf_project.py`. Executable
+annotations, writable identity overrides, nested uniqueness validators, and
+optional aggregate fields are blocked rather than silently changed.
+
+Generated writes use transactional identity counters because SQLite rolls back
+AUTOINCREMENT allocation with failed writes. IDs are allocated by the generated
+handlers; direct SQL writers must not invent their own allocation. Application
+startup, database migrations and shutdown reuse the existing runtime. No service
+or repository layer is added for this CRUD profile.
+
+`verify` copies the classified source into an isolated process, checks DRF 3.18,
+migrates a disposable SQLite database, and compares JSON responses, captured rows
+and logical identity state with an explicitly resettable PostgreSQL fixture.
+Hosted-style `sanka-verify.json` cases with `setup` retain independent resets;
+setup requests are observed too. Ordinary shared scenarios run in order. Original
+source tests are fingerprinted, but are not automatically executed or translated.
+Forward the fixture DSN and source interpreter through the CLI using
+`--extension-env SANKA_GO_TARGET_TEST_DATABASE_URL` and
+`--extension-env SANKA_GO_SOURCE_PYTHON` for test/verify.
+
+This is an anonymous JSON CRUD qualification, not full Django compatibility.
+Credential-bearing requests fail closed with 501; Django authentication/session
+identity is not migrated. Browsable HTML, form parsers, router root/OPTIONS/format
+suffixes, framework-specific malformed-JSON and unhandled-error bodies, host
+validation, arbitrary middleware, custom validators, and existing-data cutover
+remain outside this profile. Passing fixture replay does not qualify those paths
+or production deployment. The capture and reports retain `complete_backend=false`.

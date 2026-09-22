@@ -1,0 +1,204 @@
+{
+  "db_env": "BENCH_DB_PATH",
+  "scenarios": [
+    {
+      "id": "list-orders",
+      "method": "GET",
+      "path": "/api/orders/",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "expected_source_status": 200,
+      "setup": [
+        {
+          "method": "POST",
+          "path": "/api/orders/",
+          "body": {
+            "reference": "ORD-1",
+            "status": "new",
+            "items": [
+              {
+                "sku": "SKU-A",
+                "quantity": 2,
+                "price": "10.00"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "retrieve-order",
+      "method": "GET",
+      "path": "/api/orders/1/",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "expected_source_status": 200,
+      "setup": [
+        {
+          "method": "POST",
+          "path": "/api/orders/",
+          "body": {
+            "reference": "ORD-1",
+            "status": "new",
+            "items": [
+              {
+                "sku": "SKU-A",
+                "quantity": 2,
+                "price": "10.00"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "nested-create",
+      "method": "POST",
+      "path": "/api/orders/",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "expected_source_status": 201,
+      "body": {
+        "reference": "ORD-1",
+        "status": "new",
+        "items": [
+          {
+            "sku": "SKU-A",
+            "quantity": 2,
+            "price": "10.00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "update-order",
+      "method": "PATCH",
+      "path": "/api/orders/1/",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "expected_source_status": 200,
+      "body": {
+        "status": "paid",
+        "memo": "updated"
+      },
+      "setup": [
+        {
+          "method": "POST",
+          "path": "/api/orders/",
+          "body": {
+            "reference": "ORD-1",
+            "status": "new",
+            "items": [
+              {
+                "sku": "SKU-A",
+                "quantity": 2,
+                "price": "10.00"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-order",
+      "method": "DELETE",
+      "path": "/api/orders/1/",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "expected_source_status": 204,
+      "setup": [
+        {
+          "method": "POST",
+          "path": "/api/orders/",
+          "body": {
+            "reference": "ORD-1",
+            "status": "new",
+            "items": [
+              {
+                "sku": "SKU-A",
+                "quantity": 2,
+                "price": "10.00"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "duplicate-reference",
+      "method": "POST",
+      "path": "/api/orders/",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "expected_source_status": 400,
+      "body": {
+        "reference": "ORD-1",
+        "items": []
+      },
+      "setup": [
+        {
+          "method": "POST",
+          "path": "/api/orders/",
+          "body": {
+            "reference": "ORD-1",
+            "status": "new",
+            "items": [
+              {
+                "sku": "SKU-A",
+                "quantity": 2,
+                "price": "10.00"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "business-rule-rollback",
+      "method": "POST",
+      "path": "/api/orders/",
+      "headers": {
+        "Accept": "application/json"
+      },
+      "expected_source_status": 400,
+      "body": {
+        "reference": "ORD-2",
+        "items": [
+          {
+            "sku": "SKU-B",
+            "quantity": 60,
+            "price": "1.00"
+          },
+          {
+            "sku": "SKU-C",
+            "quantity": 60,
+            "price": "1.00"
+          }
+        ]
+      },
+      "setup": [
+        {
+          "method": "POST",
+          "path": "/api/orders/",
+          "body": {
+            "reference": "ORD-1",
+            "status": "new",
+            "items": [
+              {
+                "sku": "SKU-A",
+                "quantity": 2,
+                "price": "10.00"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
