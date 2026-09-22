@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from .models import go_name
+from .values import render_values
 
 MIGRATION_RUNNER = """// SPDX-License-Identifier: Apache-2.0
 package backend
@@ -108,6 +109,12 @@ def _adoption_sql(captured: dict[str, Any]) -> list[str]:
             sql_type = field["sql_type"]
             length = int(sql_type[8:-1]) if sql_type.startswith("varchar(") else None
             data_type = "character varying" if length is not None else sql_type
+            numeric = sql_type.startswith("numeric(")
+            precision, scale = (
+                list(map(int, sql_type[8:-1].split(","))) if numeric else [None, None]
+            )
+            if numeric:
+                data_type = "numeric"
             auto_kind = (
                 "identity"
                 if field["auto"] and framework == "drf"
@@ -123,6 +130,9 @@ def _adoption_sql(captured: dict[str, Any]) -> list[str]:
                     length,
                     auto_kind,
                     "NEVER",
+                    precision,
+                    scale,
+                    6 if sql_type == "timestamp with time zone" else None,
                 ]
             )
             if field["auto"]:
@@ -130,8 +140,12 @@ def _adoption_sql(captured: dict[str, Any]) -> list[str]:
             if field["primary_key"]:
                 primary.append(field["name"])
             elif field["unique"]:
-                constraints.append([model["table"], "u", [field["name"]], False, False])
-        constraints.append([model["table"], "p", primary, False, False])
+                constraints.append([model["table"], "u", [field["name"]], False, False, False])
+        constraints.append([model["table"], "p", primary, False, False, False])
+        constraints.extend(
+            [model["table"], "u", entry["columns"], False, False, False]
+            for entry in model.get("constraints", [])
+        )
     constraints.sort(key=lambda item: (item[0], item[1], item[2]))
     foreign_keys.sort(key=lambda item: (item[0], item[1]))
     locks = "\n".join(f'LOCK TABLE "{model["table"]}" IN ACCESS SHARE MODE;' for model in models)
@@ -142,6 +156,33 @@ def _adoption_sql(captured: dict[str, Any]) -> list[str]:
         RAISE EXCEPTION 'schema adoption failed: sequence ownership differs';
     END IF;"""
         for table, column in auto_columns
+    )
+    index_checks = "\n".join(
+        f"""    IF NOT EXISTS (
+        SELECT 1 FROM pg_index x JOIN pg_class t ON t.oid = x.indrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_class i ON i.oid = x.indexrelid JOIN pg_am am ON am.oid = i.relam
+        WHERE n.nspname = current_schema() AND t.relname = '{model["table"]}'
+          {("AND i.relname = '" + index["name"] + "'") if "name" in index else ""}
+          AND am.amname = 'btree'
+          AND x.indisvalid AND x.indisready AND NOT x.indisunique
+          AND x.indpred IS NULL AND x.indexprs IS NULL
+          AND x.indnatts = x.indnkeyatts
+          AND NOT EXISTS (SELECT 1 FROM unnest(x.indoption) opt WHERE opt <> 0)
+          AND NOT EXISTS (SELECT 1 FROM unnest(x.indclass) op(oid)
+                          JOIN pg_opclass oc ON oc.oid = op.oid WHERE NOT oc.opcdefault)
+          AND (SELECT jsonb_agg(a.attname ORDER BY k.ordinality)
+               FROM unnest(x.indkey) WITH ORDINALITY k(attnum, ordinality)
+               JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+              ) = {_jsonb(index["columns"])}
+    ) THEN
+        RAISE EXCEPTION 'schema adoption failed: index differs';
+    END IF;"""
+        for model in models
+        for index in [
+            *model.get("indexes", []),
+            *({"columns": [field["name"]]} for field in model["fields"] if field.get("index")),
+        ]
     )
     return [
         "-- +goose Up",
@@ -181,7 +222,10 @@ BEGIN
         CASE WHEN is_identity = 'YES' THEN 'identity'
              WHEN column_default LIKE 'nextval(%' THEN 'sequence'
              WHEN column_default IS NULL THEN 'none' ELSE 'default' END,
-        is_generated
+        is_generated,
+        CASE WHEN data_type = 'numeric' THEN numeric_precision ELSE NULL END,
+        CASE WHEN data_type = 'numeric' THEN numeric_scale ELSE NULL END,
+        CASE WHEN data_type = 'timestamp with time zone' THEN datetime_precision ELSE NULL END
     ) ORDER BY table_name, ordinal_position), '[]')
       INTO actual
       FROM information_schema.columns
@@ -189,6 +233,7 @@ BEGIN
     IF actual <> {_jsonb(columns)} THEN
         RAISE EXCEPTION 'schema adoption failed: columns differ';
     END IF;
+    {index_checks}
 
     IF EXISTS (
         SELECT 1 FROM pg_constraint con
@@ -200,21 +245,25 @@ BEGIN
         RAISE EXCEPTION 'schema adoption failed: unsupported constraints';
     END IF;
     SELECT COALESCE(jsonb_agg(jsonb_build_array(
-        table_name, constraint_type, columns, is_deferrable, is_deferred
+        table_name, constraint_type, columns, is_deferrable, is_deferred, nulls_not_distinct
     ) ORDER BY table_name, constraint_type, columns), '[]')
       INTO actual
       FROM (
         SELECT c.relname AS table_name, con.contype::text AS constraint_type,
                jsonb_agg(a.attname ORDER BY key.ordinality) AS columns,
-               con.condeferrable AS is_deferrable, con.condeferred AS is_deferred
+               con.condeferrable AS is_deferrable, con.condeferred AS is_deferred,
+               COALESCE((to_jsonb(idx)->>'indnullsnotdistinct')::boolean, false)
+                   AS nulls_not_distinct
         FROM pg_constraint con
         JOIN pg_class c ON c.oid = con.conrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_index idx ON idx.indexrelid = con.conindid
         JOIN unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON true
         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = key.attnum
         WHERE n.nspname = current_schema() AND c.relname <> 'goose_db_version'
           AND con.contype IN ('p','u')
-        GROUP BY c.relname, con.oid, con.contype, con.condeferrable, con.condeferred
+        GROUP BY c.relname, con.oid, con.contype, con.condeferrable, con.condeferred,
+                 COALESCE((to_jsonb(idx)->>'indnullsnotdistinct')::boolean, false)
       ) constraints;
     IF actual <> {_jsonb(constraints)} THEN
         RAISE EXCEPTION 'schema adoption failed: constraints differ';
@@ -331,17 +380,24 @@ END; $$;""",
                 f"    {go_name(field['name'])} {go_type} "
                 f'`json:"{field["name"]}" db:"{field["name"]}"`'
             )
+        for constraint in model.get("constraints", []):
+            names = ", ".join(f'"{name}"' for name in constraint["columns"])
+            columns.append(f'    CONSTRAINT "{constraint["name"]}" UNIQUE ({names})')
         definitions.append(f"type {model['name']} struct {{\n" + "\n".join(lines) + "\n}")
         if captured["configuration"]["schema_mode"] == "empty":
             sql.append(f'CREATE TABLE "{model["table"]}" (\n' + ",\n".join(columns) + "\n);")
             for field in model["fields"]:
                 if field.get("index"):
                     sql.append(f'CREATE INDEX ON "{model["table"]}" ("{field["name"]}");')
+            for index in model.get("indexes", []):
+                names = ", ".join(f'"{name}"' for name in index["columns"])
+                sql.append(f'CREATE INDEX "{index["name"]}" ON "{model["table"]}" ({names});')
     if captured["configuration"]["schema_mode"] == "empty":
         sql.append("-- +goose Down")
         for model in reversed(models):
             sql.append(f'DROP TABLE "{model["table"]}";')
     return {
+        **render_values(models),
         "models.go": "// SPDX-License-Identifier: Apache-2.0\npackage backend\n\n"
         + "\n\n".join(definitions)
         + "\n",

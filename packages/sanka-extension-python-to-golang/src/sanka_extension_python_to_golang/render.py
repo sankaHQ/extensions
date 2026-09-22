@@ -199,7 +199,18 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                 item for item in captured["models"] if item["name"] == route["write"]["model"]
             )
             validation_kind = route["write"].get("validation", {}).get("kind", "strict")
-            decoder_key = (model["name"], validation_kind)
+            if route["write"].get("immutable_primary"):
+                model = dict(
+                    model,
+                    fields=[
+                        dict(field, auto=True) if field["primary_key"] else field
+                        for field in model["fields"]
+                    ],
+                )
+            decoder_key = (
+                model["name"],
+                validation_kind + ("_immutable" if route["write"].get("immutable_primary") else ""),
+            )
             if route["write"]["operation"] == "delete":
                 helpers.append(_delete_helper(index, route["write"], model))
                 registrations.append(
@@ -235,8 +246,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             if target == "fiber":
                 lookup = ""
                 if lookup_field:
-                    bits = "32" if lookup_field["go_type"] == "int32" else "64"
-                    lookup = f"""rawID, parseErr := strconv.ParseInt(c.Params({canonical(lookup_field["name"])}), 10, {bits})
+                    lookup = f"""rawID, parseErr := {_parse_lookup(lookup_field, f"c.Params({canonical(lookup_field['name'])})")}
         if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
         lookup := {lookup_field["go_type"]}(rawID)"""
                 registrations.append(f"""app.{method}({path}, func(c fiber.Ctx) error {{
@@ -256,8 +266,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
             elif target == "gin":
                 lookup = ""
                 if lookup_field:
-                    bits = "32" if lookup_field["go_type"] == "int32" else "64"
-                    lookup = f"""rawID, parseErr := strconv.ParseInt(c.Param({canonical(lookup_field["name"])}), 10, {bits})
+                    lookup = f"""rawID, parseErr := {_parse_lookup(lookup_field, f"c.Param({canonical(lookup_field['name'])})")}
         if parseErr != nil {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid lookup"}}); return }}
         lookup := {lookup_field["go_type"]}(rawID)"""
                 registrations.append(f"""app.{method.upper()}({path}, func(c *gin.Context) {{
@@ -286,13 +295,12 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                     registered_path = registered_path.replace(
                         f":{lookup_field['name']}", f"{{{lookup_field['name']}}}"
                     )
-                    bits = "32" if lookup_field["go_type"] == "int32" else "64"
                     parameter = (
                         f"chi.URLParam(r, {canonical(lookup_field['name'])})"
                         if target == "chi"
                         else f"mux.Vars(r)[{canonical(lookup_field['name'])}]"
                     )
-                    lookup = f"""rawID, parseErr := strconv.ParseInt({parameter}, 10, {bits})
+                    lookup = f"""rawID, parseErr := {_parse_lookup(lookup_field, parameter)}
         if parseErr != nil {{ writeResponse(w, 400, map[string]string{{{canonical(error_key)}: "invalid lookup"}}); return }}
         lookup := {lookup_field["go_type"]}(rawID)"""
                 registration = (
@@ -531,6 +539,12 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         imports.append('"errors"')
     if database:
         imports.append('"github.com/jackc/pgx/v5/pgxpool"')
+    if (
+        not has_pydantic
+        and not has_drf
+        and not any("strconv." in code for code in registrations + helpers)
+    ):
+        imports = [item for item in imports if item != '"strconv"']
     database_import = "; ".join(dict.fromkeys(imports))
     arguments = "pool *pgxpool.Pool" if database else ""
     guard = 'if pool == nil { panic("NewApp requires a database pool") }' if database else ""
@@ -698,6 +712,13 @@ def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str
 """
 
 
+def _parse_lookup(field: dict[str, Any], expression: str) -> str:
+    if field["go_type"] == "UUIDValue":
+        return f"parseUUIDLookup({expression})"
+    bits = 32 if field["go_type"] == "int32" else 64
+    return f"strconv.ParseInt({expression}, 10, {bits})"
+
+
 def _detail_read_registration(
     index: int,
     route: dict[str, Any],
@@ -706,13 +727,12 @@ def _detail_read_registration(
     error_key: str,
 ) -> str:
     field = next(item for item in model["fields"] if item["name"] == route["read"]["lookup"])
-    bits = "32" if field["go_type"] == "int32" else "64"
     name = canonical(field["name"])
     reader = "readRows" if route["read"].get("many") else "readRow"
     path = route["path"]
     if target == "fiber":
         return f"""app.Get({canonical(path)}, func(c fiber.Ctx) error {{
-        rawID, parseErr := strconv.ParseInt(c.Params({name}), 10, {bits})
+        rawID, parseErr := {_parse_lookup(field, f"c.Params({name})")}
         if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
         body, err := {reader}{index}(c.Context(), pool, {field["go_type"]}(rawID))
         c.Set("Content-Type", "application/json")
@@ -722,7 +742,7 @@ def _detail_read_registration(
     }})"""
     if target == "gin":
         return f"""app.GET({canonical(path)}, func(c *gin.Context) {{
-        rawID, parseErr := strconv.ParseInt(c.Param({name}), 10, {bits})
+        rawID, parseErr := {_parse_lookup(field, f"c.Param({name})")}
         if parseErr != nil {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid lookup"}}); return }}
         body, err := {reader}{index}(c.Request.Context(), pool, {field["go_type"]}(rawID))
         if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{canonical(error_key)}: "not found"}}); return }}
@@ -738,7 +758,7 @@ def _detail_read_registration(
     )
     suffix = ")" if target == "chi" else ').Methods("GET")'
     return f"""{registration} func(w http.ResponseWriter, r *http.Request) {{
-        rawID, parseErr := strconv.ParseInt({parameter}, 10, {bits})
+        rawID, parseErr := {_parse_lookup(field, parameter)}
         w.Header().Set("Content-Type", "application/json")
         if parseErr != nil {{ w.WriteHeader(400); _ = json.NewEncoder(w).Encode(map[string]string{{{canonical(error_key)}: "invalid lookup"}}); return }}
         body, err := {reader}{index}(r.Context(), pool, {field["go_type"]}(rawID))
@@ -778,7 +798,6 @@ def _delete_registration(
         source
     ]
     field = next(item for item in model["fields"] if item["name"] == route["write"]["lookup"])
-    bits = "32" if field["go_type"] == "int32" else "64"
     name = canonical(field["name"])
     status = route["status"]
     path = route["path"]
@@ -789,7 +808,7 @@ def _delete_registration(
             else 'c.Response().Header.Del("Content-Type"); c.Response().Header.SetNoDefaultContentType(true)'
         )
         return f"""app.Delete({canonical(path)}, func(c fiber.Ctx) error {{
-        rawID, parseErr := strconv.ParseInt(c.Params({name}), 10, {bits})
+        rawID, parseErr := {_parse_lookup(field, f"c.Params({name})")}
         if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
         err := deleteRow{index}(c.Context(), pool, {field["go_type"]}(rawID))
         if errors.Is(err, pgx.ErrNoRows) {{ return c.Status(404).JSON(fiber.Map{{{canonical(error_key)}: "not found"}}) }}
@@ -799,7 +818,7 @@ def _delete_registration(
     }})"""
     if target == "gin":
         return f"""app.DELETE({canonical(path)}, func(c *gin.Context) {{
-        rawID, parseErr := strconv.ParseInt(c.Param({name}), 10, {bits})
+        rawID, parseErr := {_parse_lookup(field, f"c.Param({name})")}
         if parseErr != nil {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid lookup"}}); return }}
         err := deleteRow{index}(c.Request.Context(), pool, {field["go_type"]}(rawID))
         if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{canonical(error_key)}: "not found"}}); return }}
@@ -816,7 +835,7 @@ def _delete_registration(
     )
     suffix = ")" if target == "chi" else ').Methods("DELETE")'
     return f"""{registration} func(w http.ResponseWriter, r *http.Request) {{
-        rawID, parseErr := strconv.ParseInt({parameter}, 10, {bits})
+        rawID, parseErr := {_parse_lookup(field, parameter)}
         if parseErr != nil {{ writeResponse(w, 400, map[string]string{{{canonical(error_key)}: "invalid lookup"}}); return }}
         err := deleteRow{index}(r.Context(), pool, {field["go_type"]}(rawID))
         if errors.Is(err, pgx.ErrNoRows) {{ writeResponse(w, 404, map[string]string{{{canonical(error_key)}: "not found"}}); return }}
@@ -892,7 +911,11 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
                 statements.append(
                     f"item{number}.{go_name(field['name'])} = {'&' if field['nullable'] else ''}{source}"
                 )
-        writable = [field for field in fields if not field["auto"]]
+        writable = [
+            field
+            for field in fields
+            if not field["auto"] and not (operation != "create" and field["primary_key"])
+        ]
         columns = ", ".join('"' + field["name"] + '"' for field in writable)
         returning = ", ".join('"' + field["name"] + '"' for field in fields)
         destinations = ", ".join(f"&saved{number}." + go_name(field["name"]) for field in fields)
@@ -1003,8 +1026,15 @@ def _write_helper(
         name = canonical(field["name"])
         target = "item." + go_name(field["name"])
         null_guard = ""
-        if not field["nullable"]:
+        if not field["nullable"] and not (
+            field["go_type"] == "JSONValue" and not field["none_as_null"]
+        ):
             null_guard = ' || bytes.Equal(bytes.TrimSpace(raw), []byte("null"))'
+            if "default" not in field:
+                required.append(
+                    f"if !partial && !seen[{name}] {{ return item, nil, errInvalidWrite }}"
+                )
+        if field["go_type"] == "JSONValue" and not field["nullable"] and not field["none_as_null"]:
             required.append(f"if !partial && !seen[{name}] {{ return item, nil, errInvalidWrite }}")
         if validation_kind in {"pydantic", "drf"}:
             value_type = {
@@ -1061,6 +1091,33 @@ def _write_helper(
         seen[{name}] = true
     }}"""
             )
+        if "default" in field:
+            default = canonical(field["default"])
+            if field["nullable"]:
+                assignment = f"value := {field['go_type']}({default}); {target} = &value"
+            else:
+                assignment = f"{target} = {default}"
+            decoding.append(f"if !partial && !seen[{name}] {{ {assignment} }}")
+        if field["go_type"] == "DecimalValue":
+            precision, scale = field["sql_type"][8:-1].split(",")
+            value = ("*" if field["nullable"] else "") + target
+            guard = f"seen[{name}]" + (f" && {target} != nil" if field["nullable"] else "")
+            decoding.append(
+                f"if {guard} && !validDecimal(string({value}), {precision}, {scale}) {{ return item, nil, errInvalidWrite }}"
+            )
+        if field["go_type"] == "JSONValue":
+            if not field["none_as_null"]:
+                if field["nullable"]:
+                    decoding.append(
+                        f'if (!partial || seen[{name}]) && {target} == nil {{ value := JSONValue("null"); {target} = &value }}'
+                    )
+                else:
+                    null_guard = ""
+            value = ("*" if field["nullable"] else "") + target
+            guard = f"seen[{name}]" + (f" && {target} != nil" if field["nullable"] else "")
+            decoding.append(
+                f"if {guard} && !validJSON({value}) {{ return item, nil, errInvalidWrite }}"
+            )
     custom_constraints = write.get("constraints", {})
     constraints = dict(custom_constraints)
     if validation_kind == "drf":
@@ -1069,6 +1126,8 @@ def _write_helper(
             if match:
                 constraints[field["name"]] = {"max_length": int(match.group(1))}
     decoder_name = f"decode{model['name']}"
+    if write.get("immutable_primary"):
+        decoder_name += "_immutable"
     if validation_kind in {"pydantic", "drf"}:
         decoder_name += f"_{validation_kind}"
     if custom_constraints:

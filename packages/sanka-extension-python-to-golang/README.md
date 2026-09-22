@@ -897,3 +897,38 @@ input-key lookup of an existing record; lookups of newly created records do not
 imply denial. Rolled-back creates may advance sequences; verification compares those
 values between source and target and requires unchanged rows after 404/409.
 These are bounded fixture contracts, not general business-logic or cutover qualification.
+
+
+### Rich PostgreSQL values
+
+The explicit validation profile captures UUID primary/foreign keys, dates, timezone-aware
+timestamps, exact decimals and JSON values from DRF, Flask and FastAPI. Generated Go
+uses the already-pinned pgx codecs. Rich values require explicit source validation
+and serialization: UUIDs are canonical lowercase strings, dates are ISO calendar
+dates, timestamps are UTC with six fractional digits, and decimals are strings with
+exactly the declared scale, using explicit `format(value, "f")` responses. Inputs that
+need rounding, timezone inference or numeric
+coercion are blocked. Native serializer coercion for these fields is not yet qualified.
+
+Django JSONField maps to JSONB; SQLAlchemy JSON and JSONB retain their storage type
+and explicit `none_as_null` behavior. The bounded JSON write validator accepts
+objects, arrays, strings, booleans, null and integers within the exact interoperable
+range (±9007199254740991). Floating-point JSON inputs require a separate contract.
+Database replay records the SQL-null flag alongside the JSON value, so JSON null
+cannot silently stand in for SQL NULL.
+
+Static string, boolean and integer Python defaults remain client defaults, not SQL
+DEFAULT expressions. Full writes apply explicitly captured fallbacks; PATCH leaves
+absent fields unchanged. Nullable SQLAlchemy defaults, callable/server defaults, custom encoders, naive timestamps,
+expression/partial indexes and constraint options outside the captured profile block
+generation. Named column indexes and composite uniqueness are preserved, and schema
+adoption checks decimal precision/scale, timestamp precision and named index shape.
+Django updates keep explicit primary keys immutable.
+
+UUID path parameters use an explicit string-path validation guard and error response
+in the source; implicit framework UUID conversion is not substituted. Reads require
+explicit wire projections. Rich-value and relational replay requires ordered
+`sanka-verify.json` scenarios. The rich-values fixture includes all three sources and
+four routers for CRUD, plus shared pgx checks for JSON-null storage and UUID foreign-key
+transaction rollback. PostgreSQL cases require the documented isolated test DSN;
+a native codec/compile check alone does not establish database parity.

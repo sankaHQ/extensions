@@ -122,7 +122,7 @@ def test_adoption_generation(tmp_path: Path, framework: str, target: str) -> Non
 
 @pytest.mark.parametrize("framework", SOURCES)
 @pytest.mark.parametrize(
-    "option", ["default=1", "db_index=True", "server_default='1'", "primary_key=1"]
+    "option", ["default=1", "db_index=1", "server_default='1'", "primary_key=1"]
 )
 def test_unsupported_model_options_block(tmp_path: Path, framework: str, option: str) -> None:
     text = model_source(framework).replace("unique=True", option)
