@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from importlib.resources import files
 from typing import Any
@@ -348,7 +347,11 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                 "mux": "r.URL.RawQuery",
             }[target]
             paginated = "pagination" in route["read"]
-            query_argument = ", " + raw_query if "filter" in route["read"] or paginated else ""
+            query_argument = (
+                ", " + raw_query
+                if ("filter" in route["read"] or "filters" in route["read"]) or paginated
+                else ""
+            )
             pagination_error = (
                 {
                     "fiber": 'if errors.Is(err, errInvalidPage) { return c.Status(400).Send([]byte(`{"detail":"invalid pagination"}`)) }',
@@ -359,6 +362,7 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                 if paginated
                 else ""
             )
+            pagination_error = pagination_error.replace('"detail"', '"' + error_key + '"')
             if target == "fiber":
                 registrations.append(f"""app.Get({path}, func(c fiber.Ctx) error {{
         body, err := readRows{index}(c.Context(), pool{query_argument})
@@ -611,7 +615,10 @@ func writeResponse(w http.ResponseWriter, status int, payload any) {
             result[".env.example"] += "AUTH_READ_TOKEN=\nAUTH_WRITE_TOKEN=\n"
     if has_pagination:
         result["pagination.go"] = PAGINATION_SOURCE
-    if has_pagination or any("filter" in route.get("read", {}) for route in captured["routes"]):
+    if has_pagination or any(
+        "filter" in route.get("read", {}) or "filters" in route.get("read", {})
+        for route in captured["routes"]
+    ):
         first = str(captured["configuration"]["source_framework"] == "flask").lower()
         result["query.go"] = QUERY_SOURCE.replace("QUERY_FIRST", first)
     if any(route.get("read", route.get("write", {})).get("scope") for route in captured["routes"]):
@@ -654,16 +661,24 @@ def _scope_parts(operation: dict[str, Any], start: int, failure: str) -> tuple[s
 
 def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str:
     columns = ", ".join('"' + field["name"] + '"' for field in model["fields"])
-    filtered = read.get("filter")
+    filters = read.get("filters", [read["filter"]] if "filter" in read else [])
     pagination = read.get("pagination")
     related = next(
         (field for field in model["fields"] if field["name"] == read.get("lookup")), None
     )
-    where = f' WHERE "{filtered["field"]}" = ${3 if pagination else 2}' if filtered else ""
+    where = (
+        " WHERE "
+        + " AND ".join(
+            f'"{item["field"]}" = ${index}'
+            for index, item in enumerate(filters, 3 if pagination else 2)
+        )
+        if filters
+        else ""
+    )
     if related:
         where = f' WHERE "{related["name"]}" = $2'
     guard, predicate, scoped_values = _scope_parts(
-        read, 1 + (2 if pagination else 1) + bool(filtered or related), "return nil, scopeErr"
+        read, 1 + (2 if pagination else 1) + (len(filters) + bool(related)), "return nil, scopeErr"
     )
     if predicate:
         where += (" AND " if where else " WHERE ") + predicate
@@ -672,14 +687,12 @@ def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str
     )
     if pagination:
         query += " OFFSET $2"
-    signature = ", rawQuery string" if filtered or pagination else ""
+    signature = ", rawQuery string" if filters or pagination else ""
     if related:
         signature = f", lookup {related['go_type']}"
-    parameter = (
-        f", queryValue(rawQuery, {json.dumps(filtered['parameter'], ensure_ascii=False)}, "
-        f"{json.dumps(filtered['default'], ensure_ascii=False)})"
-        if filtered
-        else ""
+    parameter = "".join(
+        f", queryValue(rawQuery, {canonical(item['parameter'])}, {canonical(item['default'])})"
+        for item in filters
     )
     if related:
         parameter = ", lookup"

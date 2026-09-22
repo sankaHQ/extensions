@@ -932,3 +932,45 @@ explicit wire projections. Rich-value and relational replay requires ordered
 four routers for CRUD, plus shared pgx checks for JSON-null storage and UUID foreign-key
 transaction rollback. PostgreSQL cases require the documented isolated test DSN;
 a native codec/compile check alone does not establish database parity.
+
+
+### Composed query and dependency contracts
+
+List reads accept two to sixteen string equality predicates in one Django
+`filter(...)` or SQLAlchemy `where(...)` call. All predicates are joined with AND,
+remain in source order, and use bound SQL parameters. Unknown operators, types,
+unused FastAPI parameters and duplicate Django keyword arguments block generation.
+The existing single-predicate spelling remains supported.
+
+DRF and Flask also support the bounded ASCII limit/offset contract already supported
+for FastAPI. They read `limit` and `offset` through `request.query_params.get` and
+`request.args.get`, respectively, with explicit string defaults and the same bounds:
+limit 1–1000 (at most four digits), offset 0–2147483647 (at most ten digits).
+Django uses `[int(offset):int(offset) + int(limit)]`; SQLAlchemy uses
+`.limit(int(limit)).offset(int(offset))`. The full validation guard and 400 response
+must be present in the source. The generated error retains `error` for DRF/Flask
+and `detail` for FastAPI. Repeated query values retain each source's parsing rules.
+[Executable examples](tests/test_golang_query_composition.py) show the complete forms.
+
+Relationship lists can bind UUID foreign-key paths using the same explicit UUID
+guard and wire projection as rich primary-key reads. Implicit UUID converters,
+relationship paging and joins remain outside this contract.
+
+FastAPI async session dependencies may be keyword-only, including
+`Annotated[AsyncSession, Depends(get_session)]`, alongside defaulted filter and
+pagination parameters. Direct handlers and the existing function/class repository
+forms reuse the same scoped session lowering. Additional keyword-only parameters,
+dependency metadata, default values on Annotated dependencies, and dependency
+teardown commits remain blockers.
+
+Native FastAPI Pydantic bodies now preserve narrower integer `ge`/`le` bounds and
+string `min_length`/`max_length`, including nullable and partial fields. Constraint
+checks follow the existing native scalar coercion and retain the captured 422
+response. Rich native field coercion remains unqualified; rich values still require
+the explicit wire contract above.
+
+The composition fixture combines native schemas, CRUD, conjunction filters,
+pagination, and async injected repositories through public ordered replay. Native
+checks compare actual Python and Go error responses without listening servers.
+PostgreSQL checks require isolated source/target fixture databases and compare HTTP,
+rows and sequences; skipped database tests do not establish database parity.

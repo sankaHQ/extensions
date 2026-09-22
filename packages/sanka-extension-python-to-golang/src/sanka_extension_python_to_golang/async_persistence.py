@@ -90,11 +90,20 @@ def _session_declarations(tree: ast.Module) -> None:
             available.add(target.id)
     consumed: set[str] = set()
     for node in tree.body:
-        if (
-            not isinstance(node, ast.AsyncFunctionDef)
-            or not node.decorator_list
-            or not node.args.args
-        ):
+        if not isinstance(node, ast.AsyncFunctionDef) or not node.decorator_list:
+            continue
+        keyword_session = bool(node.args.kwonlyargs)
+        if keyword_session:
+            if len(node.args.kwonlyargs) != 1 or node.args.kwonlyargs[0].arg != "session":
+                raise ValueError("only the session dependency may be keyword-only")
+            arg = node.args.kwonlyargs[0]
+            default = node.args.kw_defaults[0]
+            node.args.args.append(arg)
+            if default is not None:
+                node.args.defaults.append(default)
+            node.args.kwonlyargs = []
+            node.args.kw_defaults = []
+        elif not node.args.args:
             continue
         arg = node.args.args[-1]
         annotation = arg.annotation
@@ -119,7 +128,8 @@ def _session_declarations(tree: ast.Module) -> None:
             continue
         if (
             arg.arg != "session"
-            or node.args.defaults
+            or (node.args.defaults and not keyword_session)
+            or (keyword_session and default is not None)
             or not isinstance(annotation.slice, ast.Tuple)
             or len(annotation.slice.elts) != 2
             or ast.unparse(annotation.slice.elts[0]) != "AsyncSession"
@@ -128,7 +138,7 @@ def _session_declarations(tree: ast.Module) -> None:
                 "session annotation requires exactly AsyncSession and Depends(provider)"
             )
         arg.annotation = ast.Name(id="AsyncSession", ctx=ast.Load())
-        node.args.defaults = [copy.deepcopy(annotation.slice.elts[1])]
+        node.args.defaults.append(copy.deepcopy(annotation.slice.elts[1]))
     if consumed != aliases.keys():
         raise ValueError("unused dependency aliases require additional capture")
     tree.body = [node for node in tree.body if node not in discarded]

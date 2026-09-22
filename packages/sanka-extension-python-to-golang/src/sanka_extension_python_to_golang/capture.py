@@ -239,6 +239,75 @@ def _write_validation(fields: list[dict[str, Any]], data: str, partial: bool, er
 """
 
 
+def _pydantic_constraints(
+    candidate: ast.ClassDef, model: dict[str, Any]
+) -> dict[str, dict[str, int]]:
+    constraints: dict[str, dict[str, int]] = {}
+    for declaration in candidate.body:
+        if not isinstance(declaration, ast.AnnAssign) or not isinstance(
+            declaration.target, ast.Name
+        ):
+            continue
+        field = next(
+            (f for f in model["fields"] if f["name"] == declaration.target.id),
+            None,
+        )
+        value = declaration.value
+        if (
+            field is None
+            or not isinstance(value, ast.Call)
+            or not isinstance(value.func, ast.Name)
+            or value.func.id != "Field"
+        ):
+            continue
+        retained = []
+        bounds: dict[str, int] = {}
+        for keyword in value.keywords:
+            key = keyword.arg
+            allowed = (
+                {"min_length", "max_length"}
+                if field["go_type"] == "string"
+                else {"ge", "le"}
+                if field["go_type"] in {"int32", "int64"}
+                else set()
+            )
+            if key not in allowed:
+                retained.append(keyword)
+                continue
+            bound = ast.literal_eval(keyword.value)
+            if type(bound) is not int or key in bounds:
+                raise ValueError("schema bounds must be unique literal integers")
+            bounds[key] = bound
+            if key in {"ge", "le"}:
+                bits = 32 if field["go_type"] == "int32" else 64
+                low, high = -(2 ** (bits - 1)), 2 ** (bits - 1) - 1
+                if not low <= bound <= high:
+                    raise ValueError("schema integer bounds exceed the database type")
+                retained.append(
+                    ast.keyword(
+                        arg=key,
+                        value=ast.parse(str(low if key == "ge" else high), mode="eval").body,
+                    )
+                )
+            elif not 0 <= bound <= 9223372036854775807:
+                raise ValueError("schema length bounds must fit nonnegative int64")
+        if bounds.get("min_length", 0) > bounds.get(
+            "max_length", 9223372036854775807
+        ) or bounds.get("ge", -9223372036854775808) > bounds.get("le", 9223372036854775807):
+            raise ValueError("schema bounds are reversed")
+        value.keywords = retained
+        if field["go_type"] in {"int32", "int64"}:
+            bits = 32 if field["go_type"] == "int32" else 64
+            bounds = {
+                k: v
+                for k, v in bounds.items()
+                if v != (-(2 ** (bits - 1)) if k == "ge" else 2 ** (bits - 1) - 1)
+            }
+        if bounds:
+            constraints[field["name"]] = bounds
+    return constraints
+
+
 def _normalize_native_pydantic(
     tree: ast.Module,
     models: list[dict[str, Any]],
@@ -309,7 +378,7 @@ def _normalize_native_pydantic(
         )
     apps[0].value = ast.Call(func=ast.Name(id="FastAPI", ctx=ast.Load()), args=[], keywords=[])
     classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
-    matched: dict[str, tuple[list[dict[str, Any]], bool]] = {}
+    matched: dict[str, tuple[list[dict[str, Any]], bool, dict[str, dict[str, int]]]] = {}
     for name, candidate in classes.items():
         if name in {"int", "str", "bool", "dict", "list", "set", "type", "len"}:
             raise ValueError("schema names must not shadow builtins")
@@ -337,8 +406,27 @@ def _normalize_native_pydantic(
                     else:
                         default = " = None" if partial or field["nullable"] else ""
                     lines.append(f"    {field['name']}: {kind}{default}")
-                if ast.dump(candidate) == ast.dump(ast.parse("\n".join(lines)).body[0]):
-                    matched[name] = (fields, partial)
+                normalized = copy.deepcopy(candidate)
+                constraints = _pydantic_constraints(normalized, model)
+                for declaration in normalized.body:
+                    if not isinstance(declaration, ast.AnnAssign) or not isinstance(
+                        declaration.target, ast.Name
+                    ):
+                        continue
+                    field = next((f for f in fields if f["name"] == declaration.target.id), None)
+                    value = declaration.value
+                    if (
+                        field is None
+                        or field["go_type"] in {"int32", "int64"}
+                        or not isinstance(value, ast.Call)
+                    ):
+                        continue
+                    if ast.unparse(value) == "Field()":
+                        declaration.value = None
+                    elif ast.unparse(value) == "Field(default=None)":
+                        declaration.value = ast.Constant(value=None)
+                if ast.dump(normalized) == ast.dump(ast.parse("\n".join(lines)).body[0]):
+                    matched[name] = (fields, partial, constraints)
                     break
             if name in matched:
                 break
@@ -362,7 +450,7 @@ def _normalize_native_pydantic(
         argument = schema_args[0]
         assert argument.annotation is not None
         schema = ast.unparse(argument.annotation)
-        fields, partial = matched[schema]
+        fields, partial, constraints = matched[schema]
         expected_statement = ast.parse(
             f"{argument.arg} = {argument.arg}.model_dump(exclude_unset=True)"
         ).body[0]
@@ -382,6 +470,8 @@ def _normalize_native_pydantic(
                 "error": {"status": 422, "body": {"detail": "invalid request body"}},
             }
         }
+        if constraints:
+            validations[node.name]["constraints"] = constraints
         used.add(schema)
     if used != classes.keys():
         raise ValueError("unused native Pydantic request model")
@@ -489,80 +579,7 @@ def _normalize_pydantic(
                             lines.append(f"    {key}: {kind} = Field({', '.join(options)})")
                         expected = ast.parse("\n".join(lines)).body[0]
                         candidate = copy.deepcopy(classes[name])
-                        constraints: dict[str, dict[str, int]] = {}
-                        for declaration in candidate.body:
-                            if not isinstance(declaration, ast.AnnAssign) or not isinstance(
-                                declaration.target, ast.Name
-                            ):
-                                continue
-                            field = next(
-                                (f for f in model["fields"] if f["name"] == declaration.target.id),
-                                None,
-                            )
-                            value = declaration.value
-                            if (
-                                field is None
-                                or not isinstance(value, ast.Call)
-                                or not isinstance(value.func, ast.Name)
-                                or value.func.id != "Field"
-                            ):
-                                continue
-                            retained = []
-                            bounds: dict[str, int] = {}
-                            for keyword in value.keywords:
-                                key = keyword.arg
-                                allowed = (
-                                    {"min_length", "max_length"}
-                                    if field["go_type"] == "string"
-                                    else {"ge", "le"}
-                                    if field["go_type"] in {"int32", "int64"}
-                                    else set()
-                                )
-                                if key not in allowed:
-                                    retained.append(keyword)
-                                    continue
-                                bound = ast.literal_eval(keyword.value)
-                                if type(bound) is not int or key in bounds:
-                                    raise ValueError(
-                                        "schema bounds must be unique literal integers"
-                                    )
-                                bounds[key] = bound
-                                if key in {"ge", "le"}:
-                                    bits = 32 if field["go_type"] == "int32" else 64
-                                    low, high = -(2 ** (bits - 1)), 2 ** (bits - 1) - 1
-                                    if not low <= bound <= high:
-                                        raise ValueError(
-                                            "schema integer bounds exceed the database type"
-                                        )
-                                    retained.append(
-                                        ast.keyword(
-                                            arg=key,
-                                            value=ast.parse(
-                                                str(low if key == "ge" else high), mode="eval"
-                                            ).body,
-                                        )
-                                    )
-                                elif not 0 <= bound <= 9223372036854775807:
-                                    raise ValueError(
-                                        "schema length bounds must fit nonnegative int64"
-                                    )
-                            if bounds.get("min_length", 0) > bounds.get(
-                                "max_length", 9223372036854775807
-                            ) or bounds.get("ge", -9223372036854775808) > bounds.get(
-                                "le", 9223372036854775807
-                            ):
-                                raise ValueError("schema bounds are reversed")
-                            value.keywords = retained
-                            if field["go_type"] in {"int32", "int64"}:
-                                bits = 32 if field["go_type"] == "int32" else 64
-                                bounds = {
-                                    k: v
-                                    for k, v in bounds.items()
-                                    if v
-                                    != (-(2 ** (bits - 1)) if k == "ge" else 2 ** (bits - 1) - 1)
-                                }
-                            if bounds:
-                                constraints[field["name"]] = bounds
+                        constraints = _pydantic_constraints(candidate, model)
                         if ast.dump(candidate) != ast.dump(expected):
                             continue
                         error = (
@@ -1679,6 +1696,13 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 "item",
             }
             available |= {arg.arg for arg in node.args.args}
+            available |= {
+                item.id
+                for item in ast.walk(node)
+                if isinstance(item, ast.Name)
+                and isinstance(item.ctx, ast.Store)
+                and item.id in {"limit", "offset"}
+            }
             if node.name in transactions:
                 available |= {
                     step["input"] for step in transactions[node.name]["write"]["transaction"]
