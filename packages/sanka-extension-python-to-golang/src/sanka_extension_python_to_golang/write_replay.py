@@ -288,6 +288,8 @@ def normalize_bodies(observed: list[dict[str, Any]], captured: dict[str, Any]) -
             ):
                 continue
             operation = route.get("read", route.get("write", {}))
+            if "literal_response" in operation:
+                break
             model = models.get(operation.get("model"))
             if model is None or not 200 <= item["status"] < 300:
                 break
@@ -480,9 +482,16 @@ def replay_writes(
             }
         result.update(compare(scenarios, actual, source_observed))
         if any(route.get("write", {}).get("integrity_conflict") for route in captured["routes"]):
+            statuses = (
+                (404, 409)
+                if any(route.get("write", {}).get("transaction") for route in captured["routes"])
+                else (409,)
+            )
             unchanged = integrity_failures_unchanged(
-                initial, actual
-            ) and integrity_failures_unchanged(source_initial, source_observed or [])
+                initial, actual, statuses=statuses
+            ) and integrity_failures_unchanged(
+                source_initial, source_observed or [], statuses=statuses
+            )
             result["integrity_failures_unchanged"] = unchanged
             result["ok"] = result["ok"] and unchanged
         if captured.get("security"):
@@ -519,11 +528,14 @@ def denied_writes_unchanged(initial: dict[str, Any], observations: list[dict[str
 
 
 def integrity_failures_unchanged(
-    initial: dict[str, Any], observations: list[dict[str, Any]]
+    initial: dict[str, Any],
+    observations: list[dict[str, Any]],
+    *,
+    statuses: tuple[int, ...] = (409,),
 ) -> bool:
     # PostgreSQL sequence allocation is not transactional; rows must still roll back.
     return all(
         current["tables"] == previous["tables"]
         for previous, current in pairwise([initial, *observations])
-        if current["status"] == 409
+        if current["status"] in statuses
     )

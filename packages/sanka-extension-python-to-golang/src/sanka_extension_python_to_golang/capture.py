@@ -201,7 +201,9 @@ def _payload(
 
 def _write_validation(fields: list[dict[str, Any]], data: str, partial: bool, error: str) -> str:
     writable = [field for field in fields if not field["auto"]]
-    allowed = "{" + ", ".join(repr(field["name"]) for field in writable) + "}"
+    allowed = (
+        "{" + ", ".join(repr(field["name"]) for field in writable) + "}" if writable else "set()"
+    )
     conditions = [f"type({data}) is not dict", f"set({data}) - {allowed}"]
     for field in writable:
         name = repr(field["name"])
@@ -751,7 +753,7 @@ def _normalize_drf_serializers(
     return ast.fix_missing_locations(tree)
 
 
-def _normalize_integrity(tree: ast.Module, framework: str) -> set[str]:
+def _normalize_integrity(tree: ast.Module, framework: str) -> tuple[set[str], set[str]]:
     """Preserve only an explicit outer handler after the ORM scope has unwound."""
     module = "django.db" if framework == "drf" else "sqlalchemy.exc"
     response = {
@@ -761,8 +763,12 @@ def _normalize_integrity(tree: ast.Module, framework: str) -> set[str]:
     }[framework]
     expected = ast.parse("try:\n    pass\nexcept IntegrityError:\n    " + response).body[0]
     assert isinstance(expected, ast.Try)
+    missing_response = response.replace("integrity conflict", "not found").replace("409", "404")
+    missing = ast.parse("try:\n    pass\nexcept LookupError:\n    " + missing_response).body[0]
+    assert isinstance(missing, ast.Try)
     imported = False
     handlers = set()
+    missing_handlers = set()
     for node in tree.body:
         if isinstance(node, ast.ImportFrom) and node.module == module and not node.level:
             imported |= any(
@@ -775,19 +781,23 @@ def _normalize_integrity(tree: ast.Module, framework: str) -> set[str]:
         ):
             continue
         guarded = node.body[0]
+        expected_handlers = expected.handlers
+        if len(guarded.handlers) == 2:
+            expected_handlers = expected.handlers + missing.handlers
+            missing_handlers.add(node.name)
         if (
             not imported
             or guarded.orelse
             or guarded.finalbody
             or [ast.dump(handler) for handler in guarded.handlers]
-            != [ast.dump(handler) for handler in expected.handlers]
+            != [ast.dump(handler) for handler in expected_handlers]
         ):
             raise ValueError(
                 "integrity handlers require an explicit outer IntegrityError-to-409 contract"
             )
         node.body = guarded.body
         handlers.add(node.name)
-    return handlers
+    return handlers, missing_handlers
 
 
 def _transaction_write(
@@ -795,7 +805,7 @@ def _transaction_write(
     framework: str,
     models: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    """Recognize whole, explicit ordered-create scopes; never infer atomicity."""
+    """Recognize complete explicit transaction bodies; never infer atomicity."""
     scopes = [item for item in node.body if isinstance(item, ast.With)]
     if not scopes:
         return None
@@ -809,15 +819,12 @@ def _transaction_write(
         body = outer.body[0].body
     else:
         body = outer.body
-    fail = "transaction requires ordered creates, explicit flushes and a response snapshot"
+    fail = "transaction requires ordered operations, explicit flushes and a response snapshot"
     if isinstance(node, ast.AsyncFunctionDef):
-        raise ValueError(fail)
-    assignments = body[: -1 : 1 if framework == "drf" else 3]
-    if len(assignments) < 2:
         raise ValueError(fail)
     by_name = {model["name"]: model for model in models}
     steps: list[dict[str, Any]] = []
-    statements = []
+    statements: list[str] = []
     reserved = {
         "app",
         "engine",
@@ -838,15 +845,43 @@ def _transaction_write(
         "environ",
         "jsonify",
         "path",
+        "field",
     }
     data = "request.data" if framework == "drf" else "data"
-    for statement in assignments:
+    cursor = 0
+
+    def dependency(
+        value: ast.expr, model: dict[str, Any], field: dict[str, Any], lookup: bool = False
+    ) -> dict[str, Any] | None:
+        if not (isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name)):
+            return None
+        previous = next(
+            (i for i, step in enumerate(steps) if step["input"] == value.value.id), None
+        )
+        if previous is None or steps[previous].get("operation") == "delete":
+            raise ValueError("transaction dependencies require an earlier live record")
+        parent = by_name[steps[previous]["model"]]
+        primary = next(item for item in parent["fields"] if item["primary_key"])
+        reference = (
+            {"table": model["table"], "column": field["name"]}
+            if lookup
+            else field.get("references", {})
+        )
+        if (
+            value.attr != primary["name"]
+            or reference.get("table") != parent["table"]
+            or reference.get("column") != primary["name"]
+        ):
+            raise ValueError("transaction dependency must match a captured primary or foreign key")
+        return {"step": previous, "field": primary["name"]}
+
+    while cursor < len(body) - 1:
+        statement = body[cursor]
         if not (
             isinstance(statement, ast.Assign)
             and len(statement.targets) == 1
             and isinstance(statement.targets[0], ast.Name)
             and isinstance(statement.value, ast.Call)
-            and not statement.value.args
         ):
             raise ValueError(fail)
         name = statement.targets[0].id
@@ -863,48 +898,144 @@ def _transaction_write(
         model_name = (
             constructor.removesuffix(".objects.create") if framework == "drf" else constructor
         )
+        lookup_value = None
+        if (
+            framework != "drf"
+            and constructor == "session.get"
+            and len(call.args) == 2
+            and isinstance(call.args[0], ast.Name)
+        ):
+            model_name = call.args[0].id
+            lookup_value = call.args[1]
+        elif (
+            framework == "drf"
+            and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "first"
+            and isinstance(call.func.value, ast.Call)
+        ):
+            filtered = call.func.value
+            prefix = ast.unparse(filtered.func)
+            if prefix.endswith(".objects.filter") and len(filtered.keywords) == 1:
+                model_name = prefix.removesuffix(".objects.filter")
+                lookup_value = filtered.keywords[0].value
         if model_name not in by_name:
             raise ValueError(fail)
         model = by_name[model_name]
-        writable = [field for field in model["fields"] if not field["auto"]]
-        if [kw.arg for kw in call.keywords] != [field["name"] for field in writable]:
-            raise ValueError("transaction create must bind every writable field in model order")
-        references = {}
-        values = []
-        for field, kw in zip(writable, call.keywords, strict=True):
-            value = kw.value
-            if isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name):
-                previous = next(
-                    (i for i, step in enumerate(steps) if step["input"] == value.value.id), None
+        fields = model["fields"]
+        primary = next(field for field in fields if field["primary_key"])
+        writable = [field for field in fields if not field["auto"]]
+        access = f"{data}[{name!r}]"
+        references: dict[str, Any] = {}
+        step: dict[str, Any] = {"input": name, "model": model_name, "references": references}
+        cursor += 1
+        if lookup_value is None:
+            operation = "create"
+            if (
+                not writable
+                or call.args
+                or [kw.arg for kw in call.keywords] != [field["name"] for field in writable]
+            ):
+                raise ValueError("transaction create must bind every writable field in model order")
+            assignments = [kw.value for kw in call.keywords]
+        else:
+            if framework != "drf" and any(
+                earlier["model"] == model_name
+                and earlier.get("operation") != "delete"
+                and any(later.get("operation") == "delete" for later in steps[index + 1 :])
+                for index, earlier in enumerate(steps)
+            ):
+                raise ValueError(
+                    "SQLAlchemy cached lookups after deletion require identity-map capture"
                 )
-                if previous is None:
-                    raise ValueError(
-                        "transaction key dependencies must reference an earlier create"
-                    )
-                parent = by_name[steps[previous]["model"]]
-                primary = next(item for item in parent["fields"] if item["primary_key"])
-                reference = field.get("references", {})
-                if (
-                    value.attr != primary["name"]
-                    or reference.get("table") != parent["table"]
-                    or reference.get("column") != primary["name"]
-                ):
-                    raise ValueError("transaction dependency must match a captured foreign key")
-                references[field["name"]] = {"step": previous, "field": primary["name"]}
-                expression = f"{steps[previous]['input']}.{primary['name']}"
+            reference = dependency(lookup_value, model, primary, True)
+            if reference:
+                step["lookup_reference"] = reference
+                expression = f"{steps[reference['step']]['input']}.{reference['field']}"
             else:
-                access = f"{data}[{name!r}]"
+                expression = f"{access}[{primary['name']!r}]"
+            lookup = (
+                f"{model_name}.objects.filter({primary['name']}={expression}).first()"
+                if framework == "drf"
+                else f"session.get({model_name}, {expression})"
+            )
+            statements += [
+                f"{name} = {lookup}",
+                f"if {name} is None:\n    raise LookupError('not found')",
+            ]
+            cursor += 1  # The complete body match below checks the missing-row guard.
+            next_node = body[cursor] if cursor < len(body) - 1 else None
+            if isinstance(next_node, ast.Expr):
+                operation = "delete"
+                statements.append(
+                    f"{name}.delete()" if framework == "drf" else f"session.delete({name})"
+                )
+                cursor += 1
+                if framework != "drf":
+                    statements.append("session.flush()")
+                    cursor += 1
+                assignments = []
+            elif isinstance(next_node, ast.If) or (
+                isinstance(next_node, ast.Assign)
+                and isinstance(next_node.targets[0], ast.Attribute)
+            ):
+                operation = "patch" if isinstance(next_node, ast.If) else "replace"
+                assignments = []
+                for offset in range(len(writable)):
+                    if cursor + offset >= len(body):
+                        raise ValueError(fail)
+                    assigned = body[cursor + offset]
+                    if operation == "patch" and isinstance(assigned, ast.If) and assigned.body:
+                        assigned = assigned.body[0]
+                    if not isinstance(assigned, ast.Assign):
+                        raise ValueError(fail)
+                    assignments.append(assigned.value)
+                cursor += len(writable) + 1  # assignments and save/flush
+            else:
+                operation = "lookup"
+                assignments = []
+            step["operation"] = operation
+        values = []
+        for field, value in zip(
+            writable, assignments, strict=operation in {"create", "replace", "patch"}
+        ):
+            reference = dependency(value, model, field)
+            if reference:
+                if operation == "patch":
+                    raise ValueError("partial update dependencies require additional capture")
+                references[field["name"]] = reference
+                expression = f"{steps[reference['step']]['input']}.{reference['field']}"
+            else:
                 expression = (
                     f"{access}.get({field['name']!r})"
-                    if field["nullable"]
+                    if field["nullable"] and operation != "patch"
                     else f"{access}[{field['name']!r}]"
                 )
             values.append(f"{field['name']}={expression}")
-        steps.append({"input": name, "model": model_name, "references": references})
-        constructor = model_name + (".objects.create" if framework == "drf" else "")
-        statements.append(f"{name} = {constructor}({', '.join(values)})")
-        if framework != "drf":
-            statements.extend([f"session.add({name})", "session.flush()"])
+            if operation == "replace":
+                statements.append(f"{name}.{field['name']} = {expression}")
+            elif operation == "patch":
+                statements.append(
+                    f"if {field['name']!r} in {access}:\n    {name}.{field['name']} = {expression}"
+                )
+        if operation == "create":
+            constructor = model_name + (".objects.create" if framework == "drf" else "")
+            statements.append(f"{name} = {constructor}({', '.join(values)})")
+            if framework != "drf":
+                statements.extend([f"session.add({name})", "session.flush()"])
+                cursor += 2
+        elif operation in {"replace", "patch"}:
+            if framework == "drf":
+                updates = (
+                    f"[field for field in {access} if field != {primary['name']!r}]"
+                    if operation == "patch"
+                    else repr([field["name"] for field in writable])
+                )
+                statements.append(f"{name}.save(update_fields={updates})")
+            else:
+                statements.append("session.flush()")
+        steps.append(step)
+    if len(steps) < 2:
+        raise ValueError(fail)
     invalid = {
         "drf": 'return Response({"error": "invalid request body"}, status=400)',
         "flask": 'return jsonify({"error": "invalid request body"}), 400',
@@ -914,14 +1045,19 @@ def _transaction_write(
     prefix = "data = request.get_json()\n" if framework == "flask" else ""
     prefix += f"if type({data}) is not dict or set({data}) != {keys}:\n    {invalid}\n"
     for step in steps:
+        operation = step.get("operation", "create")
         fields = [
-            field
+            dict(field, auto=False) if field["primary_key"] and operation != "create" else field
             for field in by_name[step["model"]]["fields"]
             if field["name"] not in step["references"]
+            and not (field["primary_key"] and step.get("lookup_reference"))
+            and (operation not in {"lookup", "delete"} or field["primary_key"])
         ]
-        if not any(not field["auto"] for field in fields):
-            raise ValueError("transaction steps require at least one validated input field")
-        prefix += _write_validation(fields, f"{data}[{step['input']!r}]", False, invalid)
+        access = f"{data}[{step['input']!r}]"
+        prefix += _write_validation(fields, access, operation == "patch", invalid)
+        if operation == "patch" and not step.get("lookup_reference"):
+            primary = next(field for field in fields if field["primary_key"])
+            prefix += f"if {primary['name']!r} not in {access}:\n    {invalid}\n"
     last = steps[-1]
     response = (
         "{"
@@ -931,13 +1067,26 @@ def _transaction_write(
         )
         + "}"
     )
+    literal_response = None
+    snapshot = body[-1] if body else None
+    if isinstance(snapshot, ast.Assign) and isinstance(snapshot.value, ast.Dict):
+        try:
+            literal_response = ast.literal_eval(snapshot.value)
+            _json_value(literal_response)
+            response = repr(literal_response)
+        except (ValueError, TypeError):
+            literal_response = None
+    if last.get("operation") == "delete" and literal_response is None:
+        raise ValueError("deleted records require an explicit literal response")
     statements.append("result = " + response)
     if framework == "drf":
-        scope = "with transaction.atomic():\n" + "\n".join("    " + line for line in statements)
+        scope = "with transaction.atomic():\n" + "\n".join(
+            "    " + line.replace("\n", "\n    ") for line in statements
+        )
         result = "return Response(result, status=201)"
     else:
         scope = "with Session(engine) as session:\n    with session.begin():\n" + "\n".join(
-            "        " + line for line in statements
+            "        " + line.replace("\n", "\n        ") for line in statements
         )
         result = "return jsonify(result), 201" if framework == "flask" else "return result"
     args = "request" if framework == "drf" else "data: dict" if framework == "fastapi" else ""
@@ -949,7 +1098,12 @@ def _transaction_write(
         raise ValueError(fail)
     return {
         "status": 201,
-        "write": {"operation": "create", "model": last["model"], "transaction": steps},
+        "write": {
+            "operation": "create",
+            "model": last["model"],
+            "transaction": steps,
+            **({"literal_response": literal_response} if literal_response is not None else {}),
+        },
     }
 
 
@@ -1378,8 +1532,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         gaps.append("routing: " + str(error))
     validations: dict[str, dict[str, Any]] = {}
     integrity_handlers: set[str] = set()
+    missing_handlers: set[str] = set()
     try:
-        integrity_handlers = _normalize_integrity(tree, framework)
+        integrity_handlers, missing_handlers = _normalize_integrity(tree, framework)
         tree = _normalize_native_pydantic(tree, models, framework, validations)
         tree = _normalize_pydantic(tree, models, framework, validations)
         if framework == "drf":
@@ -1446,6 +1601,16 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                         "transactions require an outer integrity handler "
                         "and explicit nested validation"
                     )
+                if (
+                    any(
+                        step.get("operation", "create") != "create"
+                        for step in transaction["write"]["transaction"]
+                    )
+                    and candidate.name not in missing_handlers
+                ):
+                    raise ValueError(
+                        "transaction lookups require an explicit outer LookupError-to-404 handler"
+                    )
                 transactions[candidate.name] = transaction
         except (ValueError, TypeError, KeyError) as error:
             gaps.append("transaction: " + str(error))
@@ -1454,6 +1619,24 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     assignments: dict[str, ast.expr] = {}
     for node in tree.body:
         available = imports | assignments.keys() | functions.keys() | {"__name__"}
+        if missing_handlers and (
+            (
+                isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+                and node.name == "LookupError"
+            )
+            or (
+                isinstance(node, ast.ImportFrom | ast.Import)
+                and any((alias.asname or alias.name) == "LookupError" for alias in node.names)
+            )
+            or (
+                isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name) and target.id == "LookupError"
+                    for target in node.targets
+                )
+            )
+        ):
+            gaps.append("LookupError must not be shadowed")
         if models and isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             available |= {
                 "list",
@@ -1473,7 +1656,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             if node.name in transactions:
                 available |= {
                     step["input"] for step in transactions[node.name]["write"]["transaction"]
-                } | {"result"}
+                } | {"result", "LookupError", "field"}
         unresolved = {
             item.id
             for item in ast.walk(node)
@@ -1665,6 +1848,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 payload = _drf_write(function, method, models)
             else:
                 payload = _payload(function, framework, models)
+            if name in missing_handlers and name not in transactions:
+                raise ValueError("LookupError handlers require a qualified transaction")
             if name in integrity_handlers:
                 if "write" not in payload or "IntegrityError" not in imports:
                     raise ValueError("integrity handlers require qualified database writes")

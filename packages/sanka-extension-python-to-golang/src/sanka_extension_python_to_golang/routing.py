@@ -529,7 +529,18 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
                 }
                 - declared
                 - locals_
-                - {"__name__", "list", "dict", "set", "type", "int", "str", "bool", "len"}
+                - {
+                    "__name__",
+                    "list",
+                    "dict",
+                    "set",
+                    "type",
+                    "int",
+                    "str",
+                    "bool",
+                    "len",
+                    "LookupError",
+                }
             )
             if missing:
                 raise ValueError(f"{name}: unresolved module symbols: {', '.join(sorted(missing))}")
