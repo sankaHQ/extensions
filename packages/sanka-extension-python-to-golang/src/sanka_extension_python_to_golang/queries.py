@@ -7,6 +7,8 @@ import ast
 import copy
 from typing import Any
 
+from .values import output_value, uuid_lookup_prefix
+
 
 def _pagination(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
@@ -104,7 +106,10 @@ def capture_read(
         primary = next(field for field in fields if field["primary_key"])
         response = (
             "{"
-            + ", ".join(repr(field["name"]) + ": item." + field["name"] for field in fields)
+            + ", ".join(
+                repr(field["name"]) + ": " + output_value(field, "item." + field["name"])
+                for field in fields
+            )
             + "}"
         )
         if framework == "drf":
@@ -121,7 +126,11 @@ return Response({response})
 """
             )
         else:
-            signature = primary["name"] if framework == "flask" else f"{primary['name']}: int"
+            signature = (
+                primary["name"]
+                if framework == "flask"
+                else f"{primary['name']}: {'str' if primary['go_type'] == 'UUIDValue' else 'int'}"
+            )
             missing = (
                 'return jsonify({"error": "not found"}), 404'
                 if framework == "flask"
@@ -134,6 +143,7 @@ return Response({response})
         {missing}
     return {response_value}
 """
+        source = uuid_lookup_prefix(primary, framework) + source
         expected = ast.parse(
             f"def endpoint({signature}):\n"
             + "\n".join("    " + line for line in source.splitlines())
@@ -198,6 +208,15 @@ return Response({response})
     for model in models:
         name = model["name"]
         fields = [field["name"] for field in model["fields"]]
+        rich = any(field["go_type"].endswith("Value") for field in model["fields"])
+        projection_dict = (
+            "{"
+            + ", ".join(
+                repr(field["name"]) + ": " + output_value(field, f"row[{field['name']!r}]")
+                for field in model["fields"]
+            )
+            + "}"
+        )
         primary = next(field["name"] for field in model["fields"] if field["primary_key"])
         filters: list[dict[str, Any] | None] = [None]
         filters.extend(
@@ -209,6 +228,7 @@ return Response({response})
             }
             for field in model["fields"]
             if "references" in field
+            and field["go_type"] in {"int32", "int64"}
             and field["name"]
             not in {"request", "engine", "session", "select", "dict", "row", "int"}
         )
@@ -239,10 +259,12 @@ return Response({response})
                     where = (
                         f".filter({filtered['field']}={filtered['expression']})" if filtered else ""
                     )
-                    body = (
-                        f"return Response(list({name}.objects{where}.order_by({primary!r})"
-                        f".values({projection})[:{limit}]))"
+                    rows = (
+                        f"{name}.objects{where}.order_by({primary!r})"
+                        f".values({projection})[:{limit}]"
                     )
+                    value = f"[{projection_dict} for row in {rows}]" if rich else f"list({rows})"
+                    body = f"return Response({value})"
                 else:
                     projection = ", ".join(f"{name}.{field}" for field in fields)
                     where = (
@@ -251,7 +273,7 @@ return Response({response})
                         else ""
                     )
                     value = (
-                        "[dict(row) for row in session.execute("
+                        f"[{projection_dict if rich else 'dict(row)'} for row in session.execute("
                         f"select({projection}){where}.order_by({name}.{primary}).limit({limit})"
                         ").mappings()]"
                     )

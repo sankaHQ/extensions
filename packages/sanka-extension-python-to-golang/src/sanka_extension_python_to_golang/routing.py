@@ -540,6 +540,10 @@ def project_tree(root: Path, filename: str, models_file: str) -> tuple[ast.Modul
                     "bool",
                     "len",
                     "LookupError",
+                    "ValueError",
+                    "OverflowError",
+                    "format",
+                    "all",
                 }
             )
             if missing:

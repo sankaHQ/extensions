@@ -23,6 +23,14 @@ from .routing import normalize_routes, project_tree
 from .row_security import attach_scope, normalize_row_security
 from .security import normalize_security
 from .topology import capture_fastapi_topology
+from .values import (
+    SOURCE_IMPORTS,
+    input_value,
+    invalid_value,
+    normalize_values,
+    output_value,
+    uuid_lookup_prefix,
+)
 
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
@@ -31,7 +39,9 @@ MAX_SOURCE_BYTES = 256 * 1024 * 1024
 MAX_SOURCE_FILES = 20_000
 GAP_PATH_SAMPLES = 8
 PATH = re.compile(r"/[A-Za-z0-9_/-]*\Z")
-FLASK_INT_PATH = re.compile(r"(?P<prefix>/[A-Za-z0-9_/-]*)<int:(?P<name>[a-z][a-z0-9_]*)>\Z")
+FLASK_INT_PATH = re.compile(
+    r"(?P<prefix>/[A-Za-z0-9_/-]*)<(?:(?P<kind>int|str):)?(?P<name>[a-z][a-z0-9_]*)>\Z"
+)
 FASTAPI_INT_PATH = re.compile(r"(?P<prefix>/[A-Za-z0-9_/-]*)\{(?P<name>[a-z][a-z0-9_]*)\}\Z")
 IMPORTS = {
     "flask": {"flask": {"Flask", "jsonify"}},
@@ -208,18 +218,17 @@ def _write_validation(fields: list[dict[str, Any]], data: str, partial: bool, er
     for field in writable:
         name = repr(field["name"])
         value = f"{data}[{name}]"
-        if not partial and not field["nullable"]:
+        if not partial and not field["nullable"] and "default" not in field:
             conditions.append(f"{name} not in {data}")
         if field["go_type"] in {"int32", "int64"}:
             bits = 32 if field["go_type"] == "int32" else 64
             lower, upper = -(2 ** (bits - 1)), 2 ** (bits - 1) - 1
             invalid = f"type({value}) is not int or not {lower} <= {value} <= {upper}"
         else:
-            python_type = {"string": "str", "bool": "bool"}[field["go_type"]]
-            invalid = f"type({value}) is not {python_type}"
+            invalid = invalid_value(field, value)
         if field["nullable"]:
             invalid = f"{value} is not None and ({invalid})"
-        if partial or field["nullable"]:
+        if partial or field["nullable"] or "default" in field:
             invalid = f"{name} in {data} and ({invalid})"
         conditions.append(invalid)
     joined = "\n        or ".join(f"({condition})" for condition in conditions)
@@ -923,7 +932,11 @@ def _transaction_write(
         model = by_name[model_name]
         fields = model["fields"]
         primary = next(field for field in fields if field["primary_key"])
-        writable = [field for field in fields if not field["auto"]]
+        writable = [
+            field
+            for field in fields
+            if not field["auto"] and not (lookup_value is not None and field["primary_key"])
+        ]
         access = f"{data}[{name!r}]"
         references: dict[str, Any] = {}
         step: dict[str, Any] = {"input": name, "model": model_name, "references": references}
@@ -952,7 +965,7 @@ def _transaction_write(
                 step["lookup_reference"] = reference
                 expression = f"{steps[reference['step']]['input']}.{reference['field']}"
             else:
-                expression = f"{access}[{primary['name']!r}]"
+                expression = input_value(primary, access, True)
             lookup = (
                 f"{model_name}.objects.filter({primary['name']}={expression}).first()"
                 if framework == "drf"
@@ -1005,11 +1018,7 @@ def _transaction_write(
                 references[field["name"]] = reference
                 expression = f"{steps[reference['step']]['input']}.{reference['field']}"
             else:
-                expression = (
-                    f"{access}.get({field['name']!r})"
-                    if field["nullable"] and operation != "patch"
-                    else f"{access}[{field['name']!r}]"
-                )
+                expression = input_value(field, access, operation == "patch")
             values.append(f"{field['name']}={expression}")
             if operation == "replace":
                 statements.append(f"{name}.{field['name']} = {expression}")
@@ -1062,7 +1071,7 @@ def _transaction_write(
     response = (
         "{"
         + ", ".join(
-            f"{field['name']!r}: {last['input']}.{field['name']}"
+            f"{field['name']!r}: " + output_value(field, f"{last['input']}.{field['name']}")
             for field in by_name[last["model"]]["fields"]
         )
         + "}"
@@ -1120,19 +1129,15 @@ def _sqlalchemy_write(
         writable = [field for field in fields if not field["auto"]]
         response = (
             "{"
-            + ", ".join(repr(field["name"]) + ": item." + field["name"] for field in fields)
+            + ", ".join(
+                repr(field["name"]) + ": " + output_value(field, "item." + field["name"])
+                for field in fields
+            )
             + "}"
         )
         if method == "POST":
             values = ", ".join(
-                field["name"]
-                + "="
-                + (
-                    f"data.get({field['name']!r})"
-                    if field["nullable"]
-                    else f"data[{field['name']!r}]"
-                )
-                for field in writable
+                field["name"] + "=" + input_value(field, "data") for field in writable
             )
             prefix = "data = request.get_json()\n" if framework == "flask" else ""
             invalid = (
@@ -1184,13 +1189,7 @@ def _sqlalchemy_write(
             if primary is None:
                 continue
             assignments = "\n".join(
-                f"    item.{field['name']} = "
-                + (
-                    f"data.get({field['name']!r})"
-                    if field["nullable"]
-                    else f"data[{field['name']!r}]"
-                )
-                for field in writable
+                f"    item.{field['name']} = " + input_value(field, "data") for field in writable
             )
             prefix = "data = request.get_json()\n" if framework == "flask" else ""
             invalid = (
@@ -1230,7 +1229,7 @@ def _sqlalchemy_write(
                 continue
             assignments = "\n".join(
                 f"""    if {field["name"]!r} in data:
-        item.{field["name"]} = data[{field["name"]!r}]"""
+        item.{field["name"]} = {input_value(field, "data", True)}"""
                 for field in writable
             )
             prefix = "data = request.get_json()\n" if framework == "flask" else ""
@@ -1265,6 +1264,11 @@ def _sqlalchemy_write(
             )
             write = {"operation": "patch", "model": model["name"], "lookup": primary["name"]}
             status = 200
+        if method != "POST" and primary is not None and primary["go_type"] == "UUIDValue":
+            source = uuid_lookup_prefix(primary, framework) + source
+            expected_annotations = [
+                "str" if value == "int" else value for value in expected_annotations
+            ]
         if (
             [arg.arg for arg in node.args.args] == expected_args
             and [ast.unparse(arg.annotation) if arg.annotation else "" for arg in node.args.args]
@@ -1289,23 +1293,25 @@ def _drf_write(
     if isinstance(node, ast.AsyncFunctionDef):
         raise ValueError("async DRF writes require additional capture")
     for model in models:
-        fields = model["fields"]
+        immutable_primary = method in {"PUT", "PATCH"} and any(
+            field["primary_key"] and not field["auto"] for field in model["fields"]
+        )
+        fields = [
+            dict(field, auto=True) if immutable_primary and field["primary_key"] else field
+            for field in model["fields"]
+        ]
         writable = [field for field in fields if not field["auto"]]
         response = (
             "{"
-            + ", ".join(repr(field["name"]) + ": item." + field["name"] for field in fields)
+            + ", ".join(
+                repr(field["name"]) + ": " + output_value(field, "item." + field["name"])
+                for field in fields
+            )
             + "}"
         )
         if method == "POST":
             values = ", ".join(
-                field["name"]
-                + "="
-                + (
-                    f"request.data.get({field['name']!r})"
-                    if field["nullable"]
-                    else f"request.data[{field['name']!r}]"
-                )
-                for field in writable
+                field["name"] + "=" + input_value(field, "request.data") for field in writable
             )
             validation = _write_validation(
                 fields,
@@ -1346,12 +1352,7 @@ return Response(status=204)
             if primary is None:
                 continue
             assignments = "\n".join(
-                f"item.{field['name']} = "
-                + (
-                    f"request.data.get({field['name']!r})"
-                    if field["nullable"]
-                    else f"request.data[{field['name']!r}]"
-                )
+                f"item.{field['name']} = " + input_value(field, "request.data")
                 for field in writable
             )
             validation = _write_validation(
@@ -1383,7 +1384,7 @@ return Response({response})
                 continue
             assignments = "\n".join(
                 f"""if {field["name"]!r} in request.data:
-    item.{field["name"]} = request.data[{field["name"]!r}]"""
+    item.{field["name"]} = {input_value(field, "request.data", True)}"""
                 for field in writable
             )
             validation = _write_validation(
@@ -1409,6 +1410,8 @@ return Response({response})
             expected_args = ["request", primary["name"]]
             status = 200
             write = {"operation": "patch", "model": model["name"], "lookup": primary["name"]}
+        if method != "POST" and primary is not None:
+            source = uuid_lookup_prefix(primary, "drf") + source
         if (
             [arg.arg for arg in node.args.args] == expected_args
             and not any(arg.annotation for arg in node.args.args)
@@ -1420,6 +1423,8 @@ return Response({response})
             and node.args.kwarg is None
             and ast.dump(ast.Module(body=node.body, type_ignores=[])) == ast.dump(ast.parse(source))
         ):
+            if immutable_primary:
+                write["immutable_primary"] = True
             return {"status": status, "write": write}
     raise ValueError("write handler is outside the qualified DRF recipe")
 
@@ -1517,6 +1522,17 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             allowed_imports[model_module] = {model["name"] for model in models} - reserved
         except (ValueError, TypeError, OSError, SyntaxError) as error:
             gaps.append("models: " + str(error))
+    value_validators: set[str] = set()
+    try:
+        rich_models = any(
+            field["go_type"].endswith("Value") for model in models for field in model["fields"]
+        )
+        value_validators = normalize_values(tree, rich_models)
+        if value_validators or rich_models:
+            for module, symbols in SOURCE_IMPORTS.items():
+                allowed_imports.setdefault(module, set()).update(symbols)
+    except (ValueError, TypeError, SyntaxError) as error:
+        gaps.append("values: " + str(error))
     lowered_repositories: set[tuple[str | None, str]] = set()
     application: dict[str, Any] = {}
     security: dict[str, Any] = {}
@@ -1537,6 +1553,15 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     missing_handlers: set[str] = set()
     try:
         integrity_handlers, missing_handlers = _normalize_integrity(tree, framework)
+        if any(
+            field["go_type"].endswith("Value") for model in models for field in model["fields"]
+        ) and any(
+            isinstance(node, ast.ImportFrom)
+            and node.module in {"pydantic", "rest_framework"}
+            and any(alias.name in {"BaseModel", "serializers"} for alias in node.names)
+            for node in tree.body
+        ):
+            raise ValueError("rich fields require explicit wire validation and serialization")
         tree = _normalize_native_pydantic(tree, models, framework, validations)
         tree = _normalize_pydantic(tree, models, framework, validations)
         if framework == "drf":
@@ -1616,7 +1641,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     imports: set[str] = set()
     assignments: dict[str, ast.expr] = {}
     for node in tree.body:
-        available = imports | assignments.keys() | functions.keys() | {"__name__"}
+        available = (
+            imports | assignments.keys() | functions.keys() | value_validators | {"__name__"}
+        )
         if missing_handlers and (
             (
                 isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
@@ -1646,6 +1673,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 "session",
                 "set",
                 "str",
+                "format",
                 "type",
                 "data",
                 "item",
@@ -1888,6 +1916,15 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 )
             ):
                 raise ValueError("database reads require an explicit engine and ORM imports")
+            operation = payload.get("read", payload.get("write", {}))
+            if operation.get("lookup") and match and framework in {"flask", "drf"}:
+                model = next(item for item in models if item["name"] == operation["model"])
+                field = next(
+                    item for item in model["fields"] if item["name"] == operation["lookup"]
+                )
+                kind = match.group("kind")
+                if (field["go_type"] == "UUIDValue") != (kind != "int"):
+                    raise ValueError("path converter differs from captured lookup type")
             routes.append(
                 {
                     "path": route_path,

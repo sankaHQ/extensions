@@ -52,6 +52,12 @@ def scenarios_for(root: Path, captured: dict[str, Any]) -> list[dict[str, Any]]:
         for route in captured["routes"]
     ):
         raise ValueError("captured write validation requires explicit sanka-verify.json scenarios")
+    if any(
+        field["go_type"].endswith("Value") or "default" in field
+        for model in captured["models"]
+        for field in model["fields"]
+    ):
+        raise ValueError("rich values require explicit ordered sanka-verify.json scenarios")
     operations = []
     for route in captured["routes"]:
         operation = {"method": route["method"], "path": route["path"], "status": route["status"]}
@@ -147,7 +153,7 @@ with psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://',
         for model in models:
             fields = model['fields']
             primary = next(field for field in fields if field['primary_key'])
-            columns = sql.SQL(',').join(sql.Identifier(field['name']) for field in fields)
+            columns = sql.SQL(model['observation_columns']) if 'observation_columns' in model else sql.SQL(',').join(sql.Identifier(field['name']) for field in fields)
             rows = connection.execute(sql.SQL('SELECT {} FROM {} ORDER BY {}').format(columns, sql.Identifier(model['table']), sql.Identifier(primary['name']))).fetchall()
             tables[model['table']] = [{field['name']: str(value) if field['go_type'] == 'int64' and value is not None else value for field, value in zip(fields, row)} for row in rows]
             if primary['auto']:
@@ -188,6 +194,24 @@ SOURCE_WRITES = SOURCE_WRITES.replace(
 )
 
 
+def observation_columns(model: dict[str, Any]) -> str:
+    columns = []
+    for field in model["fields"]:
+        name = '"' + field["name"] + '"'
+        kind = field["go_type"]
+        expression = name
+        if kind in {"int64", "UUIDValue", "DateValue", "DecimalValue"}:
+            expression = name + "::text"
+        elif kind == "TimestampValue":
+            expression = (
+                f"""to_char({name} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')"""
+            )
+        elif kind == "JSONValue":
+            expression = f"jsonb_build_object('value', {name}, 'sql_null', {name} IS NULL)"
+        columns.append(expression + " AS " + name)
+    return ",".join(columns)
+
+
 def write_probe(captured: dict[str, Any]) -> str:
     target = captured["configuration"]["target_framework"]
     exchange = """response, err := app.Test(request)
@@ -202,10 +226,7 @@ def write_probe(captured: dict[str, Any]) -> str:
     queries = []
     for model in captured["models"]:
         primary = next(f for f in model["fields"] if f["primary_key"])
-        columns = ",".join(
-            f'"{f["name"]}"' + (f'::text AS "{f["name"]}"' if f["go_type"] == "int64" else "")
-            for f in model["fields"]
-        )
+        columns = observation_columns(model)
         query = f'SELECT row_to_json(saved) FROM (SELECT {columns} FROM "{model["table"]}" ORDER BY "{primary["name"]}") saved'
         queries.append(f"""{{
             rows, err := pool.Query(ctx, {canonical(query)}); if err != nil {{ t.Fatal(err) }}
@@ -464,7 +485,12 @@ def replay_writes(
                     str(observed),
                     str(source / config["models_file"]),
                     "1",
-                    canonical(captured["models"]),
+                    canonical(
+                        [
+                            dict(model, observation_columns=observation_columns(model))
+                            for model in captured["models"]
+                        ]
+                    ),
                 ],
                 workspace,
                 timeout=60,

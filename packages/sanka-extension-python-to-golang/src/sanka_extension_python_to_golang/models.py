@@ -17,6 +17,11 @@ DJANGO_TYPES = {
     "BooleanField": ("boolean", "bool"),
     "TextField": ("text", "string"),
     "CharField": ("varchar", "string"),
+    "UUIDField": ("uuid", "UUIDValue"),
+    "DateField": ("date", "DateValue"),
+    "DateTimeField": ("timestamp with time zone", "TimestampValue"),
+    "DecimalField": ("numeric", "DecimalValue"),
+    "JSONField": ("jsonb", "JSONValue"),
 }
 SQLA_TYPES = {
     "Integer": ("integer", "int32"),
@@ -24,6 +29,12 @@ SQLA_TYPES = {
     "Boolean": ("boolean", "bool"),
     "Text": ("text", "string"),
     "String": ("varchar", "string"),
+    "Uuid": ("uuid", "UUIDValue"),
+    "Date": ("date", "DateValue"),
+    "DateTime": ("timestamp with time zone", "TimestampValue"),
+    "Numeric": ("numeric", "DecimalValue"),
+    "JSONB": ("jsonb", "JSONValue"),
+    "JSON": ("json", "JSONValue"),
 }
 
 
@@ -53,15 +64,19 @@ def _field(
     name: str, sql_type: str, go_type: str, options: dict[str, Any], auto: bool
 ) -> dict[str, Any]:
     identifier(name)
-    for key in ("primary_key", "nullable", "unique"):
+    for key in ("primary_key", "nullable", "unique", "index", "none_as_null"):
         if key in options and type(options[key]) is not bool:
             raise ValueError(f"{key} must be boolean")
     primary = options.get("primary_key", False)
     nullable = options.get("nullable", False)
-    if primary and (nullable or sql_type not in {"integer", "bigint"}):
-        raise ValueError("only non-null integer primary keys are qualified")
-    if auto and not primary:
+    if primary and (nullable or sql_type not in {"integer", "bigint", "uuid"}):
+        raise ValueError("only non-null integer or UUID primary keys are qualified")
+    if auto and (not primary or sql_type not in {"integer", "bigint"}):
         raise ValueError("auto increment requires the primary key")
+    if options.get("index") and options.get("unique"):
+        raise ValueError("combined index/unique ORM behavior requires separate capture")
+    if sql_type != "numeric" and {"precision", "scale"} & options.keys():
+        raise ValueError("precision and scale are only valid on decimal fields")
     length = options.get("length")
     if sql_type == "varchar":
         if type(length) is not int or not 0 < length <= 10485760:
@@ -69,7 +84,17 @@ def _field(
         sql_type = f"varchar({length})"
     elif length is not None:
         raise ValueError("length is only supported for varchar")
-    return {
+    if sql_type == "numeric":
+        precision, scale = options.get("precision"), options.get("scale")
+        if (
+            type(precision) is not int
+            or type(scale) is not int
+            or not 0 <= scale <= precision <= 1000
+            or not precision
+        ):
+            raise ValueError("numeric requires explicit bounded precision and scale")
+        sql_type = f"numeric({precision},{scale})"
+    result = {
         "name": name,
         "sql_type": sql_type,
         "go_type": go_type,
@@ -78,6 +103,67 @@ def _field(
         "unique": options.get("unique", False),
         "auto": auto,
     }
+    if sql_type in {"json", "jsonb"}:
+        result["none_as_null"] = options.get("none_as_null", True)
+    for key in ("default", "index"):
+        if key in options:
+            value = options[key]
+            if key == "default":
+                expected = {"string": str, "bool": bool, "int32": int, "int64": int}
+                if go_type not in expected or type(value) is not expected[go_type] or primary:
+                    raise ValueError("only static scalar non-primary defaults are qualified")
+                if go_type in {"int32", "int64"}:
+                    bits = 32 if go_type == "int32" else 64
+                    if not -(2 ** (bits - 1)) <= value < 2 ** (bits - 1):
+                        raise ValueError("default exceeds integer bounds")
+                if length is not None and isinstance(value, str) and len(value) > length:
+                    raise ValueError("default exceeds column length")
+            result[key] = value
+    return result
+
+
+def _table_metadata(
+    value: ast.expr, django: bool, unique: bool | None = None
+) -> list[dict[str, Any]]:
+    if not isinstance(value, (ast.List, ast.Tuple)):
+        raise ValueError("table constraints require a static list or tuple")
+    result = []
+    for call in value.elts:
+        if not isinstance(call, ast.Call):
+            raise ValueError("table constraints require explicit declarations")
+        kind = ast.unparse(call.func)
+        prefix = "models." if django else ""
+        if kind not in {prefix + "Index", prefix + "UniqueConstraint"}:
+            raise ValueError("unsupported table constraint")
+        is_unique = kind.endswith("UniqueConstraint")
+        if unique is not None and unique != is_unique:
+            raise ValueError("constraint is in the wrong metadata list")
+        options = _keywords(call, {"fields", "name"} if django else {"name"})
+        if django:
+            if call.args or "fields" not in options:
+                raise ValueError("Django indexes require explicit fields")
+            columns = options["fields"]
+        else:
+            args = [ast.literal_eval(arg) for arg in call.args]
+            if not is_unique:
+                if not args or "name" in options:
+                    raise ValueError("Index requires one explicit name")
+                options["name"], args = args[0], args[1:]
+            columns = args
+        if (
+            not isinstance(columns, (list, tuple))
+            or not columns
+            or len(set(columns)) != len(columns)
+        ):
+            raise ValueError("constraint columns must be distinct explicit fields")
+        entry: dict[str, Any] = {
+            "name": identifier(options.get("name")),
+            "columns": [identifier(column) for column in columns],
+        }
+        if is_unique:
+            entry["unique"] = True
+        result.append(entry)
+    return sorted(result, key=lambda item: item["name"])
 
 
 def _django(model: ast.ClassDef) -> dict[str, Any]:
@@ -97,9 +183,16 @@ def _django(model: ast.ClassDef) -> dict[str, Any]:
                 ):
                     raise ValueError("model Meta requires literal settings")
                 key = setting.targets[0].id
-                if key not in {"app_label", "db_table"} or key in metadata:
+                if (
+                    key not in {"app_label", "db_table", "constraints", "indexes"}
+                    or key in metadata
+                ):
                     raise ValueError("unsupported model Meta setting: " + key)
-                metadata[key] = identifier(ast.literal_eval(setting.value))
+                metadata[key] = (
+                    _table_metadata(setting.value, True, key == "constraints")
+                    if key in {"constraints", "indexes"}
+                    else identifier(ast.literal_eval(setting.value))
+                )
         elif (
             isinstance(node, ast.Assign)
             and len(node.targets) == 1
@@ -148,9 +241,27 @@ def _django(model: ast.ClassDef) -> dict[str, Any]:
                 continue
             if call.args:
                 raise ValueError("positional Django field arguments require capture")
-            options = _keywords(call, {"primary_key", "null", "unique", "max_length"})
+            options = _keywords(
+                call,
+                {
+                    "primary_key",
+                    "null",
+                    "unique",
+                    "max_length",
+                    "max_digits",
+                    "decimal_places",
+                    "default",
+                    "db_index",
+                },
+            )
             options = {
-                {"null": "nullable", "max_length": "length"}.get(key, key): value
+                {
+                    "null": "nullable",
+                    "max_length": "length",
+                    "max_digits": "precision",
+                    "decimal_places": "scale",
+                    "db_index": "index",
+                }.get(key, key): value
                 for key, value in options.items()
             }
             sql_type, go_type = DJANGO_TYPES[call.func.attr]
@@ -165,9 +276,14 @@ def _django(model: ast.ClassDef) -> dict[str, Any]:
             )
         else:
             raise ValueError("model methods, validation and custom metadata require capture")
-    if set(metadata) != {"app_label", "db_table"}:
+    if not {"app_label", "db_table"} <= set(metadata):
         raise ValueError("Django models require explicit app_label and db_table")
-    return {"name": model.name, "table": metadata["db_table"], "fields": fields}
+    return {
+        "name": model.name,
+        "table": metadata["db_table"],
+        "fields": fields,
+        **{key: metadata[key] for key in ("constraints", "indexes") if key in metadata},
+    }
 
 
 def _sqlalchemy(model: ast.ClassDef) -> dict[str, Any]:
@@ -175,6 +291,7 @@ def _sqlalchemy(model: ast.ClassDef) -> dict[str, Any]:
         raise ValueError("only direct SQLAlchemy Base subclasses are qualified")
     table = None
     fields = []
+    metadata: dict[str, Any] = {}
     for node in model.body:
         if (
             isinstance(node, ast.Assign)
@@ -185,6 +302,20 @@ def _sqlalchemy(model: ast.ClassDef) -> dict[str, Any]:
             if table is not None:
                 raise ValueError("duplicate table name declaration")
             table = identifier(ast.literal_eval(node.value))
+            continue
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "__table_args__"
+        ):
+            if metadata:
+                raise ValueError("duplicate table constraints")
+            entries = _table_metadata(node.value, False)
+            metadata = {
+                "constraints": [item for item in entries if item.get("unique")],
+                "indexes": [item for item in entries if not item.get("unique")],
+            }
             continue
         if not (
             isinstance(node, ast.AnnAssign)
@@ -200,13 +331,28 @@ def _sqlalchemy(model: ast.ClassDef) -> dict[str, Any]:
         annotation = ast.unparse(node.annotation.slice)
         nullable = annotation.endswith(" | None")
         annotation = annotation.removesuffix(" | None")
-        if annotation not in {"int", "str", "bool"}:
+        if annotation not in {"int", "str", "bool", "UUID", "date", "datetime", "Decimal", "dict"}:
             raise ValueError("unsupported column annotation")
         call = node.value
-        options = _keywords(call, {"primary_key", "nullable", "unique", "autoincrement"})
+        options = _keywords(
+            call, {"primary_key", "nullable", "unique", "autoincrement", "default", "index"}
+        )
         options.setdefault("nullable", nullable)
-        inferred = {"int": "Integer", "str": "String", "bool": "Boolean"}[annotation]
+        if options["nullable"] and "default" in options:
+            raise ValueError("nullable SQLAlchemy defaults require operation-specific capture")
+        inferred = {
+            "int": "Integer",
+            "str": "String",
+            "bool": "Boolean",
+            "UUID": "Uuid",
+            "date": "Date",
+            "datetime": "DateTime",
+            "Decimal": "Numeric",
+            "dict": "JSONB",
+        }[annotation]
         type_name = inferred
+        if annotation not in {"int", "str", "bool"} and not call.args:
+            raise ValueError("rich columns require an explicit SQL type")
         reference = None
         if len(call.args) == 2:
             foreign = call.args[1]
@@ -246,20 +392,51 @@ def _sqlalchemy(model: ast.ClassDef) -> dict[str, Any]:
             datatype = call.args[0]
             if isinstance(datatype, ast.Call) and isinstance(datatype.func, ast.Name):
                 type_name = datatype.func.id
-                if type_name != "String" or len(datatype.args) != 1 or datatype.keywords:
-                    raise ValueError("only String(length) type arguments are qualified")
-                options["length"] = ast.literal_eval(datatype.args[0])
+                if type_name == "String" and len(datatype.args) == 1 and not datatype.keywords:
+                    options["length"] = ast.literal_eval(datatype.args[0])
+                elif type_name == "Numeric" and len(datatype.args) == 2:
+                    opts = _keywords(datatype, {"asdecimal"})
+                    if opts.get("asdecimal", True) is not True:
+                        raise ValueError("numeric must preserve exact decimals")
+                    options.update(
+                        precision=ast.literal_eval(datatype.args[0]),
+                        scale=ast.literal_eval(datatype.args[1]),
+                    )
+                elif type_name == "DateTime" and not datatype.args:
+                    if _keywords(datatype, {"timezone"}) != {"timezone": True}:
+                        raise ValueError("timestamps require explicit timezone=True")
+                elif type_name in {"JSON", "JSONB"} and not datatype.args:
+                    options.update(_keywords(datatype, {"none_as_null"}))
+                    options.setdefault("none_as_null", False)
+                else:
+                    raise ValueError("unsupported SQLAlchemy type arguments")
             elif isinstance(datatype, ast.Name):
                 type_name = datatype.id
+                if type_name == "DateTime":
+                    raise ValueError("timestamps require explicit timezone=True")
+                if type_name in {"JSON", "JSONB"}:
+                    options["none_as_null"] = False
             else:
                 raise ValueError("unsupported SQLAlchemy type")
         if type_name not in SQLA_TYPES:
             raise ValueError("unsupported SQLAlchemy type: " + type_name)
         sql_type, go_type = SQLA_TYPES[type_name]
-        expected = {"int32": "int", "int64": "int", "string": "str", "bool": "bool"}[go_type]
+        expected = {
+            "int32": "int",
+            "int64": "int",
+            "string": "str",
+            "bool": "bool",
+            "UUIDValue": "UUID",
+            "DateValue": "date",
+            "TimestampValue": "datetime",
+            "DecimalValue": "Decimal",
+            "JSONValue": "dict",
+        }[go_type]
         if annotation != expected:
             raise ValueError("column annotation differs from SQL type")
-        auto = options.pop("autoincrement", options.get("primary_key", False))
+        auto = options.pop(
+            "autoincrement", options.get("primary_key", False) and sql_type in {"integer", "bigint"}
+        )
         if type(auto) is not bool:
             raise ValueError("autoincrement must be boolean")
         field = _field(node.target.id, sql_type, go_type, options, auto)
@@ -270,7 +447,7 @@ def _sqlalchemy(model: ast.ClassDef) -> dict[str, Any]:
         fields.append(field)
     if table is None:
         raise ValueError("SQLAlchemy models require __tablename__")
-    return {"name": model.name, "table": table, "fields": fields}
+    return {"name": model.name, "table": table, "fields": fields, **metadata}
 
 
 def capture_models(path: Path, framework: str) -> list[dict[str, Any]]:
@@ -281,7 +458,16 @@ def capture_models(path: Path, framework: str) -> list[dict[str, Any]]:
         if framework == "drf"
         else {
             "sqlalchemy.orm": {"DeclarativeBase", "Mapped", "mapped_column"},
-            "sqlalchemy": {*SQLA_TYPES, "ForeignKey"},
+            "sqlalchemy": {
+                *(set(SQLA_TYPES) - {"JSONB"}),
+                "ForeignKey",
+                "UniqueConstraint",
+                "Index",
+            },
+            "sqlalchemy.dialects.postgresql": {"JSONB"},
+            "uuid": {"UUID"},
+            "datetime": {"date", "datetime"},
+            "decimal": {"Decimal"},
         }
     )
     models = []
@@ -313,11 +499,16 @@ def capture_models(path: Path, framework: str) -> list[dict[str, Any]]:
                     for item in ast.walk(node)
                     if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Load)
                 }
-                if referenced - names - {"int", "str", "bool"}:
+                if referenced - names - {"int", "str", "bool", "dict"}:
                     raise ValueError("model references an unresolved symbol")
                 if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", node.name) or node.name in {
                     "NewApp",
                     "Migrate",
+                    "UUIDValue",
+                    "DateValue",
+                    "TimestampValue",
+                    "DecimalValue",
+                    "JSONValue",
                 }:
                     raise ValueError("model names must be exported Go identifiers")
                 models.append(_django(node) if framework == "drf" else _sqlalchemy(node))
@@ -333,11 +524,23 @@ def capture_models(path: Path, framework: str) -> list[dict[str, Any]]:
             raise ValueError("model table conflicts with migration bookkeeping")
         fields = model["fields"]
         if sum(field["primary_key"] for field in fields) != 1:
-            raise ValueError("models require one explicit integer primary key")
+            raise ValueError("models require one explicit primary key")
+        entries = [*model.get("constraints", []), *model.get("indexes", [])]
+        if len({entry["name"] for entry in entries}) != len(entries):
+            raise ValueError("duplicate constraint or index name")
+        if any(set(entry["columns"]) - {field["name"] for field in fields} for entry in entries):
+            raise ValueError("constraint references an uncaptured column")
         if len({go_name(field["name"]) for field in fields}) != len(fields):
             raise ValueError("duplicate or colliding field names")
     by_name = {model["name"]: model for model in models}
     by_table = {model["table"]: model for model in models}
+    index_names = [
+        entry["name"]
+        for model in models
+        for entry in [*model.get("constraints", []), *model.get("indexes", [])]
+    ]
+    if len(set(index_names)) != len(index_names) or set(index_names) & set(by_table):
+        raise ValueError("index names must be unique across the schema")
     dependencies: dict[str, set[str]] = {table: set() for table in by_table}
     for model in models:
         for field in model["fields"]:
