@@ -2,8 +2,8 @@
 
 This is the qualification contract for the first single-database write profile. Fiber, chi, mux,
 and Gin use it for the bounded flat-model POST/PUT/PATCH/DELETE recipe documented by the extension.
-It does not qualify arbitrary handlers, broader validation, or relationship writes. Existing
-read-only generated projects remain unchanged.
+The extension also captures bounded relational CRUD and explicit ordered-create scopes.
+Arbitrary handlers and business workflows remain outside this contract.
 
 Use the pinned pgx `BeginFunc` primitive for a single unit of work. All statements
 in that unit must use the callback transaction and receive the operation context.
@@ -61,3 +61,23 @@ Database cases additionally require `SANKA_MIGRATE_TEST_POSTGRES_DSN` pointing t
 a disposable test database. CI already provides it in the Python-to-Golang lane.
 Without that explicit fixture, the three database cases skip; a native fault-test
 pass alone is not database-parity evidence.
+
+## Captured business transactions
+
+`test_golang_business_transactions.py` exercises explicit synchronous source scopes
+containing two or more ordered creates, with strict nested input validation before
+the scope. Generated-key dependencies must match captured foreign keys. SQLAlchemy
+flushes each create; the source snapshots its final response before exiting the scope
+and returns it only after commit. An outer integrity handler preserves conflict status.
+Every generated INSERT uses the same pgx transaction and parameterized arguments.
+
+The fixtures compose authentication, write permissions and response headers with
+transactions. Shared HTTP replay compares responses, all captured tables, and sequences
+for invalid input, success, a later write failure, deferred-constraint commit failure,
+and recovery. A deliberately non-atomic candidate must fail table parity even when
+its HTTP status agrees. Authorization failures must leave rows and sequences unchanged.
+
+This does not lower mixed create/update/delete workflows, nested savepoints, async
+business transactions, branches, service calls or external effects. Explicit ordered
+`sanka-verify.json` scenarios are required. The same PostgreSQL fixture opt-in and
+CI qualification rules above apply; skipped database cases provide no parity evidence.
