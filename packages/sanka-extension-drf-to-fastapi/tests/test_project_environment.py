@@ -12,8 +12,10 @@ import sys
 import venv
 from pathlib import Path
 
+import pytest
+
 from sanka_extension_drf_to_fastapi.project_environment import _BOOTSTRAP
-from sanka_extensions.code import ExtensionRequest, encode_request
+from sanka_extensions.code import ExtensionRequest, JsonValue, encode_request
 
 
 def _environment(path: Path, packages: tuple[str, ...]) -> Path:
@@ -33,14 +35,14 @@ def _environment(path: Path, packages: tuple[str, ...]) -> Path:
     return python
 
 
-def _request(project: Path, command: str = "scan") -> dict:
+def _request(project: Path, command: str = "scan", target: str = "fastapi") -> dict[str, JsonValue]:
     return encode_request(
         ExtensionRequest(
             request_id="quickstart",
             command=command,
             project_root=str(project.resolve()),
             artifact_root=str((project / ".sanka").resolve()),
-            extension_id="sanka/drf-to-fastapi",
+            extension_id=f"sanka/drf-to-{target}",
             extension_version="0.1.0a9",
             manifest_digest="0" * 64,
             fingerprint={},
@@ -58,7 +60,11 @@ def _request(project: Path, command: str = "scan") -> dict:
     )
 
 
-def test_scan_and_plan_use_only_project_django_without_pythonpath(tmp_path: Path) -> None:
+@pytest.mark.parametrize("target", ["fastapi", "flask"])
+def test_scan_and_plan_use_only_project_django_without_pythonpath(
+    tmp_path: Path, target: str
+) -> None:
+    package = f"sanka_extension_drf_to_{target}"
     project = tmp_path / "source with spaces"
     shutil.copytree(Path(__file__).parent / "fixtures/drf_project", project)
     source_python = _environment(
@@ -67,7 +73,7 @@ def test_scan_and_plan_use_only_project_django_without_pythonpath(tmp_path: Path
     extension_python = _environment(
         tmp_path / "isolated extension",
         (
-            "sanka_extension_drf_to_fastapi",
+            package,
             "sanka_drf_replay",
             "sanka_extensions",
             "sanka_extension_sdk",
@@ -80,7 +86,7 @@ def test_scan_and_plan_use_only_project_django_without_pythonpath(tmp_path: Path
     environment["VIRTUAL_ENV"] = str(tmp_path / "unrelated")
     for python, missing in (
         (extension_python, "django"),
-        (source_python, "sanka_extension_drf_to_fastapi"),
+        (source_python, package),
     ):
         subprocess.run(
             [
@@ -105,14 +111,14 @@ def test_scan_and_plan_use_only_project_django_without_pythonpath(tmp_path: Path
                 text=True,
             ).strip()
         )
-        / "sanka_extension_drf_to_fastapi"
+        / package
     )
     fake.mkdir(parents=True)
     (fake / "__init__.py").write_text("raise RuntimeError('unreviewed extension selected')\n")
     for command in ("scan", "plan"):
         result = subprocess.run(
-            [str(extension_python), "-I", "-B", "-m", "sanka_extension_drf_to_fastapi"],
-            input=json.dumps(_request(project, command)),
+            [str(extension_python), "-I", "-B", "-m", package],
+            input=json.dumps(_request(project, command, target)),
             text=True,
             capture_output=True,
             env=environment,
@@ -128,13 +134,27 @@ def test_scan_and_plan_use_only_project_django_without_pythonpath(tmp_path: Path
     assert not list((tmp_path / "isolated extension").rglob("__pycache__"))
     scan = json.loads((project / ".sanka/scan.json").read_text())
     assert scan["routes"]
-    assert (
+    assert target == "flask" or (
         scan["python_version"]
         == subprocess.check_output(
             [str(source_python), "-c", "import platform; print(platform.python_version())"],
             text=True,
         ).strip()
     )
+    if target == "flask":
+        (project / ".venv").rename(tmp_path / "removed-source-environment")
+        result = subprocess.run(
+            [str(extension_python), "-I", "-B", "-m", package],
+            input=json.dumps(_request(project, target=target)),
+            text=True,
+            capture_output=True,
+            env=environment,
+            timeout=30,
+        )
+        response = json.loads(result.stdout)
+        assert response["error"]["code"] == "SANKA_SOURCE_DEPENDENCY_MISSING"
+        assert str(extension_python) in response["error"]["message"]
+        assert "django" in response["error"]["message"]
 
 
 def test_bootstrap_reports_python_mismatch_before_loading_extension(tmp_path: Path) -> None:

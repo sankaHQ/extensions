@@ -74,19 +74,25 @@ def call(root: Path, command: str, config=None, reviewed=None):
     return payload
 
 
-def test_native_lifecycle_and_explicit_gaps(tmp_path: Path) -> None:
+@pytest.mark.parametrize("output_directory", [".sanka/output/flask", "generated-flask"])
+def test_native_lifecycle_and_explicit_gaps(tmp_path: Path, output_directory: str) -> None:
     project(tmp_path)
     assert call(tmp_path, "test")["outcome"] == "error"
     assert call(tmp_path, "verify")["outcome"] == "error"
     scan = call(tmp_path, "scan")
     assert scan["outcome"] == "success", scan
-    plan = call(tmp_path, "plan")["data"]
+    plan = call(tmp_path, "plan", {"output": output_directory})["data"]
     assert plan["native_routes"] == 3
     assert plan["needs_adaptation_routes"] >= 2
-    assert call(tmp_path, "plan")["data"]["plan_hash"] == plan["plan_hash"]
+    assert (
+        call(tmp_path, "plan", {"output": output_directory})["data"]["plan_hash"]
+        == plan["plan_hash"]
+    )
     applied = call(tmp_path, "apply", {"extension_plan_hash": plan["plan_hash"]}, "core-reviewed")
     assert applied["outcome"] == "success", applied
     output = Path(applied["data"]["output"])
+    tested = call(tmp_path, "test", {"extension_plan_hash": plan["plan_hash"]}, "core-reviewed")
+    assert "manual gaps" in tested["error"]["message"]
     probe = """import json, sys
 from flask import Flask
 import target_app

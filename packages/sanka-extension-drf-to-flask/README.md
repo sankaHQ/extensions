@@ -140,6 +140,13 @@ not claim HTTP or database parity. `verify --scenarios` performs that comparison
 with isolated fixtures. For an already repaired candidate, preserve the changes and
 use scenario verification instead of regenerating a plan just to rerun its test gate.
 
+Install source dependencies in the project's `.venv`. The locked extension runs
+with that environment's Python while retaining its reviewed code and protocol.
+The environment must use the same Python major/minor version as the extension.
+Missing dependencies report the interpreter that needs them; Django is not
+installed into the CLI's environment. Generated output is excluded from the
+reviewed source hash, while source edits still require a new plan.
+
 Unsupported mapped routes still return 501 and remain listed in migration-gaps.json.
 Those are incomplete migrations. Repair explicit gaps only; prefer reusing domain
 functions and extension replay over recreating them in a model-written test harness.

@@ -7,6 +7,7 @@ import json
 import sys
 
 from sanka_extension_drf_to_flask.adapter import handle
+from sanka_extension_drf_to_flask.project_environment import use_project_environment
 from sanka_extensions.code import (
     SCHEMA_VERSION,
     ExtensionRequest,
@@ -16,10 +17,13 @@ from sanka_extensions.code import (
 )
 
 
-def main() -> int:
+def main(*, project_environment: bool = True) -> int:
     request: ExtensionRequest | None = None
     try:
-        request = decode_request(json.loads(sys.stdin.read()))
+        content = sys.stdin.read()
+        request = decode_request(json.loads(content))
+        if project_environment:
+            use_project_environment(request, content)
         response = handle(request)
         document = json.dumps(encode_response(response), sort_keys=True) + "\n"
     except Exception as error:
