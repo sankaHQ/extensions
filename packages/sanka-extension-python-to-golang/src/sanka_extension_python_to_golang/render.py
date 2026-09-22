@@ -851,6 +851,7 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
     failure = f"return {result_type}{{}}, errInvalidWrite"
     decoders = []
     decoding = []
+    body_guards = []
     statements = []
     for number, step in enumerate(steps):
         model = by_name[step["model"]]
@@ -867,7 +868,16 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
         input_model = dict(model, fields=input_fields)
         decoder_name = f"decodeTransaction{index}Step{number}"
         decoders.append(_write_helper(index, {}, input_model, True, decoder_only=decoder_name))
-        seen = f"seen{number}" if operation == "patch" else "_"
+        seen = (
+            f"seen{number}"
+            if operation == "patch" or (step.get("scope") and operation in {"create", "replace"})
+            else "_"
+        )
+        if operation in {"create", "replace", "patch"}:
+            for field, claim in step.get("scope", {}).items():
+                body_guards.append(
+                    f"if {seen}[{canonical(field)}] && item{number}.{go_name(field)} != principal[{canonical(claim)}] {{ return {result_type}{{}}, errScopeDenied }}"
+                )
         decoding.append(
             f"item{number}, {seen}, err := {decoder_name}(values[{canonical(step['input'])}], {str(operation == 'patch').lower()})\n    if err != nil {{ {failure} }}"
         )
@@ -895,24 +905,30 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
                 f"if err := tx.QueryRow(ctx, {canonical(query)}, {arguments}).Scan({destinations}); err != nil {{ return err }}"
             )
             continue
-        select = f'SELECT {returning} FROM "{model["table"]}" WHERE "{primary["name"]}" = $1'
+        _, predicate, scope_values = _scope_parts(step, 2, "")
+        predicate = " AND " + predicate if predicate else ""
+        select = (
+            f'SELECT {returning} FROM "{model["table"]}" WHERE "{primary["name"]}" = $1{predicate}'
+        )
         statements.append(
-            f"if err := tx.QueryRow(ctx, {canonical(select)}, {key}).Scan({destinations}); err != nil {{ return err }}"
+            f"if err := tx.QueryRow(ctx, {canonical(select)}, {key}{scope_values}).Scan({destinations}); err != nil {{ return err }}"
         )
         if operation == "lookup":
             continue
         if operation == "delete":
-            query = f'DELETE FROM "{model["table"]}" WHERE "{primary["name"]}" = $1'
+            query = f'DELETE FROM "{model["table"]}" WHERE "{primary["name"]}" = $1{predicate}'
             statements.append(
-                f"if _, err := tx.Exec(ctx, {canonical(query)}, {key}); err != nil {{ return err }}"
+                f"if _, err := tx.Exec(ctx, {canonical(query)}, {key}{scope_values}); err != nil {{ return err }}"
             )
             continue
         if operation == "replace":
             sets = ", ".join(f'"{field["name"]}" = ${i}' for i, field in enumerate(writable, 1))
             arguments = ", ".join(f"item{number}." + go_name(field["name"]) for field in writable)
-            query = f'UPDATE "{model["table"]}" SET {sets} WHERE "{primary["name"]}" = ${len(writable) + 1} RETURNING {returning}'
+            _, predicate, scope_values = _scope_parts(step, len(writable) + 2, "")
+            predicate = " AND " + predicate if predicate else ""
+            query = f'UPDATE "{model["table"]}" SET {sets} WHERE "{primary["name"]}" = ${len(writable) + 1}{predicate} RETURNING {returning}'
             statements.append(
-                f"if err := tx.QueryRow(ctx, {canonical(query)}, {arguments}, {key}).Scan({destinations}); err != nil {{ return transactionUpdateError(err) }}"
+                f"if err := tx.QueryRow(ctx, {canonical(query)}, {arguments}, {key}{scope_values}).Scan({destinations}); err != nil {{ return transactionUpdateError(err) }}"
             )
         else:
             statements.append(f"sets{number} := []string{{}}; args{number} := []any{{}}")
@@ -921,10 +937,17 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
                 statements.append(
                     f"if {seen}[{canonical(field['name'])}] {{ args{number} = append(args{number}, item{number}.{go_name(field['name'])}); sets{number} = append(sets{number}, fmt.Sprintf({column}, len(args{number}))) }}"
                 )
-            query = f'UPDATE "{model["table"]}" SET %s WHERE "{primary["name"]}" = $%d RETURNING {returning}'
+            query = f'UPDATE "{model["table"]}" SET %s WHERE "{primary["name"]}" = $%d'
+            scope_append = []
+            for field, claim in step.get("scope", {}).items():
+                scope_append.append(
+                    f"args{number} = append(args{number}, principal[{canonical(claim)}]); query += fmt.Sprintf({canonical(' AND ' + chr(34) + field + chr(34) + ' = $%d')}, len(args{number}))"
+                )
             statements.append(f"""if len(sets{number}) > 0 {{
             args{number} = append(args{number}, {key})
             query := fmt.Sprintf({canonical(query)}, strings.Join(sets{number}, ", "), len(args{number}))
+            {chr(10).join(scope_append)}
+            query += {canonical(" RETURNING " + returning)}
             if err := tx.QueryRow(ctx, query, args{number}...).Scan({destinations}); err != nil {{ return transactionUpdateError(err) }}
         }}""")
     declarations = "\n    ".join(f"var saved{i} {step['model']}" for i, step in enumerate(steps))
@@ -934,7 +957,9 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
         if "literal_response" in write
         else f"saved{len(steps) - 1}"
     )
+    guard, _, _ = _scope_parts(write, 1, f"return {result_type}{{}}, scopeErr")
     helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte) ({result_type}, error) {{
+    {guard}
     var values map[string]json.RawMessage
     decoder := json.NewDecoder(bytes.NewReader(body))
     if err := decoder.Decode(&values); err != nil || values == nil {{ {failure} }}
@@ -945,6 +970,7 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
         if _, ok := allowed[key]; !ok {{ {failure} }}
     }}
     {chr(10).join(decoding)}
+    {chr(10).join(body_guards)}
     {declarations}
     err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
         {chr(10).join(statements)}

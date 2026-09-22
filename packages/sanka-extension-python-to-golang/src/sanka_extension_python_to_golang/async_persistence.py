@@ -436,8 +436,23 @@ def normalize_async_persistence(tree: ast.Module) -> tuple[ast.Module, set[tuple
                 node.body[-1:] = copy.deepcopy(helper.body)
                 used.add(helper.name)
         scopes = [item for item in ast.walk(node) if isinstance(item, ast.AsyncWith)]
-        if len(scopes) != 1 or scopes[0] is not node.body[-1]:
-            raise ValueError("async handler requires one final session scope")
+        transactional = (
+            len(scopes) == 2
+            and len(scopes[0].body) == 1
+            and scopes[0].body[0] is scopes[1]
+            and len(scopes[1].items) == 1
+            and ast.unparse(scopes[1].items[0].context_expr) == "session.begin()"
+            and scopes[1].items[0].optional_vars is None
+        )
+        persistence_body = (
+            node.body[0].body
+            if len(node.body) == 1 and isinstance(node.body[0], ast.Try)
+            else node.body
+        )
+        if not transactional and (len(scopes) != 1 or scopes[0] is not persistence_body[-1]):
+            raise ValueError(
+                "async handler requires one final session scope or explicit transaction"
+            )
         scope = scopes[0]
         if (
             len(scope.items) != 1
@@ -457,7 +472,7 @@ def normalize_async_persistence(tree: ast.Module) -> tuple[ast.Module, set[tuple
                 isinstance(call, ast.Call)
                 and isinstance(call.func, ast.Attribute)
                 and ast.unparse(call.func.value) == "session"
-                and call.func.attr in {"get", "delete", "commit", "refresh", "execute"}
+                and call.func.attr in {"get", "delete", "commit", "refresh", "execute", "flush"}
             ):
                 raise ValueError("unsupported awaited persistence operation")
             awaited.append(call)
@@ -467,6 +482,7 @@ def normalize_async_persistence(tree: ast.Module) -> tuple[ast.Module, set[tuple
                 and isinstance(item.func, ast.Attribute)
                 and ast.unparse(item.func.value) == "session"
                 and item.func.attr != "add"
+                and not (transactional and item is scopes[1].items[0].context_expr)
                 and item not in awaited
             ):
                 raise ValueError("async session operations must be awaited")
@@ -475,9 +491,12 @@ def normalize_async_persistence(tree: ast.Module) -> tuple[ast.Module, set[tuple
             def visit_Await(self, item: ast.Await) -> ast.expr:
                 return item.value
 
-        node.body = [Lower().visit(item) for item in node.body]
-        node.body[-1] = ast.With(items=scope.items, body=scope.body, type_comment=None)
+            def visit_AsyncWith(self, item: ast.AsyncWith) -> ast.With:
+                self.generic_visit(item)
+                return ast.With(items=item.items, body=item.body, type_comment=None)
+
         scope.items[0].context_expr = ast.parse("Session(engine)", mode="eval").body
+        node.body = [Lower().visit(item) for item in node.body]
     if used != helpers.keys():
         raise ValueError("unused or unsupported async repository")
     result = []
@@ -497,3 +516,93 @@ def normalize_async_persistence(tree: ast.Module) -> tuple[ast.Module, set[tuple
         + result
     )
     return ast.fix_missing_locations(tree), lowered
+
+
+def normalize_workflow_calls(tree: ast.Module) -> tuple[ast.Module, set[tuple[str | None, str]]]:
+    """Expand plain tail delegation; the complete resulting body still needs capture."""
+    tree = copy.deepcopy(tree)
+    functions = {
+        n.name: n for n in tree.body if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    consumed: set[str] = set()
+
+    def expand(
+        node: ast.FunctionDef | ast.AsyncFunctionDef, chain: tuple[str, ...]
+    ) -> list[ast.stmt]:
+        body = node.body
+        if len(body) != 1 or not isinstance(body[0], ast.Return):
+            return body
+        value = body[0].value
+        asynchronous = isinstance(value, ast.Await)
+        call = value.value if isinstance(value, ast.Await) else value
+        if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name):
+            return body
+        helper = functions.get(call.func.id)
+        if helper is None or helper.decorator_list:
+            return body
+        if helper.name in chain or len(chain) >= 8:
+            raise ValueError("workflow calls must be acyclic and at most eight functions deep")
+        expanded = expand(helper, (*chain, helper.name))
+        # Existing async CRUD lowering owns ordinary repository delegation.
+        if not any(
+            isinstance(n, ast.With | ast.AsyncWith)
+            and any(
+                ast.unparse(i.context_expr) in {"transaction.atomic()", "session.begin()"}
+                for i in n.items
+            )
+            for statement in expanded
+            for n in ast.walk(statement)
+        ):
+            return body
+        args = helper.args
+        if (
+            asynchronous != isinstance(node, ast.AsyncFunctionDef)
+            or asynchronous != isinstance(helper, ast.AsyncFunctionDef)
+            or helper.returns
+            or helper.type_params
+            or args.defaults
+            or args.kw_defaults
+            or args.kwonlyargs
+            or args.posonlyargs
+            or args.vararg
+            or args.kwarg
+            or call.keywords
+            or [ast.unparse(a) for a in call.args] != [a.arg for a in args.args]
+            or [a.arg for a in args.args] != [a.arg for a in node.args.args]
+            or any(
+                a.annotation is not None
+                and ast.unparse(a.annotation) not in {"dict", "int", "str", "bool"}
+                for a in args.args
+            )
+        ):
+            raise ValueError(
+                "workflow helpers require unchanged positional arguments and matching async calls"
+            )
+        # Reject dynamic rebinding before replacing a call by its static declaration.
+        bindings = [
+            n
+            for n in ast.walk(tree)
+            if (isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) and n.id == helper.name)
+            or (isinstance(n, ast.alias) and (n.asname or n.name) == helper.name)
+            or (isinstance(n, ast.arg) and n.arg == helper.name)
+            or (
+                isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+                and n.name == helper.name
+            )
+        ]
+        if len(bindings) != 1:
+            raise ValueError("workflow helper symbols must not be rebound")
+        consumed.add(helper.name)
+        return copy.deepcopy(expanded)
+
+    for node in functions.values():
+        if node.decorator_list:
+            node.body = expand(node, (node.name,))
+    tree.body = [
+        n
+        for n in tree.body
+        if not isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) or n.name not in consumed
+    ]
+    if any(isinstance(n, ast.Name) and n.id in consumed for n in ast.walk(tree)):
+        raise ValueError("workflow helpers may only be used in captured tail calls")
+    return tree, {(None, name) for name in consumed}

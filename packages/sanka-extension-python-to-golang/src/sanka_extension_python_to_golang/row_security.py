@@ -12,7 +12,7 @@ def normalize_row_security(
 ) -> dict[str, Any]:
     if not security.get("native"):
         return {}
-    scopes = {}
+    scopes: dict[str, Any] = {}
     for node in tree.body:
         if not isinstance(node, ast.FunctionDef):
             continue
@@ -60,6 +60,89 @@ def normalize_row_security(
             "flask": 'return jsonify({"error": "permission denied"}), 403',
             "fastapi": 'raise HTTPException(status_code=403, detail="permission denied")',
         }[framework]
+        transactional = any(
+            isinstance(n, ast.With)
+            and any(
+                ast.unparse(i.context_expr) in {"transaction.atomic()", "session.begin()"}
+                for i in n.items
+            )
+            for n in ast.walk(node)
+        )
+        if transactional:
+            steps: dict[str, Any] = {}
+            for entry in ast.walk(node):
+                if (
+                    not isinstance(entry, ast.If)
+                    or not isinstance(entry.test, ast.BoolOp)
+                    or not isinstance(entry.test.op, ast.Or)
+                ):
+                    continue
+                terms = entry.test.values
+                first = terms[0]
+                if not isinstance(first, ast.Compare) or not isinstance(first.left, ast.Name):
+                    continue
+                variable = first.left.id
+                if ast.unparse(first) != f"{variable} is None":
+                    continue
+                found: dict[str, str] = {}
+                for term in terms[1:]:
+                    if not (
+                        isinstance(term, ast.Compare)
+                        and len(term.ops) == 1
+                        and isinstance(term.ops[0], ast.NotEq)
+                        and isinstance(term.left, ast.Attribute)
+                        and ast.unparse(term.left.value) == variable
+                        and record(found, term.left.attr, term.comparators[0])
+                    ):
+                        break
+                else:
+                    if variable in steps:
+                        raise ValueError("duplicate transaction row guard")
+                    steps[variable] = {"row": found, "body": {}, "models": []}
+                    entry.test = first
+            # All request guards must be consecutive immediately before the transaction.
+            scope_index = next((i for i, n in enumerate(node.body) if isinstance(n, ast.With)), -1)
+            for index in range(scope_index - 1, -1, -1):
+                entry = node.body[index]
+                if (
+                    not isinstance(entry, ast.If)
+                    or not isinstance(entry.test, ast.BoolOp)
+                    or not isinstance(entry.test.op, ast.And)
+                    or len(entry.test.values) != 2
+                ):
+                    break
+                comparison = entry.test.values[1]
+                if not (
+                    isinstance(comparison, ast.Compare)
+                    and len(comparison.ops) == 1
+                    and isinstance(comparison.ops[0], ast.NotEq)
+                    and isinstance(comparison.left, ast.Subscript)
+                    and isinstance(comparison.left.slice, ast.Constant)
+                    and type(comparison.left.slice.value) is str
+                ):
+                    break
+                access = comparison.left.value
+                if not (
+                    isinstance(access, ast.Subscript)
+                    and ast.unparse(access.value) == data
+                    and isinstance(access.slice, ast.Constant)
+                    and type(access.slice.value) is str
+                ):
+                    break
+                variable, field = access.slice.value, comparison.left.slice.value
+                expected = ast.parse(
+                    f"if {field!r} in {ast.unparse(access)} and "
+                    f"{ast.unparse(comparison)}:\n    {denied}"
+                ).body[0]
+                if ast.dump(entry) != ast.dump(expected):
+                    break
+                policy = steps.setdefault(variable, {"row": {}, "body": {}, "models": []})
+                if not record(policy["body"], field, comparison.comparators[0]):
+                    break
+                node.body.pop(index)
+            if steps:
+                scopes[node.name] = {"transaction": steps}
+            continue
         for index in range(len(node.body) - 2, -1, -1):
             item = node.body[index]
             following = node.body[index + 1]
@@ -110,7 +193,7 @@ def normalize_row_security(
                 terms = entry.test.values
                 if ast.unparse(terms[0]) != "item is None":
                     continue
-                found: dict[str, str] = {}
+                found = {}
                 for term in terms[1:]:
                     if not (
                         isinstance(term, ast.Compare)
@@ -200,6 +283,30 @@ def attach_scope(
     operation = payload.get("read", payload.get("write"))
     if operation is None:
         raise ValueError("identity predicates require qualified database operations")
+    if operation.get("transaction"):
+        policies = scope.get("transaction", {})
+        steps = operation["transaction"]
+        if set(policies) != {step["input"] for step in steps}:
+            raise ValueError("every transaction step requires an explicit identity policy")
+        for step in steps:
+            kind = step.get("operation", "create")
+            child = {"operation": kind, "model": step["model"]}
+            attach_scope(
+                {"read" if kind == "lookup" else "write": child}, policies[step["input"]], models
+            )
+            step["scope"] = child["scope"]
+            # An input foreign key cannot establish that the related row is accessible.
+            model = next(m for m in models if m["name"] == step["model"])
+            if kind in {"create", "replace", "patch"} and any(
+                f.get("references") and f["name"] not in step["references"] for f in model["fields"]
+            ):
+                raise ValueError(
+                    "scoped transaction foreign keys require earlier scoped record references"
+                )
+        operation["scope"] = dict(
+            sorted({k: v for step in steps for k, v in step["scope"].items()}.items())
+        )
+        return
     row, body = scope["row"], scope["body"]
     creating = operation.get("operation") == "create"
     writing = "write" in payload and operation["operation"] != "delete"
@@ -252,7 +359,13 @@ def scoped_replay_roles(
             return roles, {}
         probes = []
         bodies: dict[str, Any] = {}
-        for claim in sorted(set(scope.values())):
+        steps = operation.get("transaction", [])
+        claims_used = (
+            {value for step in steps for value in step["scope"].values()}
+            if steps
+            else set(scope.values())
+        )
+        for claim in sorted(claims_used):
             body = case.get("body", {})
             guarded_body = case["method"] in ("POST", "PUT", "PATCH") and any(
                 field in body for field, value in scope.items() if value == claim
@@ -267,6 +380,36 @@ def scoped_replay_roles(
                 "exp": 4102444800,
             }
             claims[claim] = "other-user" if claim == "sub" else "other-tenant"
+            if steps:
+                guarded_body = any(
+                    step.get("operation", "create") in {"create", "replace", "patch"}
+                    and any(
+                        field in body.get(step["input"], {})
+                        for field, value in step["scope"].items()
+                        if value == claim
+                    )
+                    for step in steps
+                )
+                existing_row = any(
+                    step.get("operation", "create") != "create"
+                    and not step.get("lookup_reference")
+                    and claim in step["scope"].values()
+                    for step in steps
+                )
+                if not guarded_body and not existing_row:
+                    continue
+                status = 403 if guarded_body else 404
+                probes.append(("transaction-cross-" + claim, replay_token(claims), status))
+                if guarded_body and existing_row:
+                    role = "transaction-cross-row-" + claim
+                    bodies[role] = {key: dict(value) for key, value in body.items()}
+                    for step in steps:
+                        if step.get("operation", "create") in {"create", "replace", "patch"}:
+                            bodies[role][step["input"]].update(
+                                {field: claims[value] for field, value in step["scope"].items()}
+                            )
+                    probes.append((role, replay_token(claims), 404))
+                continue
             probes.append(("cross-" + claim, replay_token(claims), status))
             if case["method"] in ("PUT", "PATCH") and operation.get("lookup"):
                 role = "cross-row-" + claim
