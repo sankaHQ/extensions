@@ -790,6 +790,169 @@ def _normalize_integrity(tree: ast.Module, framework: str) -> set[str]:
     return handlers
 
 
+def _transaction_write(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    framework: str,
+    models: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Recognize whole, explicit ordered-create scopes; never infer atomicity."""
+    scopes = [item for item in node.body if isinstance(item, ast.With)]
+    if not scopes:
+        return None
+    outer = scopes[0]
+    signature = ast.unparse(outer.items[0].context_expr)
+    if signature not in {"transaction.atomic()", "Session(engine)"}:
+        return None
+    if framework != "drf":
+        if not outer.body or not isinstance(outer.body[0], ast.With):
+            return None  # Existing scalar CRUD owns ordinary session scopes.
+        body = outer.body[0].body
+    else:
+        body = outer.body
+    fail = "transaction requires ordered creates, explicit flushes and a response snapshot"
+    if isinstance(node, ast.AsyncFunctionDef):
+        raise ValueError(fail)
+    assignments = body[: -1 : 1 if framework == "drf" else 3]
+    if len(assignments) < 2:
+        raise ValueError(fail)
+    by_name = {model["name"]: model for model in models}
+    steps: list[dict[str, Any]] = []
+    statements = []
+    reserved = {
+        "app",
+        "engine",
+        "session",
+        "transaction",
+        "request",
+        "data",
+        "result",
+        "set",
+        "type",
+        "dict",
+        "int",
+        "str",
+        "bool",
+        "list",
+        "len",
+        "select",
+        "environ",
+        "jsonify",
+        "path",
+    }
+    data = "request.data" if framework == "drf" else "data"
+    for statement in assignments:
+        if not (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+            and isinstance(statement.value, ast.Call)
+            and not statement.value.args
+        ):
+            raise ValueError(fail)
+        name = statement.targets[0].id
+        if (
+            not re.fullmatch(r"[a-z][a-z0-9_]*", name)
+            or name in reserved
+            or any(step["input"] == name for step in steps)
+        ):
+            raise ValueError(
+                "transaction local names must be unique and not shadow runtime symbols"
+            )
+        call = statement.value
+        constructor = ast.unparse(call.func)
+        model_name = (
+            constructor.removesuffix(".objects.create") if framework == "drf" else constructor
+        )
+        if model_name not in by_name:
+            raise ValueError(fail)
+        model = by_name[model_name]
+        writable = [field for field in model["fields"] if not field["auto"]]
+        if [kw.arg for kw in call.keywords] != [field["name"] for field in writable]:
+            raise ValueError("transaction create must bind every writable field in model order")
+        references = {}
+        values = []
+        for field, kw in zip(writable, call.keywords, strict=True):
+            value = kw.value
+            if isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name):
+                previous = next(
+                    (i for i, step in enumerate(steps) if step["input"] == value.value.id), None
+                )
+                if previous is None:
+                    raise ValueError(
+                        "transaction key dependencies must reference an earlier create"
+                    )
+                parent = by_name[steps[previous]["model"]]
+                primary = next(item for item in parent["fields"] if item["primary_key"])
+                reference = field.get("references", {})
+                if (
+                    value.attr != primary["name"]
+                    or reference.get("table") != parent["table"]
+                    or reference.get("column") != primary["name"]
+                ):
+                    raise ValueError("transaction dependency must match a captured foreign key")
+                references[field["name"]] = {"step": previous, "field": primary["name"]}
+                expression = f"{steps[previous]['input']}.{primary['name']}"
+            else:
+                access = f"{data}[{name!r}]"
+                expression = (
+                    f"{access}.get({field['name']!r})"
+                    if field["nullable"]
+                    else f"{access}[{field['name']!r}]"
+                )
+            values.append(f"{field['name']}={expression}")
+        steps.append({"input": name, "model": model_name, "references": references})
+        constructor = model_name + (".objects.create" if framework == "drf" else "")
+        statements.append(f"{name} = {constructor}({', '.join(values)})")
+        if framework != "drf":
+            statements.extend([f"session.add({name})", "session.flush()"])
+    invalid = {
+        "drf": 'return Response({"error": "invalid request body"}, status=400)',
+        "flask": 'return jsonify({"error": "invalid request body"}), 400',
+        "fastapi": 'raise HTTPException(status_code=400, detail="invalid request body")',
+    }[framework]
+    keys = "{" + ", ".join(repr(step["input"]) for step in steps) + "}"
+    prefix = "data = request.get_json()\n" if framework == "flask" else ""
+    prefix += f"if type({data}) is not dict or set({data}) != {keys}:\n    {invalid}\n"
+    for step in steps:
+        fields = [
+            field
+            for field in by_name[step["model"]]["fields"]
+            if field["name"] not in step["references"]
+        ]
+        if not any(not field["auto"] for field in fields):
+            raise ValueError("transaction steps require at least one validated input field")
+        prefix += _write_validation(fields, f"{data}[{step['input']!r}]", False, invalid)
+    last = steps[-1]
+    response = (
+        "{"
+        + ", ".join(
+            f"{field['name']!r}: {last['input']}.{field['name']}"
+            for field in by_name[last["model"]]["fields"]
+        )
+        + "}"
+    )
+    statements.append("result = " + response)
+    if framework == "drf":
+        scope = "with transaction.atomic():\n" + "\n".join("    " + line for line in statements)
+        result = "return Response(result, status=201)"
+    else:
+        scope = "with Session(engine) as session:\n    with session.begin():\n" + "\n".join(
+            "        " + line for line in statements
+        )
+        result = "return jsonify(result), 201" if framework == "flask" else "return result"
+    args = "request" if framework == "drf" else "data: dict" if framework == "fastapi" else ""
+    expected_args = ast.parse(f"def f({args}): pass").body[0]
+    assert isinstance(expected_args, ast.FunctionDef)
+    if ast.dump(node.args) != ast.dump(expected_args.args) or ast.dump(
+        ast.Module(body=node.body, type_ignores=[])
+    ) != ast.dump(ast.parse(prefix + scope + "\n" + result)):
+        raise ValueError(fail)
+    return {
+        "status": 201,
+        "write": {"operation": "create", "model": last["model"], "transaction": steps},
+    }
+
+
 def _sqlalchemy_write(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     framework: str,
@@ -1181,7 +1344,8 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 raise ValueError("models_file conflicts with runtime imports")
             models = capture_models(root / config["models_file"], framework)
             allowed_imports["django.db" if framework == "drf" else "sqlalchemy.exc"] = {
-                "IntegrityError"
+                "IntegrityError",
+                *(["transaction"] if framework == "drf" else []),
             }
             if framework != "drf":
                 allowed_imports.update(
@@ -1266,6 +1430,25 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             gaps.append("persistence: captured contracts require Go lowering")
         elif not persistence_gaps:
             persistence = None
+    transactions: dict[str, dict[str, Any]] = {}
+    for candidate in tree.body:
+        if not isinstance(candidate, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        try:
+            transaction = _transaction_write(candidate, framework, models)
+            if transaction is not None:
+                if (
+                    candidate.name not in integrity_handlers
+                    or candidate.name in row_scopes
+                    or candidate.name in validations
+                ):
+                    raise ValueError(
+                        "transactions require an outer integrity handler "
+                        "and explicit nested validation"
+                    )
+                transactions[candidate.name] = transaction
+        except (ValueError, TypeError, KeyError) as error:
+            gaps.append("transaction: " + str(error))
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     imports: set[str] = set()
     assignments: dict[str, ast.expr] = {}
@@ -1287,6 +1470,10 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 "item",
             }
             available |= {arg.arg for arg in node.args.args}
+            if node.name in transactions:
+                available |= {
+                    step["input"] for step in transactions[node.name]["write"]["transaction"]
+                } | {"result"}
         unresolved = {
             item.id
             for item in ast.walk(node)
@@ -1464,7 +1651,15 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 raise ValueError("jsonify must be imported from flask")
             if isinstance(function, ast.AsyncFunctionDef) and framework != "fastapi":
                 raise ValueError("async handlers are qualified only for FastAPI")
-            if method in {"POST", "PUT", "PATCH", "DELETE"} and framework in {"flask", "fastapi"}:
+            if name in transactions:
+                if (
+                    method != "POST"
+                    or (framework == "drf" and "transaction" not in imports)
+                    or (framework != "drf" and (engine is None or "Session" not in imports))
+                ):
+                    raise ValueError("transactions require POST and explicit database imports")
+                payload = transactions[name]
+            elif method in {"POST", "PUT", "PATCH", "DELETE"} and framework in {"flask", "fastapi"}:
                 payload = _sqlalchemy_write(function, framework, method, models)
             elif method in {"POST", "PUT", "PATCH", "DELETE"} and framework == "drf":
                 payload = _drf_write(function, method, models)

@@ -41,6 +41,8 @@ def scenarios_for(root: Path, captured: dict[str, Any]) -> list[dict[str, Any]]:
     path = root / "sanka-verify.json"
     if path.exists():
         return load_scenarios(path)
+    if any(route.get("write", {}).get("transaction") for route in captured["routes"]):
+        raise ValueError("transactions require explicit ordered sanka-verify.json scenarios")
     if any("references" in field for model in captured["models"] for field in model["fields"]):
         raise ValueError("relational writes require explicit ordered sanka-verify.json scenarios")
     if any(

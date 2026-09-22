@@ -213,11 +213,14 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                     )
                 )
                 continue
-            helpers.append(
-                _write_helper(index, route["write"], model, decoder_key not in write_models)
-            )
-            if not route["write"].get("constraints"):
-                write_models.add(decoder_key)
+            if route["write"].get("transaction"):
+                helpers.append(_transaction_helper(index, route["write"], captured["models"]))
+            else:
+                helpers.append(
+                    _write_helper(index, route["write"], model, decoder_key not in write_models)
+                )
+                if not route["write"].get("constraints"):
+                    write_models.add(decoder_key)
             method = route["method"].title()
             status = route["status"]
             lookup_field = None
@@ -825,8 +828,73 @@ def _delete_helper(index: int, write: dict[str, Any], model: dict[str, Any]) -> 
 """
 
 
+def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str, Any]]) -> str:
+    by_name = {model["name"]: model for model in models}
+    steps = write["transaction"]
+    result_type = write["model"]
+    failure = f"return {result_type}{{}}, errInvalidWrite"
+    decoders = []
+    decoding = []
+    statements = []
+    for number, step in enumerate(steps):
+        model = by_name[step["model"]]
+        fields = model["fields"]
+        input_model = dict(
+            model, fields=[field for field in fields if field["name"] not in step["references"]]
+        )
+        decoder_name = f"decodeTransaction{index}Step{number}"
+        decoders.append(_write_helper(index, {}, input_model, True, decoder_only=decoder_name))
+        decoding.append(
+            f"item{number}, _, err := {decoder_name}(values[{canonical(step['input'])}], false)\n    if err != nil {{ {failure} }}"
+        )
+        for field in fields:
+            reference = step["references"].get(field["name"])
+            if reference:
+                source = f"saved{reference['step']}.{go_name(reference['field'])}"
+                statements.append(
+                    f"item{number}.{go_name(field['name'])} = {'&' if field['nullable'] else ''}{source}"
+                )
+        writable = [field for field in fields if not field["auto"]]
+        columns = ", ".join('"' + field["name"] + '"' for field in writable)
+        returning = ", ".join('"' + field["name"] + '"' for field in fields)
+        placeholders = ", ".join(f"${i}" for i in range(1, len(writable) + 1))
+        arguments = ", ".join(f"item{number}." + go_name(field["name"]) for field in writable)
+        destinations = ", ".join(f"&saved{number}." + go_name(field["name"]) for field in fields)
+        query = f'INSERT INTO "{model["table"]}" ({columns}) VALUES ({placeholders}) RETURNING {returning}'
+        statements.append(
+            f"if err := tx.QueryRow(ctx, {canonical(query)}, {arguments}).Scan({destinations}); err != nil {{ return err }}"
+        )
+    declarations = "\n    ".join(f"var saved{i} {step['model']}" for i, step in enumerate(steps))
+    allowed = ", ".join(canonical(step["input"]) + ": {}" for step in steps)
+    helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte) ({result_type}, error) {{
+    var values map[string]json.RawMessage
+    decoder := json.NewDecoder(bytes.NewReader(body))
+    if err := decoder.Decode(&values); err != nil || values == nil {{ {failure} }}
+    if err := decoder.Decode(&struct{{}}{{}}); err != io.EOF {{ {failure} }}
+    allowed := map[string]struct{{}}{{{allowed}}}
+    if len(values) != len(allowed) {{ {failure} }}
+    for key := range values {{
+        if _, ok := allowed[key]; !ok {{ {failure} }}
+    }}
+    {chr(10).join(decoding)}
+    {declarations}
+    err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {{
+        {chr(10).join(statements)}
+        return nil
+    }})
+    return saved{len(steps) - 1}, err
+}}
+"""
+    return "\n".join(decoders) + helper
+
+
 def _write_helper(
-    index: int, write: dict[str, Any], model: dict[str, Any], include_decoder: bool
+    index: int,
+    write: dict[str, Any],
+    model: dict[str, Any],
+    include_decoder: bool,
+    *,
+    decoder_only: str = "",
 ) -> str:
     fields = model["fields"]
     writable = [field for field in fields if not field["auto"]]
@@ -911,6 +979,8 @@ def _write_helper(
         decoder_name += f"_{validation_kind}"
     if custom_constraints:
         decoder_name += f"_write{index}"
+    if decoder_only:
+        decoder_name = decoder_only
     for field in writable:
         target = "item." + go_name(field["name"])
         bounds = constraints.get(field["name"], {})
@@ -947,6 +1017,8 @@ def _write_helper(
     return item, seen, nil
 }}
 """
+    if decoder_only:
+        return decoder
     operation = write["operation"]
     scope = write.get("scope", {})
     guard, _, _ = _scope_parts(write, 1, f"return {model['name']}{{}}, scopeErr")

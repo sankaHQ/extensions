@@ -424,7 +424,24 @@ requires 409 responses to leave table rows unchanged. Sequence allocations may
 advance on failed inserts. The integration corpus exercises parent/child CRUD,
 unique and foreign-key failures, reassignment, restricted and cascading deletion,
 and subsequent ID allocation across the source/target matrix. These are individual
-CRUD operations; arbitrary multi-table business transaction capture remains separate.
+CRUD operations. Explicit ordered-create business transactions are also qualified:
+Django `transaction.atomic()` or SQLAlchemy `Session(engine)` with `session.begin()`,
+strictly validated nested input objects, and two or more ordered creates. SQLAlchemy
+must explicitly flush each create. Later creates may reference an earlier generated
+primary key through a captured foreign key. The response must snapshot the final
+record inside the scope and be returned after the scope commits, with the existing
+outer integrity-conflict handler. All generated statements use one pgx transaction.
+
+Each input object needs at least one writable field; generated foreign keys are
+excluded from client input. Explicit ordered replay scenarios are required. Tests
+combine authorization, permission checks, response middleware, related schemas,
+validation, successful writes, whole-transaction rollback, and recovery across all
+three Python sources and four Go targets. PostgreSQL cases require the documented
+isolated fixture and run in CI; local compilation alone does not prove parity.
+
+Mixed create/update/delete orchestration, nested transactions, conditional workflows,
+async business transactions, custom service calls, and external effects still block
+capture. No service/repository scaffolding is added for inline source orchestration.
 
 After reviewing the generated SQL, set `DATABASE_URL` and run
 `go run ./cmd/migrate up` from the generated directory. Migrations are embedded,
