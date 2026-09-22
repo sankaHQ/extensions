@@ -324,7 +324,10 @@ def _normalize_native_pydantic(
         len(imports) != 1
         or imports[0].level
         or {(alias.name, alias.asname) for alias in imports[0].names}
-        != {("BaseModel", None), ("Field", None)}
+        not in [
+            {(name, None) for name in ("BaseModel", "Field", *extra)}
+            for extra in ((), ("AwareDatetime",), ("JsonValue",), ("AwareDatetime", "JsonValue"))
+        ]
     ):
         return tree
     if framework != "fastapi" or not models:
@@ -387,7 +390,8 @@ def _normalize_native_pydantic(
                 for item in ast.walk(declaration)
                 if isinstance(item, ast.Name)
                 and isinstance(item.ctx, ast.Load)
-                and item.id in {"BaseModel", "Field", "UUID", "Decimal"}
+                and item.id
+                in {"BaseModel", "Field", "UUID", "Decimal", "date", "AwareDatetime", "JsonValue"}
             }
             if required - declared_imports:
                 raise ValueError("native schema imports must precede their declarations")
@@ -410,6 +414,9 @@ def _normalize_native_pydantic(
                         "int64": "int",
                         "UUIDValue": "UUID",
                         "DecimalValue": "Decimal",
+                        "DateValue": "date",
+                        "TimestampValue": "AwareDatetime",
+                        "JSONValue": "JsonValue",
                     }.get(field["go_type"])
                     if kind is None:
                         raise ValueError(
@@ -752,6 +759,16 @@ def _normalize_drf_serializers(
                             precision, scale = field["sql_type"][8:-1].split(",")
                             options.extend([f"max_digits={precision}", f"decimal_places={scale}"])
                             field_type = "DecimalField"
+                        elif field["go_type"] == "DateValue":
+                            options.append("input_formats=['iso-8601']")
+                            field_type = "DateField"
+                        elif field["go_type"] == "TimestampValue":
+                            options.extend(
+                                ["input_formats=['iso-8601']", "default_timezone=timezone.utc"]
+                            )
+                            field_type = "DateTimeField"
+                        elif field["go_type"] == "JSONValue":
+                            field_type = "JSONField"
                         else:
                             break
                         lines.append(
