@@ -167,13 +167,20 @@ jobs:
         env:
           SANKA_GO_TESTS: "1"
         run: uv run --no-sync python -m pytest packages/sanka-code-migration/tests/test_input_values.py -q
+      - name: Qualify native values and packaged project replay
+        env:
+          SANKA_GO_TESTS: "1"
+          GOTOOLCHAIN: local
+          GOWORK: "off"
+          GOMAXPROCS: "2"
+        run: uv run --no-sync python -m pytest packages/sanka-extension-python-to-golang/tests/test_golang_native_values.py packages/sanka-extension-python-to-golang/tests/test_golang_project_readiness.py -q
       - name: Compare all three Python sources with all four Go targets
         env:
           SANKA_GO_TESTS: "1"
           GOTOOLCHAIN: local
           GOWORK: "off"
           GOMAXPROCS: "2"
-        run: uv run --no-sync python -m pytest packages/sanka-extension-python-to-golang/tests -q
+        run: uv run --no-sync python -m pytest packages/sanka-extension-python-to-golang/tests --ignore=packages/sanka-extension-python-to-golang/tests/test_golang_native_values.py --ignore=packages/sanka-extension-python-to-golang/tests/test_golang_project_readiness.py -q
 
   typescript-to-rust:
     name: TypeScript to Rust endpoint qualification

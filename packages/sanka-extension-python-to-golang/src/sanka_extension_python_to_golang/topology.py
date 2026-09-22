@@ -7,6 +7,8 @@ import ast
 from pathlib import Path
 from typing import Any
 
+from .routing import source_import_root
+
 
 def _module_file(root: Path, module: str) -> Path | None:
     path = root.joinpath(*module.split("."))
@@ -18,17 +20,18 @@ def _module_file(root: Path, module: str) -> Path | None:
 
 def _imports(root: Path, tree: ast.Module, source: Path) -> dict[str, tuple[Path, str]]:
     result: dict[str, tuple[Path, str]] = {}
+    import_root = source_import_root(root, source.relative_to(root).as_posix())
     for node in tree.body:
         if not isinstance(node, ast.ImportFrom) or not node.module:
             continue
-        parts = list(source.relative_to(root).parts[:-1])
+        parts = list(source.relative_to(import_root).parts[:-1])
         if node.level:
             if node.level > len(parts):
                 continue
             module = ".".join(parts[: len(parts) - node.level + 1] + node.module.split("."))
         else:
             module = node.module
-        path = _module_file(root, module)
+        path = _module_file(import_root, module)
         if path is None:
             continue
         for alias in node.names:

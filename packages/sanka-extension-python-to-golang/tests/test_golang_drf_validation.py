@@ -40,7 +40,7 @@ def drf_serializer_source() -> str:
         def visit_Attribute(self, node: ast.Attribute) -> ast.expr:
             if ast.unparse(node) == "request.data":
                 return ast.copy_location(ast.Name(id="data", ctx=ast.Load()), node)
-            return node
+            return self.generic_visit(node)
 
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name != "delete_widget":

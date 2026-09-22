@@ -254,8 +254,27 @@ def request_paths(route: dict[str, Any]) -> list[str]:
     path = route["path"]
     lookup = route.get("read", {}).get("lookup")
     if lookup:
-        values = ("1", "2", "2147483647") if route["read"].get("many") else ("1",)
+        values: tuple[str, ...] = ("1", "2", "2147483647") if route["read"].get("many") else ("1",)
+        if route["read"].get("lookup_type") == "uuid":
+            values = (
+                "00000000-0000-0000-0000-000000000001",
+                "00000000-0000-0000-0000-000000000002",
+            )
         return [path.replace(f":{lookup}", value) for value in values]
+    if "filters" in route.get("read", {}):
+        paths = []
+        for item in route["read"]["filters"]:
+            child = route | {
+                "read": {k: v for k, v in route["read"].items() if k != "filters"}
+                | {"filter": item}
+            }
+            paths.extend(request_paths(child))
+        paths.append(
+            path
+            + "?"
+            + urlencode([(item["parameter"], item["default"]) for item in route["read"]["filters"]])
+        )
+        return list(dict.fromkeys(paths))
     filtered = route.get("read", {}).get("filter")
     result = [path]
     if "pagination" in route.get("read", {}):
@@ -267,7 +286,7 @@ def request_paths(route: dict[str, Any]) -> list[str]:
                 "limit=2&offset=2",
                 "limit=0001&offset=0000000001",
                 "limit=1000&offset=2147483647",
-                "limit=bad&limit=1",
+                "limit=1&limit=1",
             )
         )
     if not filtered:
@@ -378,7 +397,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             "limit=0",
             "limit=1001",
             "limit=",
-            "limit=1&limit=bad",
+            "limit=bad&limit=bad",
             "limit=%D9%A1",
             "offset=-1",
             "offset=2147483648",

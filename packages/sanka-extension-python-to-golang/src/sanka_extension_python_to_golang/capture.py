@@ -239,6 +239,75 @@ def _write_validation(fields: list[dict[str, Any]], data: str, partial: bool, er
 """
 
 
+def _pydantic_constraints(
+    candidate: ast.ClassDef, model: dict[str, Any]
+) -> dict[str, dict[str, int]]:
+    constraints: dict[str, dict[str, int]] = {}
+    for declaration in candidate.body:
+        if not isinstance(declaration, ast.AnnAssign) or not isinstance(
+            declaration.target, ast.Name
+        ):
+            continue
+        field = next(
+            (f for f in model["fields"] if f["name"] == declaration.target.id),
+            None,
+        )
+        value = declaration.value
+        if (
+            field is None
+            or not isinstance(value, ast.Call)
+            or not isinstance(value.func, ast.Name)
+            or value.func.id != "Field"
+        ):
+            continue
+        retained = []
+        bounds: dict[str, int] = {}
+        for keyword in value.keywords:
+            key = keyword.arg
+            allowed = (
+                {"min_length", "max_length"}
+                if field["go_type"] == "string"
+                else {"ge", "le"}
+                if field["go_type"] in {"int32", "int64"}
+                else set()
+            )
+            if key not in allowed:
+                retained.append(keyword)
+                continue
+            bound = ast.literal_eval(keyword.value)
+            if type(bound) is not int or key in bounds:
+                raise ValueError("schema bounds must be unique literal integers")
+            bounds[key] = bound
+            if key in {"ge", "le"}:
+                bits = 32 if field["go_type"] == "int32" else 64
+                low, high = -(2 ** (bits - 1)), 2 ** (bits - 1) - 1
+                if not low <= bound <= high:
+                    raise ValueError("schema integer bounds exceed the database type")
+                retained.append(
+                    ast.keyword(
+                        arg=key,
+                        value=ast.parse(str(low if key == "ge" else high), mode="eval").body,
+                    )
+                )
+            elif not 0 <= bound <= 9223372036854775807:
+                raise ValueError("schema length bounds must fit nonnegative int64")
+        if bounds.get("min_length", 0) > bounds.get(
+            "max_length", 9223372036854775807
+        ) or bounds.get("ge", -9223372036854775808) > bounds.get("le", 9223372036854775807):
+            raise ValueError("schema bounds are reversed")
+        value.keywords = retained
+        if field["go_type"] in {"int32", "int64"}:
+            bits = 32 if field["go_type"] == "int32" else 64
+            bounds = {
+                k: v
+                for k, v in bounds.items()
+                if v != (-(2 ** (bits - 1)) if k == "ge" else 2 ** (bits - 1) - 1)
+            }
+        if bounds:
+            constraints[field["name"]] = bounds
+    return constraints
+
+
 def _normalize_native_pydantic(
     tree: ast.Module,
     models: list[dict[str, Any]],
@@ -308,13 +377,29 @@ def _normalize_native_pydantic(
             "native Pydantic models require the qualified stable validation error handler"
         )
     apps[0].value = ast.Call(func=ast.Name(id="FastAPI", ctx=ast.Load()), args=[], keywords=[])
+    declared_imports: set[str] = set()
+    for declaration in tree.body:
+        if isinstance(declaration, ast.ImportFrom):
+            declared_imports.update(alias.asname or alias.name for alias in declaration.names)
+        elif isinstance(declaration, ast.ClassDef):
+            required = {
+                item.id
+                for item in ast.walk(declaration)
+                if isinstance(item, ast.Name)
+                and isinstance(item.ctx, ast.Load)
+                and item.id in {"BaseModel", "Field", "UUID", "Decimal"}
+            }
+            if required - declared_imports:
+                raise ValueError("native schema imports must precede their declarations")
     classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
-    matched: dict[str, tuple[list[dict[str, Any]], bool]] = {}
+    matched: dict[str, tuple[list[dict[str, Any]], bool, dict[str, dict[str, int]]]] = {}
     for name, candidate in classes.items():
         if name in {"int", "str", "bool", "dict", "list", "set", "type", "len"}:
             raise ValueError("schema names must not shadow builtins")
         for model in models:
-            fields = [field for field in model["fields"] if not field["auto"]]
+            fields = [
+                dict(field, native_input=True) for field in model["fields"] if not field["auto"]
+            ]
             for partial in (False, True):
                 lines = [f"class {name}(BaseModel):"]
                 for field in fields:
@@ -323,7 +408,13 @@ def _normalize_native_pydantic(
                         "bool": "bool",
                         "int32": "int",
                         "int64": "int",
-                    }[field["go_type"]]
+                        "UUIDValue": "UUID",
+                        "DecimalValue": "Decimal",
+                    }.get(field["go_type"])
+                    if kind is None:
+                        raise ValueError(
+                            "native Pydantic field type requires additional qualification"
+                        )
                     if field["nullable"]:
                         kind += " | None"
                     if field["go_type"] in {"int32", "int64"}:
@@ -334,11 +425,39 @@ def _normalize_native_pydantic(
                             if partial or field["nullable"]
                             else f" = Field(ge={low}, le={high})"
                         )
+                    elif field["go_type"] == "DecimalValue":
+                        precision, scale = field["sql_type"][8:-1].split(",")
+                        default = (
+                            " = Field("
+                            + ("default=None, " if partial or field["nullable"] else "")
+                            + f"max_digits={precision}, decimal_places={scale})"
+                        )
                     else:
                         default = " = None" if partial or field["nullable"] else ""
                     lines.append(f"    {field['name']}: {kind}{default}")
-                if ast.dump(candidate) == ast.dump(ast.parse("\n".join(lines)).body[0]):
-                    matched[name] = (fields, partial)
+                normalized = copy.deepcopy(candidate)
+                constraints = _pydantic_constraints(normalized, model)
+                for declaration in normalized.body:
+                    if not isinstance(declaration, ast.AnnAssign) or not isinstance(
+                        declaration.target, ast.Name
+                    ):
+                        continue
+                    declared_field = next(
+                        (f for f in fields if f["name"] == declaration.target.id), None
+                    )
+                    value = declaration.value
+                    if (
+                        declared_field is None
+                        or declared_field["go_type"] in {"int32", "int64"}
+                        or not isinstance(value, ast.Call)
+                    ):
+                        continue
+                    if ast.unparse(value) == "Field()":
+                        declaration.value = None
+                    elif ast.unparse(value) == "Field(default=None)":
+                        declaration.value = ast.Constant(value=None)
+                if ast.dump(normalized) == ast.dump(ast.parse("\n".join(lines)).body[0]):
+                    matched[name] = (fields, partial, constraints)
                     break
             if name in matched:
                 break
@@ -362,7 +481,7 @@ def _normalize_native_pydantic(
         argument = schema_args[0]
         assert argument.annotation is not None
         schema = ast.unparse(argument.annotation)
-        fields, partial = matched[schema]
+        fields, partial, constraints = matched[schema]
         expected_statement = ast.parse(
             f"{argument.arg} = {argument.arg}.model_dump(exclude_unset=True)"
         ).body[0]
@@ -382,6 +501,8 @@ def _normalize_native_pydantic(
                 "error": {"status": 422, "body": {"detail": "invalid request body"}},
             }
         }
+        if constraints:
+            validations[node.name]["constraints"] = constraints
         used.add(schema)
     if used != classes.keys():
         raise ValueError("unused native Pydantic request model")
@@ -479,7 +600,11 @@ def _normalize_pydantic(
                                 "bool": "bool",
                                 "int32": "int",
                                 "int64": "int",
-                            }[field["go_type"]]
+                            }.get(field["go_type"])
+                            if kind is None:
+                                raise ValueError(
+                                    "strict rich schemas require additional qualification"
+                                )
                             if field["nullable"]:
                                 kind += " | None"
                             options = ["default=None"] if partial or field["nullable"] else []
@@ -489,80 +614,7 @@ def _normalize_pydantic(
                             lines.append(f"    {key}: {kind} = Field({', '.join(options)})")
                         expected = ast.parse("\n".join(lines)).body[0]
                         candidate = copy.deepcopy(classes[name])
-                        constraints: dict[str, dict[str, int]] = {}
-                        for declaration in candidate.body:
-                            if not isinstance(declaration, ast.AnnAssign) or not isinstance(
-                                declaration.target, ast.Name
-                            ):
-                                continue
-                            field = next(
-                                (f for f in model["fields"] if f["name"] == declaration.target.id),
-                                None,
-                            )
-                            value = declaration.value
-                            if (
-                                field is None
-                                or not isinstance(value, ast.Call)
-                                or not isinstance(value.func, ast.Name)
-                                or value.func.id != "Field"
-                            ):
-                                continue
-                            retained = []
-                            bounds: dict[str, int] = {}
-                            for keyword in value.keywords:
-                                key = keyword.arg
-                                allowed = (
-                                    {"min_length", "max_length"}
-                                    if field["go_type"] == "string"
-                                    else {"ge", "le"}
-                                    if field["go_type"] in {"int32", "int64"}
-                                    else set()
-                                )
-                                if key not in allowed:
-                                    retained.append(keyword)
-                                    continue
-                                bound = ast.literal_eval(keyword.value)
-                                if type(bound) is not int or key in bounds:
-                                    raise ValueError(
-                                        "schema bounds must be unique literal integers"
-                                    )
-                                bounds[key] = bound
-                                if key in {"ge", "le"}:
-                                    bits = 32 if field["go_type"] == "int32" else 64
-                                    low, high = -(2 ** (bits - 1)), 2 ** (bits - 1) - 1
-                                    if not low <= bound <= high:
-                                        raise ValueError(
-                                            "schema integer bounds exceed the database type"
-                                        )
-                                    retained.append(
-                                        ast.keyword(
-                                            arg=key,
-                                            value=ast.parse(
-                                                str(low if key == "ge" else high), mode="eval"
-                                            ).body,
-                                        )
-                                    )
-                                elif not 0 <= bound <= 9223372036854775807:
-                                    raise ValueError(
-                                        "schema length bounds must fit nonnegative int64"
-                                    )
-                            if bounds.get("min_length", 0) > bounds.get(
-                                "max_length", 9223372036854775807
-                            ) or bounds.get("ge", -9223372036854775808) > bounds.get(
-                                "le", 9223372036854775807
-                            ):
-                                raise ValueError("schema bounds are reversed")
-                            value.keywords = retained
-                            if field["go_type"] in {"int32", "int64"}:
-                                bits = 32 if field["go_type"] == "int32" else 64
-                                bounds = {
-                                    k: v
-                                    for k, v in bounds.items()
-                                    if v
-                                    != (-(2 ** (bits - 1)) if k == "ge" else 2 ** (bits - 1) - 1)
-                                }
-                            if bounds:
-                                constraints[field["name"]] = bounds
+                        constraints = _pydantic_constraints(candidate, model)
                         if ast.dump(candidate) != ast.dump(expected):
                             continue
                         error = (
@@ -648,8 +700,10 @@ def _normalize_drf_serializers(
     if len(native_imports) + len(strict_imports) != 1:
         raise ValueError("use one explicit DRF serializer import style")
     native = bool(native_imports)
+    native_declared = False
     for node in tree.body:
         if node in native_imports:
+            native_declared = True
             continue
         if isinstance(node, ast.ImportFrom) and node.module == "rest_framework.serializers":
             if node.level or any(a.asname or a.name not in schema_imports for a in node.names):
@@ -659,10 +713,16 @@ def _normalize_drf_serializers(
             imports.update(a.name for a in node.names)
             continue
         if isinstance(node, ast.ClassDef):
+            if native and not native_declared:
+                raise ValueError("serializer imports must precede their declarations")
             if not native and imports != schema_imports:
                 raise ValueError("serializer imports must precede their declarations")
             for model in models:
-                fields = [field for field in model["fields"] if not field["auto"]]
+                fields = [
+                    dict(field, native_input=native)
+                    for field in model["fields"]
+                    if not field["auto"]
+                ]
                 if native:
                     lines = [f"class {node.name}(serializers.Serializer):"]
                     for field in fields:
@@ -686,6 +746,12 @@ def _normalize_drf_serializers(
                             field_type = "IntegerField"
                         elif field["go_type"] == "bool":
                             field_type = "BooleanField"
+                        elif field["go_type"] == "UUIDValue":
+                            field_type = "UUIDField"
+                        elif field["go_type"] == "DecimalValue":
+                            precision, scale = field["sql_type"][8:-1].split(",")
+                            options.extend([f"max_digits={precision}", f"decimal_places={scale}"])
+                            field_type = "DecimalField"
                         else:
                             break
                         lines.append(
@@ -737,6 +803,11 @@ def _normalize_drf_serializers(
                     ):
                         continue
                     remaining = ast.Module(body=node.body[3:], type_ignores=[])
+                    if kind == "drf" and any(
+                        isinstance(item, ast.Attribute) and ast.unparse(item) == "request.data"
+                        for item in ast.walk(remaining)
+                    ):
+                        raise ValueError("native serializer handlers must use validated_data only")
                     ValidatedData().visit(remaining)
                     node.body = (
                         ast.parse(_write_validation(fields, "request.data", partial, error)).body
@@ -1121,11 +1192,12 @@ def _sqlalchemy_write(
     framework: str,
     method: str,
     models: list[dict[str, Any]],
+    native_input: bool = False,
 ) -> dict[str, Any]:
     if isinstance(node, ast.AsyncFunctionDef):
         raise ValueError("async database writes require additional capture")
     for model in models:
-        fields = model["fields"]
+        fields = [dict(field, native_input=native_input) for field in model["fields"]]
         writable = [field for field in fields if not field["auto"]]
         response = (
             "{"
@@ -1289,6 +1361,7 @@ def _drf_write(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     method: str,
     models: list[dict[str, Any]],
+    native_input: bool = False,
 ) -> dict[str, Any]:
     if isinstance(node, ast.AsyncFunctionDef):
         raise ValueError("async DRF writes require additional capture")
@@ -1297,7 +1370,9 @@ def _drf_write(
             field["primary_key"] and not field["auto"] for field in model["fields"]
         )
         fields = [
-            dict(field, auto=True) if immutable_primary and field["primary_key"] else field
+            dict(field, native_input=native_input, auto=True)
+            if immutable_primary and field["primary_key"]
+            else dict(field, native_input=native_input)
             for field in model["fields"]
         ]
         writable = [field for field in fields if not field["auto"]]
@@ -1471,10 +1546,25 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 and source != root / config.get("models_file", "")
             ):
                 unconsumed.append(relative.as_posix())
+    # Only modules outside the statically imported graph can be source tests.
+    # They remain fingerprinted; their assertions are not translated or executed.
+    source_tests = sorted(
+        name
+        for name in unconsumed
+        if "versions" not in Path(name).parts
+        and "migrations" not in Path(name).parts
+        and (
+            "tests" in Path(name).parts[:-1]
+            or Path(name).name == "conftest.py"
+            or Path(name).name.startswith("test_")
+            or Path(name).name.endswith("_test.py")
+        )
+    )
+    unconsumed = [name for name in unconsumed if name not in source_tests]
     persistence = None
     if framework == "fastapi":
         try:
-            persistence = capture_fastapi_persistence(root)
+            persistence = capture_fastapi_persistence(root, excluded=frozenset(source_tests))
         except (OSError, SyntaxError, TypeError, ValueError) as error:
             gaps.append("persistence: " + str(error))
         if persistence is not None:
@@ -1553,15 +1643,6 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     missing_handlers: set[str] = set()
     try:
         integrity_handlers, missing_handlers = _normalize_integrity(tree, framework)
-        if any(
-            field["go_type"].endswith("Value") for model in models for field in model["fields"]
-        ) and any(
-            isinstance(node, ast.ImportFrom)
-            and node.module in {"pydantic", "rest_framework"}
-            and any(alias.name in {"BaseModel", "serializers"} for alias in node.names)
-            for node in tree.body
-        ):
-            raise ValueError("rich fields require explicit wire validation and serialization")
         tree = _normalize_native_pydantic(tree, models, framework, validations)
         tree = _normalize_pydantic(tree, models, framework, validations)
         if framework == "drf":
@@ -1679,6 +1760,13 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 "item",
             }
             available |= {arg.arg for arg in node.args.args}
+            available |= {
+                item.id
+                for item in ast.walk(node)
+                if isinstance(item, ast.Name)
+                and isinstance(item.ctx, ast.Store)
+                and item.id in {"limit", "offset"}
+            }
             if node.name in transactions:
                 available |= {
                     step["input"] for step in transactions[node.name]["write"]["transaction"]
@@ -1869,9 +1957,22 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                     raise ValueError("transactions require POST and explicit database imports")
                 payload = transactions[name]
             elif method in {"POST", "PUT", "PATCH", "DELETE"} and framework in {"flask", "fastapi"}:
-                payload = _sqlalchemy_write(function, framework, method, models)
+                payload = _sqlalchemy_write(
+                    function,
+                    framework,
+                    method,
+                    models,
+                    validations.get(name, {}).get("validation", {}).get("kind")
+                    in {"pydantic", "drf"},
+                )
             elif method in {"POST", "PUT", "PATCH", "DELETE"} and framework == "drf":
-                payload = _drf_write(function, method, models)
+                payload = _drf_write(
+                    function,
+                    method,
+                    models,
+                    validations.get(name, {}).get("validation", {}).get("kind")
+                    in {"pydantic", "drf"},
+                )
             else:
                 payload = _payload(function, framework, models)
             if name in missing_handlers and name not in transactions:
@@ -1958,12 +2059,25 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             "files": len(records),
             "python_files": sum(name.endswith(".py") for name in records),
             "bytes": total,
+            "module_roles": {
+                "application": sorted({filename, *modules}),
+                "models": [config["models_file"]] if config.get("models_file") in records else [],
+                "tests": source_tests,
+                "unclassified": sorted(
+                    name
+                    for name in records
+                    if name.endswith(".py")
+                    and name not in {filename, *modules, *source_tests}
+                    and name != config.get("models_file")
+                ),
+            },
         },
         "configuration": config,
         "routes": sorted(routes, key=lambda item: item["path"]),
         "gaps": sorted(set(gaps)),
         "scope": "literal public JSON GET endpoints",
         "complete_backend": False,
+        "generation_ready": not gaps,
     }
 
     if modules:

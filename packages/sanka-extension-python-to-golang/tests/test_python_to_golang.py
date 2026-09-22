@@ -186,6 +186,12 @@ def test_nested_entrypoint_capture(tmp_path: Path) -> None:
         "files": 1,
         "python_files": 1,
         "bytes": entrypoint.stat().st_size,
+        "module_roles": {
+            "application": ["app/main.py"],
+            "models": [],
+            "tests": [],
+            "unclassified": [],
+        },
     }
 
 

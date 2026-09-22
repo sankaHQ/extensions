@@ -162,8 +162,8 @@ def test_native_fastapi_uses_captured_validation_error(tmp_path: Path, target: s
     [
         ("status_code=422", "status_code=400"),
         ('{"detail": "invalid request body"}', '{"error": "invalid request body"}'),
-        ("ge=-2147483648", "ge=-10"),
-        ("le=2147483647", "le=10"),
+        ("ge=-2147483648", "ge=-2147483649"),
+        ("le=2147483647", "le=2147483648"),
         ("exclude_unset=True", "exclude_unset=False"),
         ("from pydantic import BaseModel, Field", "from counterfeit import BaseModel, Field"),
     ],
@@ -642,3 +642,64 @@ def test_nullable_partial_constraints(tmp_path: Path, target: str) -> None:
             }
         )
     assert_go_decoder_parity(tmp_path, captured, cases, f"decodeWidget_write{index}")
+
+
+@pytest.mark.parametrize("target", TARGETS)
+def test_native_field_constraints(tmp_path: Path, target: str) -> None:
+    text = (
+        native_fastapi_schema_source()
+        .replace("ge=-2147483648", "ge=0")
+        .replace("le=2147483647", "le=100")
+    )
+    text = text.replace("name: str\n", "name: str = Field(min_length=2, max_length=40)\n")
+    text = text.replace(
+        "name: str = None", "name: str = Field(default=None, min_length=2, max_length=40)"
+    )
+    captured = captured_source(tmp_path, "fastapi", target, text)
+    assert captured["gaps"] == []
+    assert captured["routes"][0]["write"]["constraints"] == {
+        "name": {"min_length": 2, "max_length": 40},
+        "count": {"ge": 0, "le": 100},
+    }
+
+    if os.getenv("SANKA_GO_TESTS") != "1":
+        return
+    from pydantic import BaseModel, Field, ValidationError
+
+    namespace = {"BaseModel": BaseModel, "Field": Field}
+    declarations = ast.Module(
+        body=[n for n in ast.parse(text).body if isinstance(n, ast.ClassDef)], type_ignores=[]
+    )
+    exec(compile(declarations, "schemas.py", "exec"), namespace)
+    cases = []
+    for partial, name in [(False, "WidgetInput"), (True, "WidgetPatch")]:
+        for payload in [
+            {},
+            {"name": "ok", "count": 1, "enabled": True},
+            {"name": "a", "count": "1", "enabled": "yes"},
+            {"name": "😀😀", "count": "100", "enabled": "false"},
+            {"name": "valid", "count": 101, "enabled": True},
+            {"name": "valid", "count": -1, "enabled": True},
+            {"name": "valid", "count": True, "enabled": 1},
+            {"note": None},
+            {"name": None},
+            {"name": "a" * 41},
+        ]:
+            try:
+                result = namespace[name].model_validate(payload).model_dump(exclude_unset=True)
+            except ValidationError:
+                result = None
+            cases.append(
+                {
+                    "body": json.dumps(payload),
+                    "partial": partial,
+                    "valid": result is not None,
+                    "expected": result,
+                }
+            )
+    index = next(
+        i
+        for i, r in enumerate(captured["routes"])
+        if r.get("write", {}).get("operation") == "create"
+    )
+    assert_go_decoder_parity(tmp_path, captured, cases, f"decodeWidget_pydantic_write{index}")

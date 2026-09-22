@@ -932,3 +932,97 @@ explicit wire projections. Rich-value and relational replay requires ordered
 four routers for CRUD, plus shared pgx checks for JSON-null storage and UUID foreign-key
 transaction rollback. PostgreSQL cases require the documented isolated test DSN;
 a native codec/compile check alone does not establish database parity.
+
+
+### Composed query and dependency contracts
+
+List reads accept two to sixteen string equality predicates in one Django
+`filter(...)` or SQLAlchemy `where(...)` call. All predicates are joined with AND,
+remain in source order, and use bound SQL parameters. Unknown operators, types,
+unused FastAPI parameters and duplicate Django keyword arguments block generation.
+The existing single-predicate spelling remains supported.
+
+DRF and Flask also support the bounded ASCII limit/offset contract already supported
+for FastAPI. They read `limit` and `offset` through `request.query_params.get` and
+`request.args.get`, respectively, with explicit string defaults and the same bounds:
+limit 1–1000 (at most four digits), offset 0–2147483647 (at most ten digits).
+Django uses `[int(offset):int(offset) + int(limit)]`; SQLAlchemy uses
+`.limit(int(limit)).offset(int(offset))`. The full validation guard and 400 response
+must be present in the source. The generated error retains `error` for DRF/Flask
+and `detail` for FastAPI. Repeated query values retain each source's parsing rules.
+[Executable examples](tests/test_golang_query_composition.py) show the complete forms.
+
+Relationship lists can bind UUID foreign-key paths using the same explicit UUID
+guard and wire projection as rich primary-key reads. Implicit UUID converters,
+relationship paging and joins remain outside this contract.
+
+FastAPI async session dependencies may be keyword-only, including
+`Annotated[AsyncSession, Depends(get_session)]`, alongside defaulted filter and
+pagination parameters. Direct handlers and the existing function/class repository
+forms reuse the same scoped session lowering. Additional keyword-only parameters,
+dependency metadata, default values on Annotated dependencies, and dependency
+teardown commits remain blockers.
+
+Native FastAPI Pydantic bodies now preserve narrower integer `ge`/`le` bounds and
+string `min_length`/`max_length`, including nullable and partial fields. Constraint
+checks follow the existing native scalar coercion and retain the captured 422
+response. Rich native field coercion remains unqualified; rich values still require
+the explicit wire contract above.
+
+The composition fixture combines native schemas, CRUD, conjunction filters,
+pagination, and async injected repositories through public ordered replay. Native
+checks compare actual Python and Go error responses without listening servers.
+PostgreSQL checks require isolated source/target fixture databases and compare HTTP,
+rows and sequences; skipped database tests do not establish database parity.
+
+### Native UUID and decimal request fields
+
+Qualified DRF `Serializer` and FastAPI Pydantic CRUD handlers can use native UUID
+fields and decimals with explicit precision and scale matching the database.
+The capture preserves typed validated values, nullable fields, and PATCH presence;
+FastAPI dependency-injected async sessions and qualified repositories use the same
+contract. UUID formats follow each source validator, including DRF's integer
+inputs. Decimal validation and database coercion use exact decimal digits, with
+Pydantic's default decimal-context validation and DRF's signed-zero response
+behavior preserved. Pydantic decimals retain their original coefficient and exponent
+until PostgreSQL applies the column scale and range rules. ORM defaults do not make a required serializer field optional.
+
+The native profile requires the existing explicit response projection and stable
+validation error handler. Native DRF handlers must read `validated_data` after validation;
+mixing raw request values with coerced fields remains a capture gap. Custom validators,
+decimal contexts, aliases, rounding
+policies, and native date/time/JSON request schemas remain capture gaps. Existing
+explicit wire-validation profiles remain supported. The generated native helpers
+use Go's standard library and are emitted only for native rich-field contracts.
+
+Qualification includes differential serializer/Go decoder tests and PostgreSQL
+replay fixtures for DRF, synchronous FastAPI and async FastAPI on Fiber, chi, mux,
+and Gin, including HTTP errors, exact numeric values, null/absent updates, deletes,
+and table/sequence effects. Database tests require the documented fixture DSN.
+
+
+### Packaged source projects and generation readiness
+
+`source_file` and `models_file` stay relative to the project root. Regular Python
+packages can live directly in the project or under a directory such as `src/`;
+imports resolve from the outermost regular package, as they do in isolated replay.
+Package initializers must remain declarative. Namespace-package execution,
+import cycles, shadowed framework modules and dynamic imports remain capture gaps.
+
+Scan includes `generation_ready` and `source_inventory.module_roles`, separating
+application modules, the configured model module, source tests and unclassified
+Python files. Unimported `tests/` files, `conftest.py`, `test_*.py` and `*_test.py`
+are inventoried as source tests. Imported helpers remain application code even
+when their filenames look like tests. Migration directories are never excluded by
+these test conventions. Every source test remains in the source fingerprint, so
+changing it invalidates the reviewed plan. Source assertions are not translated
+or executed; generated contract tests and source/target replay provide the stated
+qualification. Unclassified runtime behavior still blocks generation.
+
+A ready scan means the captured project can be generated, not that it is ready
+for production cutover. Test/verify reports include `qualification` flags for
+candidate execution, source comparison, original-test execution and cutover
+qualification. `test` executes the Go candidate; `verify` also compares the
+captured Python source. PostgreSQL write verification additionally compares rows
+and sequences in independent resettable fixture schemas. Neither command marks
+arbitrary application behavior or production deployment as qualified.
