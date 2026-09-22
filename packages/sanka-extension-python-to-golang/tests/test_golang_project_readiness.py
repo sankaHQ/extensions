@@ -171,6 +171,54 @@ def test_src_database_project_review_and_replay(
     (tmp_path / "tests/test_database.py").write_text(
         "raise RuntimeError('original tests must not run')"
     )
+    body = {"name": "first", "count": 1, "enabled": True}
+    scenarios = [
+        {
+            "id": "invalid",
+            "method": "POST",
+            "path": "/widgets",
+            "body": body | {"count": "bad"},
+            "expected_status": 422 if async_ else 400,
+        },
+        {
+            "id": "create",
+            "method": "POST",
+            "path": "/widgets",
+            "body": body,
+            "expected_status": 201,
+        },
+        {
+            "id": "patch",
+            "method": "PATCH",
+            "path": "/widgets/1",
+            "body": {"count": 2, "note": None},
+            "expected_status": 200,
+        },
+        {
+            "id": "absent",
+            "method": "PATCH",
+            "path": "/widgets/1",
+            "body": {},
+            "expected_status": 200,
+        },
+        {
+            "id": "replace",
+            "method": "PUT",
+            "path": "/widgets/1",
+            "body": body | {"name": "changed"},
+            "expected_status": 200,
+        },
+        {"id": "delete", "method": "DELETE", "path": "/widgets/1", "expected_status": 204},
+        {"id": "missing", "method": "DELETE", "path": "/widgets/1", "expected_status": 404},
+        {
+            "id": "recreate",
+            "method": "POST",
+            "path": "/widgets",
+            "body": body,
+            "expected_status": 201,
+        },
+    ]
+    (tmp_path / "sanka-verify.json").write_text(json.dumps({"scenarios": scenarios}))
     req = dataclasses.replace(
         request(tmp_path, framework, target),
         configuration={
@@ -217,6 +265,10 @@ def test_src_database_project_review_and_replay(
             monkeypatch.setenv("SANKA_GO_SOURCE_TEST_DATABASE_URL", source_url)
             monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", target_url)
             verified = handle(dataclasses.replace(req, command="verify"))
+            if verified.outcome != "success":
+                report_path = tmp_path / ".sanka/go/verify.json"
+                if report_path.exists():
+                    print(report_path.read_text())
             assert verified.outcome == "success", verified.error
             assert verified.data["source"] == verified.data["candidate"]
             assert verified.data["qualification"]["source_compared"]

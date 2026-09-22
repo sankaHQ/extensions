@@ -488,7 +488,7 @@ def test_native_values_postgres_replay(
                 "-0.0000" if framework == "drf" else "0.0000"
             )
             assert observed["absent"]["body"]["count"] == "0.0000"
-            assert observed["recreate"]["body"]["id"] == 2
+            assert observed["recreate"]["body"]["id"] == "2"
             if framework == "fastapi":
                 assert_decimal_database_boundaries(output, source_url, target_url)
 
