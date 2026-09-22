@@ -53,9 +53,10 @@ def generate(
     *,
     app_source: str | None = None,
     schema_mode: str = "empty",
+    model_text: str | None = None,
 ) -> Path:
     (root / "app.py").write_text(source(framework) if app_source is None else app_source)
-    (root / "models.py").write_text(model_source(framework))
+    (root / "models.py").write_text(model_source(framework) if model_text is None else model_text)
     req = request(root, framework, target)
     req = dataclasses.replace(
         req,

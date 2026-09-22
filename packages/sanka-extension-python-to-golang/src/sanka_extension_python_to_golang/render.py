@@ -323,7 +323,8 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                 item for item in captured["models"] if item["name"] == route["read"]["model"]
             )
             if "lookup" in route["read"]:
-                helpers.append(_detail_read_helper(index, route["read"], model))
+                helper = _read_helper if route["read"].get("many") else _detail_read_helper
+                helpers.append(helper(index, route["read"], model))
                 registrations.append(
                     _detail_read_registration(index, route, model, target, error_key)
                 )
@@ -436,6 +437,22 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
         w.Header().Set("Content-Type", "application/json")
         _, _ = w.Write([]byte({body}))
     }}{suffix}""")
+    has_integrity = any(
+        route.get("write", {}).get("integrity_conflict") for route in captured["routes"]
+    )
+    for index, route in enumerate(captured["routes"]):
+        if not route.get("write", {}).get("integrity_conflict"):
+            continue
+        if target == "fiber":
+            conflict = f'return c.Status(409).JSON(fiber.Map{{{canonical(error_key)}: "integrity conflict"}})'
+        elif target == "gin":
+            conflict = f'c.JSON(409, gin.H{{{canonical(error_key)}: "integrity conflict"}}); return'
+        else:
+            conflict = f'writeResponse(w, 409, map[string]string{{{canonical(error_key)}: "integrity conflict"}}); return'
+        registrations[index] = registrations[index].replace(
+            "if err != nil {",
+            "if err != nil {\n            if isIntegrityConflict(err) { " + conflict + " }\n",
+        )
     setup = {
         "fiber": (
             "app := fiber.New(fiber.Config{DisableHeadAutoRegister: true, BodyLimit: 1048576, "
@@ -474,6 +491,13 @@ def render(captured: dict[str, Any]) -> dict[str, str]:
                 '"github.com/jackc/pgx/v5"',
             ]
         )
+    if has_integrity:
+        imports.append('"github.com/jackc/pgx/v5/pgconn"')
+        helpers.append("""func isIntegrityConflict(err error) bool {
+    var databaseError *pgconn.PgError
+    return errors.As(err, &databaseError) && len(databaseError.Code) == 5 && databaseError.Code[:2] == "23"
+}
+""")
     if has_body_writes:
         imports.extend(['"bytes"', '"encoding/json"', '"io"'])
     if has_writes and target in {"chi", "mux"}:
@@ -599,9 +623,14 @@ def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str
     columns = ", ".join('"' + field["name"] + '"' for field in model["fields"])
     filtered = read.get("filter")
     pagination = read.get("pagination")
+    related = next(
+        (field for field in model["fields"] if field["name"] == read.get("lookup")), None
+    )
     where = f' WHERE "{filtered["field"]}" = ${3 if pagination else 2}' if filtered else ""
+    if related:
+        where = f' WHERE "{related["name"]}" = $2'
     guard, predicate, scoped_values = _scope_parts(
-        read, 1 + (2 if pagination else 1) + bool(filtered), "return nil, scopeErr"
+        read, 1 + (2 if pagination else 1) + bool(filtered or related), "return nil, scopeErr"
     )
     if predicate:
         where += (" AND " if where else " WHERE ") + predicate
@@ -611,12 +640,16 @@ def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str
     if pagination:
         query += " OFFSET $2"
     signature = ", rawQuery string" if filtered or pagination else ""
+    if related:
+        signature = f", lookup {related['go_type']}"
     parameter = (
         f", queryValue(rawQuery, {json.dumps(filtered['parameter'], ensure_ascii=False)}, "
         f"{json.dumps(filtered['default'], ensure_ascii=False)})"
         if filtered
         else ""
     )
+    if related:
+        parameter = ", lookup"
     destinations = ", ".join("&item." + go_name(field["name"]) for field in model["fields"])
     arguments = "ctx context.Context, pool *pgxpool.Pool" + signature
     page = ""
@@ -656,12 +689,13 @@ def _detail_read_registration(
     field = next(item for item in model["fields"] if item["name"] == route["read"]["lookup"])
     bits = "32" if field["go_type"] == "int32" else "64"
     name = canonical(field["name"])
+    reader = "readRows" if route["read"].get("many") else "readRow"
     path = route["path"]
     if target == "fiber":
         return f"""app.Get({canonical(path)}, func(c fiber.Ctx) error {{
         rawID, parseErr := strconv.ParseInt(c.Params({name}), 10, {bits})
         if parseErr != nil {{ return c.Status(400).JSON(fiber.Map{{{canonical(error_key)}: "invalid lookup"}}) }}
-        body, err := readRow{index}(c.Context(), pool, {field["go_type"]}(rawID))
+        body, err := {reader}{index}(c.Context(), pool, {field["go_type"]}(rawID))
         c.Set("Content-Type", "application/json")
         if errors.Is(err, pgx.ErrNoRows) {{ return c.Status(404).JSON(fiber.Map{{{canonical(error_key)}: "not found"}}) }}
         if err != nil {{ return c.Status(500).Send([]byte(`{{"error":"database read failed"}}`)) }}
@@ -671,7 +705,7 @@ def _detail_read_registration(
         return f"""app.GET({canonical(path)}, func(c *gin.Context) {{
         rawID, parseErr := strconv.ParseInt(c.Param({name}), 10, {bits})
         if parseErr != nil {{ c.JSON(400, gin.H{{{canonical(error_key)}: "invalid lookup"}}); return }}
-        body, err := readRow{index}(c.Request.Context(), pool, {field["go_type"]}(rawID))
+        body, err := {reader}{index}(c.Request.Context(), pool, {field["go_type"]}(rawID))
         if errors.Is(err, pgx.ErrNoRows) {{ c.JSON(404, gin.H{{{canonical(error_key)}: "not found"}}); return }}
         if err != nil {{ c.Data(500, "application/json", []byte(`{{"error":"database read failed"}}`)); return }}
         c.Data(200, "application/json", body)
@@ -688,7 +722,7 @@ def _detail_read_registration(
         rawID, parseErr := strconv.ParseInt({parameter}, 10, {bits})
         w.Header().Set("Content-Type", "application/json")
         if parseErr != nil {{ w.WriteHeader(400); _ = json.NewEncoder(w).Encode(map[string]string{{{canonical(error_key)}: "invalid lookup"}}); return }}
-        body, err := readRow{index}(r.Context(), pool, {field["go_type"]}(rawID))
+        body, err := {reader}{index}(r.Context(), pool, {field["go_type"]}(rawID))
         if errors.Is(err, pgx.ErrNoRows) {{ w.WriteHeader(404); _ = json.NewEncoder(w).Encode(map[string]string{{{canonical(error_key)}: "not found"}}); return }}
         if err != nil {{ w.WriteHeader(500); _, _ = w.Write([]byte(`{{"error":"database read failed"}}`)); return }}
         _, _ = w.Write(body)

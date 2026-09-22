@@ -78,15 +78,33 @@ def _jsonb(value: Any) -> str:
 
 
 def _adoption_sql(captured: dict[str, Any]) -> list[str]:
-    models = captured["models"]
+    models = sorted(captured["models"], key=lambda model: model["table"])
     framework = captured["configuration"]["source_framework"]
     tables = [[model["table"], "r"] for model in models]
     columns = []
     constraints = []
+    foreign_keys = []
     auto_columns = []
     for model in models:
         primary = []
         for ordinal, field in enumerate(model["fields"], 1):
+            if reference := field.get("references"):
+                foreign_keys.append(
+                    [
+                        model["table"],
+                        [field["name"]],
+                        reference["table"],
+                        [reference["column"]],
+                        {"NO ACTION": "a", "RESTRICT": "r", "CASCADE": "c", "SET NULL": "n"}[
+                            reference["on_delete"]
+                        ],
+                        "a",
+                        "s",
+                        reference["deferrable"],
+                        reference["deferred"],
+                        True,
+                    ]
+                )
             sql_type = field["sql_type"]
             length = int(sql_type[8:-1]) if sql_type.startswith("varchar(") else None
             data_type = "character varying" if length is not None else sql_type
@@ -115,6 +133,7 @@ def _adoption_sql(captured: dict[str, Any]) -> list[str]:
                 constraints.append([model["table"], "u", [field["name"]], False, False])
         constraints.append([model["table"], "p", primary, False, False])
     constraints.sort(key=lambda item: (item[0], item[1], item[2]))
+    foreign_keys.sort(key=lambda item: (item[0], item[1]))
     locks = "\n".join(f'LOCK TABLE "{model["table"]}" IN ACCESS SHARE MODE;' for model in models)
     auto_checks = "\n".join(
         f"""    IF pg_get_serial_sequence(
@@ -176,7 +195,7 @@ BEGIN
         JOIN pg_class c ON c.oid = con.conrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = current_schema() AND c.relname <> 'goose_db_version'
-          AND con.contype NOT IN ('p','u')
+          AND con.contype NOT IN ('p','u','f')
     ) THEN
         RAISE EXCEPTION 'schema adoption failed: unsupported constraints';
     END IF;
@@ -199,6 +218,33 @@ BEGIN
       ) constraints;
     IF actual <> {_jsonb(constraints)} THEN
         RAISE EXCEPTION 'schema adoption failed: constraints differ';
+    END IF;
+
+    SELECT COALESCE(jsonb_agg(jsonb_build_array(
+        table_name, columns, target_table, target_columns, delete_action, update_action,
+        match_type, is_deferrable, is_deferred, is_validated
+    ) ORDER BY table_name, columns), '[]') INTO actual FROM (
+        SELECT c.relname AS table_name,
+               (SELECT jsonb_agg(a.attname ORDER BY key.ordinality)
+                  FROM unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality)
+                  JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum=key.attnum) AS columns,
+               CASE WHEN target.relnamespace=c.relnamespace THEN target.relname
+                    ELSE '' END AS target_table,
+               (SELECT jsonb_agg(a.attname ORDER BY key.ordinality)
+                  FROM unnest(con.confkey) WITH ORDINALITY AS key(attnum, ordinality)
+                  JOIN pg_attribute a ON a.attrelid=target.oid AND a.attnum=key.attnum)
+                   AS target_columns,
+               con.confdeltype::text AS delete_action, con.confupdtype::text AS update_action,
+               con.confmatchtype::text AS match_type, con.condeferrable AS is_deferrable,
+               con.condeferred AS is_deferred, con.convalidated AS is_validated
+          FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid
+          JOIN pg_namespace n ON n.oid=c.relnamespace
+          JOIN pg_class target ON target.oid=con.confrelid
+         WHERE n.nspname=current_schema() AND c.relname <> 'goose_db_version'
+           AND con.contype='f'
+    ) foreign_keys;
+    IF actual <> {_jsonb(foreign_keys)} THEN
+        RAISE EXCEPTION 'schema adoption failed: foreign keys differ';
     END IF;
 
     SELECT count(*)::int INTO sequence_count
@@ -270,6 +316,15 @@ END; $$;""",
                 suffix += " PRIMARY KEY"
             elif field["unique"]:
                 suffix += " UNIQUE"
+            if reference := field.get("references"):
+                suffix += (
+                    f' REFERENCES "{reference["table"]}" ("{reference["column"]}")'
+                    f" ON DELETE {reference['on_delete']}"
+                )
+                if reference["deferrable"]:
+                    suffix += " DEFERRABLE INITIALLY " + (
+                        "DEFERRED" if reference["deferred"] else "IMMEDIATE"
+                    )
             columns.append(f'    "{field["name"]}" {kind}{suffix}')
             go_type = ("*" if field["nullable"] else "") + field["go_type"]
             lines.append(
@@ -279,6 +334,9 @@ END; $$;""",
         definitions.append(f"type {model['name']} struct {{\n" + "\n".join(lines) + "\n}")
         if captured["configuration"]["schema_mode"] == "empty":
             sql.append(f'CREATE TABLE "{model["table"]}" (\n' + ",\n".join(columns) + "\n);")
+            for field in model["fields"]:
+                if field.get("index"):
+                    sql.append(f'CREATE INDEX ON "{model["table"]}" ("{field["name"]}");')
     if captured["configuration"]["schema_mode"] == "empty":
         sql.append("-- +goose Down")
         for model in reversed(models):

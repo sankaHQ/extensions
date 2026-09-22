@@ -114,10 +114,40 @@ def _django(model: ast.ClassDef) -> dict[str, Any]:
                 and isinstance(call.func, ast.Attribute)
                 and isinstance(call.func.value, ast.Name)
                 and call.func.value.id == "models"
-                and call.func.attr in DJANGO_TYPES
-                and not call.args
+                and call.func.attr in {*DJANGO_TYPES, "ForeignKey"}
             ):
                 raise ValueError("unsupported Django field or model attribute")
+            if call.func.attr == "ForeignKey":
+                if len(call.args) != 1 or not isinstance(call.args[0], ast.Name):
+                    raise ValueError("ForeignKey requires an earlier explicit model")
+                deletion = [item for item in call.keywords if item.arg == "on_delete"]
+                if len(deletion) != 1 or ast.unparse(deletion[0].value) != "models.DO_NOTHING":
+                    raise ValueError("Django Python deletion policies require separate capture")
+                options = _keywords(
+                    ast.Call(
+                        func=call.func,
+                        args=[],
+                        keywords=[item for item in call.keywords if item.arg != "on_delete"],
+                    ),
+                    {"null", "db_index"},
+                )
+                if type(options.get("db_index", True)) is not bool:
+                    raise ValueError("db_index must be boolean")
+                field = _field(
+                    field_name + "_id",
+                    "bigint",
+                    "int64",
+                    {
+                        "nullable": options.get("null", False),
+                    },
+                    False,
+                )
+                field["reference_model"] = call.args[0].id
+                field["index"] = options.get("db_index", True)
+                fields.append(field)
+                continue
+            if call.args:
+                raise ValueError("positional Django field arguments require capture")
             options = _keywords(call, {"primary_key", "null", "unique", "max_length"})
             options = {
                 {"null": "nullable", "max_length": "length"}.get(key, key): value
@@ -177,9 +207,42 @@ def _sqlalchemy(model: ast.ClassDef) -> dict[str, Any]:
         options.setdefault("nullable", nullable)
         inferred = {"int": "Integer", "str": "String", "bool": "Boolean"}[annotation]
         type_name = inferred
+        reference = None
+        if len(call.args) == 2:
+            foreign = call.args[1]
+            if not (
+                isinstance(foreign, ast.Call)
+                and isinstance(foreign.func, ast.Name)
+                and foreign.func.id == "ForeignKey"
+                and len(foreign.args) == 1
+            ):
+                raise ValueError("unsupported column constraint")
+            target = ast.literal_eval(foreign.args[0])
+            if type(target) is not str or len(target.split(".")) != 2:
+                raise ValueError("ForeignKey requires a captured table.column")
+            table_name, column = map(identifier, target.split("."))
+            opts = _keywords(foreign, {"ondelete", "deferrable", "initially"})
+            action = opts.get("ondelete", "NO ACTION")
+            deferrable = opts.get("deferrable", False)
+            initially = opts.get("initially", "IMMEDIATE")
+            if (
+                action not in {"NO ACTION", "RESTRICT", "CASCADE", "SET NULL"}
+                or type(deferrable) is not bool
+                or initially not in {"IMMEDIATE", "DEFERRED"}
+                or (initially == "DEFERRED" and not deferrable)
+                or (action == "SET NULL" and not options["nullable"])
+            ):
+                raise ValueError("unsupported foreign-key behavior")
+            reference = {
+                "table": table_name,
+                "column": column,
+                "on_delete": action,
+                "deferrable": deferrable,
+                "deferred": initially == "DEFERRED",
+            }
+        elif len(call.args) > 2:
+            raise ValueError("multiple column constraints require capture")
         if call.args:
-            if len(call.args) != 1:
-                raise ValueError("relationships and multiple column arguments require capture")
             datatype = call.args[0]
             if isinstance(datatype, ast.Call) and isinstance(datatype.func, ast.Name):
                 type_name = datatype.func.id
@@ -199,7 +262,12 @@ def _sqlalchemy(model: ast.ClassDef) -> dict[str, Any]:
         auto = options.pop("autoincrement", options.get("primary_key", False))
         if type(auto) is not bool:
             raise ValueError("autoincrement must be boolean")
-        fields.append(_field(node.target.id, sql_type, go_type, options, auto))
+        field = _field(node.target.id, sql_type, go_type, options, auto)
+        if reference:
+            if field["primary_key"]:
+                raise ValueError("shared primary-key relationships require capture")
+            field["references"] = reference
+        fields.append(field)
     if table is None:
         raise ValueError("SQLAlchemy models require __tablename__")
     return {"name": model.name, "table": table, "fields": fields}
@@ -213,7 +281,7 @@ def capture_models(path: Path, framework: str) -> list[dict[str, Any]]:
         if framework == "drf"
         else {
             "sqlalchemy.orm": {"DeclarativeBase", "Mapped", "mapped_column"},
-            "sqlalchemy": set(SQLA_TYPES),
+            "sqlalchemy": {*SQLA_TYPES, "ForeignKey"},
         }
     )
     models = []
@@ -268,4 +336,42 @@ def capture_models(path: Path, framework: str) -> list[dict[str, Any]]:
             raise ValueError("models require one explicit integer primary key")
         if len({go_name(field["name"]) for field in fields}) != len(fields):
             raise ValueError("duplicate or colliding field names")
-    return sorted(models, key=lambda model: model["table"])
+    by_name = {model["name"]: model for model in models}
+    by_table = {model["table"]: model for model in models}
+    dependencies: dict[str, set[str]] = {table: set() for table in by_table}
+    for model in models:
+        for field in model["fields"]:
+            if "reference_model" in field:
+                parent = by_name.get(field.pop("reference_model"))
+                if parent is None:
+                    raise ValueError("foreign key references an uncaptured model")
+                primary = next(item for item in parent["fields"] if item["primary_key"])
+                field.update(sql_type=primary["sql_type"], go_type=primary["go_type"])
+                field["references"] = {
+                    "table": parent["table"],
+                    "column": primary["name"],
+                    "on_delete": "NO ACTION",
+                    "deferrable": True,
+                    "deferred": True,
+                }
+            if "references" not in field:
+                continue
+            reference = field["references"]
+            parent = by_table.get(reference["table"])
+            if parent is None:
+                raise ValueError("foreign key references an uncaptured table")
+            primary = next(item for item in parent["fields"] if item["primary_key"])
+            if primary["name"] != reference["column"] or primary["sql_type"] != field["sql_type"]:
+                raise ValueError("foreign key must match the captured primary-key type")
+            dependencies[model["table"]].add(parent["table"])
+    ordered = []
+    while dependencies:
+        ready = sorted(table for table, parents in dependencies.items() if not parents)
+        if not ready:
+            raise ValueError("cyclic foreign keys require separate migration capture")
+        for table in ready:
+            ordered.append(by_table[table])
+            del dependencies[table]
+        for parents in dependencies.values():
+            parents.difference_update(ready)
+    return ordered

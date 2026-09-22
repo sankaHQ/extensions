@@ -199,7 +199,19 @@ return Response({response})
         name = model["name"]
         fields = [field["name"] for field in model["fields"]]
         primary = next(field["name"] for field in model["fields"] if field["primary_key"])
-        filters: list[dict[str, str] | None] = [None]
+        filters: list[dict[str, Any] | None] = [None]
+        filters.extend(
+            {
+                "field": field["name"],
+                "parameter": field["name"],
+                "expression": field["name"],
+                "path": True,
+            }
+            for field in model["fields"]
+            if "references" in field
+            and field["name"]
+            not in {"request", "engine", "session", "select", "dict", "row", "int"}
+        )
         filters.extend(
             {"field": field["name"], "parameter": key, "default": default, "expression": expression}
             for field in model["fields"]
@@ -208,7 +220,13 @@ return Response({response})
         )
         for filtered in filters:
             signature = "request" if framework == "drf" else ""
-            if filtered and framework == "fastapi":
+            if filtered and filtered.get("path"):
+                signature = {
+                    "drf": f"request, {filtered['parameter']}",
+                    "flask": filtered["parameter"],
+                    "fastapi": f"{filtered['parameter']}: int",
+                }[framework]
+            elif filtered and framework == "fastapi":
                 signature = f"{filtered['parameter']}: str = {filtered['default']!r}"
             expected_function = ast.parse(f"def endpoint({signature}): pass").body[0]
             assert isinstance(expected_function, ast.FunctionDef)
@@ -244,7 +262,9 @@ return Response({response})
                     if isinstance(node, ast.AsyncFunctionDef):
                         raise ValueError("synchronous database reads require a synchronous handler")
                     result = {"model": name, "order_by": primary, "limit": limit}
-                    if filtered:
+                    if filtered and filtered.get("path"):
+                        result.update(lookup=filtered["field"], many=True)
+                    elif filtered:
                         result["filter"] = {
                             key: value for key, value in filtered.items() if key != "expression"
                         }

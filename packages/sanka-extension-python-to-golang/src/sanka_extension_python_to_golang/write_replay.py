@@ -41,6 +41,8 @@ def scenarios_for(root: Path, captured: dict[str, Any]) -> list[dict[str, Any]]:
     path = root / "sanka-verify.json"
     if path.exists():
         return load_scenarios(path)
+    if any("references" in field for model in captured["models"] for field in model["fields"]):
+        raise ValueError("relational writes require explicit ordered sanka-verify.json scenarios")
     if any(
         route.get("write", {}).get("constraints")
         or route.get("write", {}).get("validation")
@@ -56,6 +58,7 @@ def scenarios_for(root: Path, captured: dict[str, Any]) -> list[dict[str, Any]]:
             operation.update(
                 kind={"patch": "update"}.get(write["operation"], write["operation"]),
                 model=write["model"],
+                conflict=write.get("integrity_conflict", False),
             )
         elif "read" in route:
             operation.update(
@@ -474,6 +477,12 @@ def replay_writes(
                 "version": _run([str(source_python), "-I", "--version"], workspace).strip(),
             }
         result.update(compare(scenarios, actual, source_observed))
+        if any(route.get("write", {}).get("integrity_conflict") for route in captured["routes"]):
+            unchanged = integrity_failures_unchanged(
+                initial, actual
+            ) and integrity_failures_unchanged(source_initial, source_observed or [])
+            result["integrity_failures_unchanged"] = unchanged
+            result["ok"] = result["ok"] and unchanged
         if captured.get("security"):
             result["security_headers"] = compare_headers(
                 json.loads((candidate / "sanka-observed.headers.json").read_text()),
@@ -504,4 +513,15 @@ def denied_writes_unchanged(initial: dict[str, Any], observations: list[dict[str
         for previous, current in pairwise([initial, *observations])
         if current["status"] in (401, 403)
         or (".cross-" in current["id"] and current["status"] == 404)
+    )
+
+
+def integrity_failures_unchanged(
+    initial: dict[str, Any], observations: list[dict[str, Any]]
+) -> bool:
+    # PostgreSQL sequence allocation is not transactional; rows must still roll back.
+    return all(
+        current["tables"] == previous["tables"]
+        for previous, current in pairwise([initial, *observations])
+        if current["status"] == 409
     )

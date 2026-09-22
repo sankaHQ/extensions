@@ -375,8 +375,56 @@ scan/plan/apply.
 Qualified schema fields are 32/64-bit integers, booleans, bounded strings, and
 text, with nullability, single integer primary keys, automatic IDs and single
 column uniqueness. Nullable Go fields use pointers. Defaults (including Python
-and server defaults), relationships, indexes, custom types, validators, managers,
+and server defaults), ORM object relationships, custom indexes, custom types, validators, managers,
 and model methods remain blockers. Generated structs do not implement validation.
+
+Single-column foreign keys may reference a captured integer primary key of the
+same width. SQLAlchemy requires an explicit column type followed by
+`ForeignKey("parents.id")`; `ondelete` may be `NO ACTION`, `RESTRICT`, `CASCADE`,
+or `SET NULL` (nullable columns only). Literal `deferrable` and `initially` options
+are preserved. Django accepts `models.ForeignKey(Parent, on_delete=models.DO_NOTHING)`
+with optional `null` and `db_index`. Its `<field>_id` column inherits the parent's
+integer width, index defaults to enabled, and the constraint is initially deferred.
+Python-side Django deletion policies remain blocked. Tables are created in stable
+dependency order and dropped in reverse order; cycles and unresolved references block
+generation. No lazy relationship loading or ORM cascade behavior is invented.
+
+Read handlers may project these scalar foreign-key columns. A bounded ordered list
+may filter one such column using an integer path parameter of the same name:
+`Child.objects.filter(parent_id=parent_id).order_by("id").values("id", "parent_id")[:2]`
+or `select(Child.id, Child.parent_id).where(Child.parent_id == parent_id).order_by(Child.id).limit(2)`.
+The existing full-field projection and explicit route requirements still apply.
+Generated pgx queries bind both the parent key and limit. Replay checks multiple
+parent keys, including an absent parent. Joins and object projections remain blocked.
+
+Foreign-key schemas may use the existing scalar CRUD recipes when every write
+handler explicitly catches `IntegrityError` outside its ORM scope and returns
+409 with `{"error": "integrity conflict"}` (DRF/Flask) or
+`{"detail": "integrity conflict"}` (FastAPI). Import the exception directly from
+`django.db` or `sqlalchemy.exc`. For example, enclose the entire qualified
+FastAPI write body in `try`, followed by:
+
+```python
+except IntegrityError:
+    raise HTTPException(status_code=409, detail="integrity conflict")
+```
+
+Only this exact response contract is lowered. Broader exception catches, retries,
+`finally`/`else` behavior, and catches inside the transaction remain blocked.
+The generated handler classifies PostgreSQL integrity errors after pgx transaction
+cleanup, including deferred failures at commit. Other database errors retain the
+existing failure response. Database cascades remain database operations; no ORM
+object relationship behavior is added.
+
+Relational write verification requires explicit ordered `sanka-verify.json`
+scenarios: create parents before children, exercise invalid references and deletion
+effects, and include recovery after failures. Replay resets independent fixtures,
+compares every captured table and sequence after every request, and independently
+requires 409 responses to leave table rows unchanged. Sequence allocations may
+advance on failed inserts. The integration corpus exercises parent/child CRUD,
+unique and foreign-key failures, reassignment, restricted and cascading deletion,
+and subsequent ID allocation across the source/target matrix. These are individual
+CRUD operations; arbitrary multi-table business transaction capture remains separate.
 
 After reviewing the generated SQL, set `DATABASE_URL` and run
 `go run ./cmd/migrate up` from the generated directory. Migrations are embedded,
@@ -387,12 +435,14 @@ that baseline.
 
 `adopt-existing` is a validation-only baseline for a database already created by
 the captured Python models. It checks the table and ordered-column set, types,
-nullability, identity/sequence ownership, primary and unique constraints, and
+nullability, identity/sequence ownership, primary, unique and foreign-key constraints, and
 rejects extra application tables, unsupported constraints, user triggers and row
 security. Extra indexes are preserved. It takes `ACCESS SHARE` locks on captured
 tables during validation, so run it in a controlled schema-change window.
 Application rows are never changed; `down` only unregisters the Goose baseline.
 Do not edit an applied baseline; later schema changes require new revisions.
+Foreign-key adoption checks referenced tables/columns, update/delete actions,
+match mode, deferral, and validation state; a mismatching constraint blocks adoption.
 
 PostgreSQL schema, constraint, apply/reapply and rollback equivalence are checked
 separately by the opt-in integration suite.

@@ -751,6 +751,45 @@ def _normalize_drf_serializers(
     return ast.fix_missing_locations(tree)
 
 
+def _normalize_integrity(tree: ast.Module, framework: str) -> set[str]:
+    """Preserve only an explicit outer handler after the ORM scope has unwound."""
+    module = "django.db" if framework == "drf" else "sqlalchemy.exc"
+    response = {
+        "drf": 'return Response({"error": "integrity conflict"}, status=409)',
+        "flask": 'return jsonify({"error": "integrity conflict"}), 409',
+        "fastapi": 'raise HTTPException(status_code=409, detail="integrity conflict")',
+    }[framework]
+    expected = ast.parse("try:\n    pass\nexcept IntegrityError:\n    " + response).body[0]
+    assert isinstance(expected, ast.Try)
+    imported = False
+    handlers = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == module and not node.level:
+            imported |= any(
+                alias.name == "IntegrityError" and not alias.asname for alias in node.names
+            )
+        if not (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and len(node.body) == 1
+            and isinstance(node.body[0], ast.Try)
+        ):
+            continue
+        guarded = node.body[0]
+        if (
+            not imported
+            or guarded.orelse
+            or guarded.finalbody
+            or [ast.dump(handler) for handler in guarded.handlers]
+            != [ast.dump(handler) for handler in expected.handlers]
+        ):
+            raise ValueError(
+                "integrity handlers require an explicit outer IntegrityError-to-409 contract"
+            )
+        node.body = guarded.body
+        handlers.add(node.name)
+    return handlers
+
+
 def _sqlalchemy_write(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     framework: str,
@@ -1141,6 +1180,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             }:
                 raise ValueError("models_file conflicts with runtime imports")
             models = capture_models(root / config["models_file"], framework)
+            allowed_imports["django.db" if framework == "drf" else "sqlalchemy.exc"] = {
+                "IntegrityError"
+            }
             if framework != "drf":
                 allowed_imports.update(
                     {
@@ -1171,7 +1213,9 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
     except (ValueError, TypeError, SyntaxError) as error:
         gaps.append("routing: " + str(error))
     validations: dict[str, dict[str, Any]] = {}
+    integrity_handlers: set[str] = set()
     try:
+        integrity_handlers = _normalize_integrity(tree, framework)
         tree = _normalize_native_pydantic(tree, models, framework, validations)
         tree = _normalize_pydantic(tree, models, framework, validations)
         if framework == "drf":
@@ -1426,6 +1470,16 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 payload = _drf_write(function, method, models)
             else:
                 payload = _payload(function, framework, models)
+            if name in integrity_handlers:
+                if "write" not in payload or "IntegrityError" not in imports:
+                    raise ValueError("integrity handlers require qualified database writes")
+                payload["write"]["integrity_conflict"] = True
+            if (
+                "write" in payload
+                and name not in integrity_handlers
+                and any("references" in field for model in models for field in model["fields"])
+            ):
+                raise ValueError("relational writes require an explicit integrity conflict handler")
             if name in security.get("projections", {}):
                 if method != "GET" or "body" not in payload:
                     raise ValueError("identity projections require a qualified GET response")
