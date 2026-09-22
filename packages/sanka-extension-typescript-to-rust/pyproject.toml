@@ -1,0 +1,28 @@
+[project]
+name = "sanka-extension-typescript-to-rust"
+version = "0.1.0a2"
+description = "Deterministic TypeScript to Rust migration extension (experimental)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Sanka, Inc." }]
+dependencies = [
+  "sanka-extension-sdk==0.1.0a4",
+  "sanka-ts-capture==0.1.0a1",
+  "sanka-http-replay==0.1.0a2",
+]
+
+[project.scripts]
+sanka-extension-typescript-to-rust = "sanka_extension_typescript_to_rust.__main__:main"
+
+[project.urls]
+Repository = "https://github.com/sankaHQ/extensions"
+Issues = "https://github.com/sankaHQ/extensions/issues"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sanka_extension_typescript_to_rust"]

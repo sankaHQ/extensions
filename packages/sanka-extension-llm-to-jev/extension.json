@@ -1,0 +1,56 @@
+{
+  "commands": [
+    "scan",
+    "plan",
+    "apply",
+    "test",
+    "verify"
+  ],
+  "distribution": {
+    "executable": "sanka-extension-llm-to-jev",
+    "name": "sanka-extension-llm-to-jev",
+    "version": "0.1.0a1"
+  },
+  "id": "sanka/llm-to-jev",
+  "kind": "migration",
+  "match": {
+    "all": [
+      {
+        "kind": "language",
+        "value": "python"
+      }
+    ],
+    "any": [
+      {
+        "kind": "static_import",
+        "value": "openai"
+      }
+    ]
+  },
+  "protocol_version": "sanka-extension/v1",
+  "runtime": {
+    "sanka_cli": "==0.2.12"
+  },
+  "schema_version": "sanka-extension-manifest/v2",
+  "targets": [
+    "jev-classifier"
+  ],
+  "version": "0.1.0a1",
+  "wheels": [
+    {
+      "name": "sanka_extension_llm_to_jev-0.1.0a1-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/llm-to-jev-v0.1.0a1/sanka_extension_llm_to_jev-0.1.0a1-py3-none-any.whl",
+      "sha256": "148107e83ff8427c7076aae511c55ef88e162b0d49ae4bfee0e6e2eab8f72825"
+    },
+    {
+      "name": "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/llm-to-jev-v0.1.0a1/sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
+      "sha256": "f1a6655095ab81e549137e1d9604492bda2a31677d674c6359b0a39a2da96307"
+    },
+    {
+      "name": "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/llm-to-jev-v0.1.0a1/sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
+      "sha256": "34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e"
+    }
+  ]
+}

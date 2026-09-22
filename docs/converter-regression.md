@@ -21,6 +21,14 @@ This is a required manual converter release/regression check. It is not automati
 coverage on public extensions PRs. Private fixtures and evaluation reports remain
 in private benchmark runs; do not attach their contents to a public PR.
 
+The Flask 0.1.0a7 router inventory includes HEAD and OPTIONS methods that earlier
+versions omitted. For the unchanged pinned fixtures, `drf-flask-001`,
+`drf-flask-002` and `drf-flask-003` therefore have 10, 30 and 11 eligible routes
+(previously 5, 12 and 9). Their minimum native-route counts remain 0, 0 and 1.
+All independent evaluation gates, scenario totals and metric floors remain
+unchanged. These inventory corrections do not assert new behavior coverage;
+the complete regression must still pass before publication.
+
 ## Local check
 
 Use a clean `sankaHQ/bench` checkout at the manifest's exact benchmark revision.
@@ -70,3 +78,14 @@ runtime acceptance.
 To update benchmark coverage, review and pin its new commit and update the route
 and independent evaluation floors together, then execute the real converter/evaluator run. Unit tests of
 the runner alone do not satisfy this check.
+
+## Flask route inventory correction for a31
+
+The router support added in PR52 inventories implicit HEAD and OPTIONS handlers.
+For the unchanged pinned fixtures, eligible counts are 10, 30 and 11 for Flask
+001, 002 and 003 respectively (previously 5, 12 and 9). Comparing the scanner
+before PR52 with the current scanner confirms no removed route identities and
+only HEAD/OPTIONS additions. Native-route minimums and independent evaluator
+thresholds are unchanged. The earlier a31 regression run stopped those three
+fixtures at the inventory gate; the corrected inventory requires a fresh complete
+run and does not establish behavioral acceptance by itself.

@@ -93,7 +93,7 @@ def build(*, update_manifest: bool = False) -> None:
         check=True,
     )
     wheel = directory / WHEEL
-    metadata, entries = _wheel_metadata(wheel)
+    metadata, entries, _members = _wheel_metadata(wheel)
     project = tomllib.loads((ROOT / "packages" / PACKAGE / "pyproject.toml").read_text())["project"]
     if (metadata["Name"], metadata["Version"]) != (PACKAGE, VERSION) or project[
         "version"

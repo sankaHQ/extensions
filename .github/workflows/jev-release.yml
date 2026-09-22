@@ -1,0 +1,72 @@
+name: Jev release qualification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Require the landed immutable release tag for publication
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = llm-to-jev-v0.1.0a1
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen --all-packages
+      - run: make build-jev-release
+      - name: Check out the reviewed cookbook acceptance harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: sankaHQ/sanka-examples
+          ref: ed912226af15aaa9e96c4b1f228c6ad8e9e07ba8
+          path: cookbook
+          persist-credentials: false
+      - name: Verify the complete lifecycle in isolated public consumer environments
+        run: |
+          uv run --no-project --python 3.12 python cookbook/ai/llm-classification-to-jev/check.py \
+            --extension-wheel "$PWD/release/jev/sanka_extension_llm_to_jev-0.1.0a1-py3-none-any.whl" \
+            --extension-template "$PWD/packages/sanka-extension-llm-to-jev/extension.template.json" \
+            --report "$PWD/release/jev-acceptance.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: jev-release-${{ github.sha }}
+          path: |
+            release/jev/*
+            release/jev-acceptance.json
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
+    needs: qualify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: jev-release-${{ github.sha }}
+          path: release
+      - name: Publish the verified immutable Jev prerelease
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/jev/* release/jev-acceptance.json \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
+            --title "Jev classifier converter 0.1.0a1" \
+            --notes "Offline Sanka Code converter for the bounded Python OpenAI enum-classifier pattern. Public CLI 0.2.12; full isolated lifecycle and source-preservation checks passed with mocked inference. No live quality, latency or savings claim. Application owners must review decisions and labels and evaluate their own workload."
+        env:
+          GH_TOKEN: ${{ github.token }}

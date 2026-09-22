@@ -25,7 +25,7 @@ def validate(directory: Path, *, root: Path = ROOT) -> None:
     expected = directory / f"sanka_extension_sdk-{version}-py3-none-any.whl"
     if sorted(directory.iterdir()) != [expected]:
         raise ValueError("SDK candidate directory must contain exactly its versioned wheel")
-    metadata, entries = _wheel_metadata(expected)
+    metadata, entries, _members = _wheel_metadata(expected)
     if (metadata["Name"], metadata["Version"]) != ("sanka-extension-sdk", version):
         raise ValueError("SDK candidate metadata does not match its source")
     if metadata["License-Expression"] != "Apache-2.0" or entries:

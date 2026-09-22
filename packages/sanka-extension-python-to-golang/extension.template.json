@@ -1,0 +1,51 @@
+{
+  "schema_version": "sanka-extension-manifest/v2",
+  "kind": "migration",
+  "id": "sanka/python-to-golang",
+  "version": "0.1.0a2",
+  "protocol_version": "sanka-extension/v1",
+  "distribution": {
+    "name": "sanka-extension-python-to-golang",
+    "version": "0.1.0a2",
+    "executable": "sanka-extension-python-to-golang"
+  },
+  "commands": [
+    "scan",
+    "plan",
+    "apply",
+    "test",
+    "verify"
+  ],
+  "targets": [
+    "fiber",
+    "chi",
+    "mux",
+    "gin"
+  ],
+  "runtime": {
+    "sanka_cli": ">=0.2.12,<0.3"
+  },
+  "match": {
+    "all": [
+      {
+        "kind": "language",
+        "value": "python"
+      }
+    ],
+    "any": [
+      {
+        "kind": "static_import",
+        "value": "flask"
+      },
+      {
+        "kind": "static_import",
+        "value": "fastapi"
+      },
+      {
+        "kind": "static_import",
+        "value": "rest_framework"
+      }
+    ]
+  },
+  "wheels": []
+}

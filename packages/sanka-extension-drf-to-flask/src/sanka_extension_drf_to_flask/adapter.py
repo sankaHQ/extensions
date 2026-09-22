@@ -62,21 +62,37 @@ def _within(root: Path, value: str) -> Path:
     return path
 
 
-def _source_hash(root: Path, *, output: Path | None = None) -> str:
+def _source_hash(root: Path, *, exclude: Path | None = None) -> str:
     records = {}
     for directory, names, files in os.walk(root):
         names[:] = sorted(
             n
             for n in names
-            if not n.startswith(".") and n != "__pycache__" and Path(directory) / n != output
+            if not n.startswith(".") and n != "__pycache__" and Path(directory) / n != exclude
         )
+        if any((Path(directory) / name).is_symlink() for name in names):
+            raise ValueError("source directories must not be symlinks")
         for name in sorted(files):
             path = Path(directory) / name
-            if path.suffix == ".py" or name in {"pyproject.toml", "requirements.txt"}:
+            if path.suffix == ".py" or name in {
+                "pyproject.toml",
+                "requirements.txt",
+                "uv.lock",
+                "poetry.lock",
+            }:
                 if path.is_symlink():
                     raise ValueError("source files must not be symlinks")
                 records[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
     return _hash(records)
+
+
+def _require_captured_settings(config: dict[str, JsonValue], captured: dict[str, Any]) -> None:
+    settings_module = captured.get("settings_module")
+    backend = captured.get("backend_scan")
+    if isinstance(backend, dict) and backend.get("settings_module") != settings_module:
+        raise ValueError("captured settings_module facts differ; scan again")
+    if "settings_module" in config and config["settings_module"] != settings_module:
+        raise ValueError("settings_module differs from the captured source configuration")
 
 
 def _settings(root: Path, config: dict[str, JsonValue]) -> str:
@@ -794,18 +810,28 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
 
 
-def _apply(root: Path, output: Path, files: dict[str, str]) -> None:
+def _apply(root: Path, output: Path, files: dict[str, str], *, standalone: bool = False) -> None:
     if output.exists():
         raise ValueError("output already exists; preserve repairs and choose a new output")
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=".flask-", dir=output.parent))
     try:
         for name, content in files.items():
-            if Path(name).name != name or (root / name).exists():
+            relative = Path(name)
+            if (
+                relative.is_absolute()
+                or ".." in relative.parts
+                or "\\" in name
+                or not relative.parts
+                or name != relative.as_posix()
+                or (not standalone and (root / name).exists())
+            ):
                 raise ValueError(f"generated file would replace existing source: {name}")
             if name.endswith(".py"):
                 compile(content, name, "exec")
-            (temporary / name).write_text(content)
+            destination = temporary / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(content)
         temporary.rename(output)
     finally:
         if temporary.exists():
@@ -824,6 +850,12 @@ def _verify(request: ExtensionRequest) -> ExtensionResponse:
         if not isinstance(value, str) or not value:
             raise ReplayError(f"{name} must be a non-empty path")
         return (root / value).absolute()
+
+    def option(name: str) -> str | None:
+        value = config.get(name)
+        if value is not None and (not isinstance(value, str) or not value):
+            raise ReplayError(f"{name} must be a non-empty string")
+        return value
 
     scenarios_path = path("scenarios")
     if scenarios_path is None:
@@ -852,6 +884,9 @@ def _verify(request: ExtensionRequest) -> ExtensionResponse:
         candidate_root=path("candidate"),
         entrypoint=str(config.get("entrypoint") or "target_app.py"),
         db_env=str(config.get("db_env") or "SANKA_TEST_DB"),
+        candidate_db_env=option("candidate_db_env"),
+        database_backend=option("database_backend") or "sqlite",
+        postgres_admin_dsn_env=option("postgres_admin_dsn_env"),
         seed=path("seed"),
         ignored_tables=cast(list[str], ignored),
         all_headers=bool(config.get("all_headers")),
@@ -886,7 +921,9 @@ def _reviewed_plan(request: ExtensionRequest) -> tuple[dict[str, Any], str]:
         or _hash(plan) != digest
     ):
         raise ValueError("apply requires the current reviewed core and extension plan hashes")
-    if plan["source_hash"] != _source_hash(root, output=_within(root, plan["output"])):
+    _require_captured_settings(config, plan)
+    output = _within(root, plan["output"]) if request.command == "test" else None
+    if plan["source_hash"] != _source_hash(root, exclude=output):
         raise ValueError("source changed after plan; scan and review again")
     return plan, digest
 
@@ -912,7 +949,12 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 )
             for name in plan["files"]:
                 path = output / name
-                if path.is_symlink() or not path.is_file():
+                if (
+                    path.is_symlink()
+                    or any(parent.is_symlink() for parent in path.parents)
+                    or not path.is_file()
+                    or not path.resolve().is_relative_to(output)
+                ):
                     raise ValueError(f"missing or unsafe generated file: {name}")
                 if path.read_text() != plan["files"][name]:
                     raise ValueError(
@@ -926,15 +968,29 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 "assert not any(m == 'rest_framework' or m.startswith('rest_framework.') "
                 "for m in sys.modules)"
             )
+            if plan.get("orm") == "sqlalchemy":
+                dialect = plan["database_schema"]["dialect"]
+                boot_url = (
+                    "sqlite:///:memory:"
+                    if dialect == "sqlite"
+                    else "postgresql+psycopg://unused:unused@127.0.0.1:1/unused"
+                )
+                probe = (
+                    "import sys; from target_app import create_app; from flask import Flask; "
+                    f"app = create_app({{'DATABASE_URL': {boot_url!r}}}); "
+                    "assert isinstance(app, Flask); "
+                    "assert not any(m.split('.')[0] in {'django','rest_framework','fastapi'} "
+                    "for m in sys.modules); app.extensions['sanka_engine'].dispose()"
+                )
+            python_path = (
+                (str(output),)
+                if plan.get("orm") == "sqlalchemy"
+                else (str(output), str(root), os.environ.get("PYTHONPATH"))
+            )
             result = subprocess.run(
                 [str(config.get("candidate_python") or sys.executable), "-c", probe],
                 cwd=output,
-                env=os.environ
-                | {
-                    "PYTHONPATH": os.pathsep.join(
-                        filter(None, (str(output), str(root), os.environ.get("PYTHONPATH")))
-                    )
-                },
+                env=os.environ | {"PYTHONPATH": os.pathsep.join(filter(None, python_path))},
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -956,17 +1012,26 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
         if request.command == "scan":
             with contextlib.redirect_stdout(io.StringIO()):
                 data = _scan(root, config)
+                try:
+                    from .planning import capture
+
+                    data.update(capture(root, config))
+                except Exception as error:
+                    data["backend_capture_error"] = f"{type(error).__name__}: {error}"
             artifact = artifacts / "scan.json"
             _write_json(artifact, data)
         elif request.command == "plan":
-            if config.get("orm") not in {None, "django"}:
-                raise ValueError("Flask currently retains the Django ORM")
+            if config.get("orm") not in {None, "django", "sqlalchemy"}:
+                raise ValueError("Flask ORM must be django or sqlalchemy")
+            if config.get("strategy", "native") != "native":
+                raise ValueError("Flask supports only native strategy")
             if (
-                config.get("strategy", "native") != "native"
-                or config.get("generation", "minimal") != "minimal"
+                config.get("orm") != "sqlalchemy"
+                and config.get("generation", "minimal") != "minimal"
             ):
-                raise ValueError("Flask supports only native strategy and minimal generation")
+                raise ValueError("Django compatibility mode supports minimal generation")
             scan = json.loads((artifacts / "scan.json").read_text())
+            _require_captured_settings(config, scan)
             if scan["source_hash"] != _source_hash(root):
                 raise ValueError("source changed after scan; scan again")
             output = _within(root, str(config.get("output") or ".sanka/output/flask"))
@@ -983,8 +1048,12 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 "native_routes": native,
                 "readiness": native / eligible if eligible else 0.0,
                 "needs_adaptation_routes": eligible - native,
-                "files": _render(scan),
+                "files": _render(scan) if config.get("orm") != "sqlalchemy" else {},
             }
+            if config.get("orm") == "sqlalchemy":
+                from .planning import plan_native
+
+                data = plan_native(root, output, scan, config)
             data["plan_hash"] = _hash(data)
             artifact = artifacts / "plan-flask.json"
             _write_json(artifact, data)
@@ -1003,25 +1072,38 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 raise ValueError(
                     "inspect the plan for gaps; force and gap-report-only are not supported"
                 )
-            if config.get("orm") not in {None, "django"}:
-                raise ValueError("the reviewed Flask plan retains the Django ORM")
+            if config.get("orm", plan.get("orm", "django")) != plan.get("orm", "django"):
+                raise ValueError("ORM differs from the reviewed Flask plan")
+            if plan.get("orm") == "sqlalchemy":
+                from .planning import PROFILE_KEYS
+
+                for key in PROFILE_KEYS & config.keys():
+                    if config[key] != plan["reviewed_configuration"].get(key):
+                        raise ValueError(f"{key} differs from the reviewed Flask plan")
             configured = config.get("output")
             if configured is not None and _within(root, str(configured)) != Path(plan["output"]):
                 raise ValueError("output differs from the reviewed plan")
             output = _within(root, str(config.get("bench_candidate") or plan["output"]))
             if config.get("bench_candidate"):
                 output = _within(root, str(output / "overlay"))
-            _apply(root, output, plan["files"])
+            _apply(root, output, plan["files"], standalone=plan.get("orm") == "sqlalchemy")
             data = {
                 "output": str(output),
                 "plan_hash": digest,
                 "routes_generated": plan["native_routes"],
                 "needs_adaptation_routes": plan["needs_adaptation_routes"],
                 "mode": "native",
-                "repair_guidance": "For manual uploads, reuse sanka_form.parse_form(request). "
-                "It returns source-compatible fields and UploadedFile objects, including legacy "
-                "boundary behavior. Catch FormError and preserve its detail/status. "
-                "Preserve source parsing and verify repairs before accepting them.",
+                "orm": plan.get("orm", "django"),
+                "repair_guidance": (
+                    "Preserve generated files and add independent source/target contract tests. "
+                    "Schema changes require new Alembic revisions; never edit the baseline."
+                    if plan.get("orm") == "sqlalchemy"
+                    else "For manual uploads, reuse sanka_form.parse_form(request). "
+                    "It returns source-compatible fields and UploadedFile objects, including "
+                    "legacy "
+                    "boundary behavior. Catch FormError and preserve its detail/status. "
+                    "Preserve source parsing and verify repairs before accepting them."
+                ),
             }
             artifact = output
         else:
@@ -1035,6 +1117,11 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             data=cast(dict[str, JsonValue], data),
             artifacts=[str(artifact.resolve())],
             limitations=[
+                "Standalone SQLAlchemy generation covers only captured, supported contracts. "
+                "Independently verify HTTP behavior and database effects before cutover."
+            ]
+            if data.get("orm") == "sqlalchemy"
+            else [
                 "Only recognized JSON/form APIView handlers and isolated ORM dependencies "
                 "are converted. "
                 "Review migration-gaps.json and independently verify all behavior."

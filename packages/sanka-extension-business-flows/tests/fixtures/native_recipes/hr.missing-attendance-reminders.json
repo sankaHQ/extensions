@@ -1,0 +1,44 @@
+{
+  "recipe_id": "hr.missing-attendance-reminders",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ],
+    "employee_ids": [
+      "0701",
+      "701"
+    ]
+  },
+  "expected_configuration": {
+    "task": "missing_attendance",
+    "settings": {
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "employee_ids": [
+        "701"
+      ],
+      "weekdays": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri"
+      ],
+      "excluded_dates": [],
+      "lookback_days": 7
+    }
+  },
+  "expected_node_ids": [
+    "hr-missing-attendance-reminders/schedule",
+    "hr-missing-attendance-reminders/create-tasks"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "visibility": "complete_attendance_and_absence_read_scope",
+    "source_revision": "completed_local_workday"
+  }
+}

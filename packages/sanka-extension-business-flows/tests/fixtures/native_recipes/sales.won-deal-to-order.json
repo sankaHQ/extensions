@@ -1,0 +1,20 @@
+{
+  "recipe_id": "sales.won-deal-to-order",
+  "input": {
+    "won_stage": " Closed won "
+  },
+  "expected_configuration": {
+    "conversion": "won_deal_to_order",
+    "settings": {
+      "won_stage": " Closed won "
+    }
+  },
+  "expected_node_ids": [
+    "sales-won-deal-to-order/trigger",
+    "sales-won-deal-to-order/create-order"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "existing_bound_order": "preserve"
+  }
+}

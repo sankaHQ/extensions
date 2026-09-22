@@ -115,6 +115,30 @@ Only manifest-listed wheels are installed, with `pip --isolated --no-index --no-
 
 Missing trust, artifacts, compatibility, or matching hashes stops execution. The runtime does not silently substitute another version or implementation.
 
+## Run an experimental extension
+
+The experimental converters are published as scoped prereleases outside the CLI's
+default marketplace snapshot: `sanka/python-to-golang` and `sanka/typescript-to-rust`
+in [`api-converters-v0.1.0a1`](docs/api-converter-release.md) and
+`sanka/react-native-to-native` in
+[`mobile-converters-v0.1.0a1`](docs/mobile-converter-release.md). Install them by
+adding this repository as a marketplace pinned to the release commit, as each
+package README documents. An extension that is not catalogued yet, or a working
+copy you are developing, can still run from this checkout through the same
+`sanka-extension/v1` protocol the CLI uses:
+
+```bash
+uv sync --frozen --all-packages
+uv run python scripts/fetch_typescript_bundle.py   # TypeScript-based extensions
+uv run python scripts/run_extension.py sanka/typescript-to-rust scan --project ~/app --config database_layer=sqlx
+uv run python scripts/run_extension.py sanka/typescript-to-rust plan --project ~/app --config database_layer=sqlx
+uv run python scripts/run_extension.py sanka/typescript-to-rust apply --project ~/app --config database_layer=sqlx --plan-hash sha256:...
+```
+
+`apply` requires the exact hash that `plan` printed, artifacts live under
+`<project>/.sanka/<extension name>/`, and `test` and `verify` need the toolchains
+and fixture databases documented in each package README.
+
 ## Development and release validation
 
 ```bash

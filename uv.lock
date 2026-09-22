@@ -9,6 +9,7 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "sanka-code-migration",
     "sanka-connector-clickhouse",
     "sanka-connector-csv",
     "sanka-connector-markdown",
@@ -19,8 +20,14 @@ members = [
     "sanka-extension-business-flows",
     "sanka-extension-drf-to-fastapi",
     "sanka-extension-drf-to-flask",
+    "sanka-extension-llm-to-jev",
+    "sanka-extension-python-to-golang",
+    "sanka-extension-react-native-to-native",
     "sanka-extension-sdk",
+    "sanka-extension-typescript-to-rust",
     "sanka-extensions-workspace",
+    "sanka-http-replay",
+    "sanka-ts-capture",
 ]
 overrides = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
 
@@ -31,6 +38,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/4e/8a/64761f4005f17809769d23e518d915db74e6310474e733e3593cfc854ef1/aiosqlite-0.22.1.tar.gz", hash = "sha256:043e0bd78d32888c0a9ca90fc788b38796843360c855a7262a532813133a0650", size = 14821, upload-time = "2025-12-23T19:25:43.997Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/00/b7/e3bf5133d697a08128598c8d0abc5e16377b51465a33756de24fa7dee953/aiosqlite-0.22.1-py3-none-any.whl", hash = "sha256:21c002eb13823fad740196c5a2e9d8e62f6243bd9e7e4a1f87fb5e44ecb4fceb", size = 17405, upload-time = "2025-12-23T19:25:42.139Z" },
+]
+
+[[package]]
+name = "alembic"
+version = "1.20.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mako" },
+    { name = "sqlalchemy" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ed/aa/02910bdb8e2f1444f6654d5b296cd827d126f82209050ee7b1000f92ac4b/alembic-1.20.0.tar.gz", hash = "sha256:db505480647bc60386c5369402f4a57a506b7539c9e9ef5e270d45cbbe4939bf", size = 2093272, upload-time = "2026-09-11T19:09:11.126Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/27/78a89b55b0904d222183164e079b4ca56208e94eff1d35ad1f1ad5be9b06/alembic-1.20.0-py3-none-any.whl", hash = "sha256:77eb101048d95f982c0353e9233404889dcd7a6fc244c107836c0e2fc9cf7d9d", size = 268719, upload-time = "2026-09-11T19:09:12.88Z" },
 ]
 
 [[package]]
@@ -283,6 +304,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e2/42/6cb20996733984c1f6661daeda3877990836c76c633c6c8879d39f7120eb/django-6.1.tar.gz", hash = "sha256:86a2aacd59b817e4d6ac2ebfe22356c58f66f7b24e503f71b7c2fead677ee48b", size = 11223034, upload-time = "2026-08-05T19:21:53.789Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/91/9c/ce847620134cfab903e75690c498af73b46abbede2912ea89bd76d5c1e76/django-6.1-py3-none-any.whl", hash = "sha256:6c132cd980c9392b06807d4ca52d72530d631dc65a85d9dacede00a780cefbbe", size = 8417399, upload-time = "2026-08-05T19:21:47.285Z" },
+]
+
+[[package]]
+name = "django-filter"
+version = "25.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2c/e4/465d2699cd388c0005fb8d6ae6709f239917c6d8790ac35719676fffdcf3/django_filter-25.2.tar.gz", hash = "sha256:760e984a931f4468d096f5541787efb8998c61217b73006163bf2f9523fe8f23", size = 143818, upload-time = "2025-10-05T09:51:31.521Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/40/6a02495c5658beb1f31eb09952d8aa12ef3c2a66342331ce3a35f7132439/django_filter-25.2-py3-none-any.whl", hash = "sha256:9c0f8609057309bba611062fe1b720b4a873652541192d232dd28970383633e3", size = 94145, upload-time = "2025-10-05T09:51:29.728Z" },
 ]
 
 [[package]]
@@ -660,6 +693,18 @@ wheels = [
 ]
 
 [[package]]
+name = "mako"
+version = "1.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markupsafe" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2a/12/b5fa2353e2754cd67fb9f83793fa48ff42c213a5da7e719869d2301f6ab8/mako-1.4.1.tar.gz", hash = "sha256:d7904710b662996425a21627710c4777c45053146942cf8a7aebf757c92b8c27", size = 410165, upload-time = "2026-08-05T06:10:56.611Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a5/54/12ed58d458474aaab5c3d180173e745a4fe131bb330370596876d19ff60f/mako-1.4.1-py3-none-any.whl", hash = "sha256:a359d9a94a541213958742b2698d0a7757bb83551767bc468a74b9905aba9617", size = 80010, upload-time = "2026-08-05T06:10:58.248Z" },
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -970,6 +1015,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyjwt"
+version = "2.14.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/af/c3/8a3b59c25070cc61dc517fbdfa5dc0904670c96f605cc69759dc09166b99/pyjwt-2.14.0.tar.gz", hash = "sha256:77283c83fb56ecf566a886c757a714bc83668e38156de2cce8263302f42e0b86", size = 113177, upload-time = "2026-09-11T13:11:54.638Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/97/672cb32ce0dfea44b740cb7b4f97038463b9cf7c0ead1aacf595572851d6/pyjwt-2.14.0-py3-none-any.whl", hash = "sha256:ad0cef71c756a56e74863c2919cf0985f72decbcfcb550ee2f422e7c62b5eedc", size = 32896, upload-time = "2026-09-11T13:11:53.409Z" },
+]
+
+[[package]]
 name = "pypika-tortoise"
 version = "0.6.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1088,6 +1142,11 @@ wheels = [
 ]
 
 [[package]]
+name = "sanka-code-migration"
+version = "0.1.0a3"
+source = { editable = "packages/sanka-code-migration" }
+
+[[package]]
 name = "sanka-connector-clickhouse"
 version = "0.1.0a14"
 source = { editable = "packages/sanka-connector-clickhouse" }
@@ -1161,7 +1220,7 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 
 [[package]]
 name = "sanka-drf-replay"
-version = "0.1.0a2"
+version = "0.1.0a4"
 source = { editable = "packages/sanka-drf-replay" }
 
 [[package]]
@@ -1177,32 +1236,77 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 
 [[package]]
 name = "sanka-extension-drf-to-fastapi"
-version = "0.1.0a13"
+version = "0.1.0a17"
 source = { editable = "packages/sanka-extension-drf-to-fastapi" }
 dependencies = [
+    { name = "sanka-code-migration" },
     { name = "sanka-drf-replay" },
     { name = "sanka-extension-sdk" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "sanka-code-migration", editable = "packages/sanka-code-migration" },
     { name = "sanka-drf-replay", editable = "packages/sanka-drf-replay" },
     { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
 ]
 
 [[package]]
 name = "sanka-extension-drf-to-flask"
-version = "0.1.0a7"
+version = "0.1.0a12"
 source = { editable = "packages/sanka-extension-drf-to-flask" }
 dependencies = [
+    { name = "sanka-code-migration" },
     { name = "sanka-drf-replay" },
     { name = "sanka-extension-sdk" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "sanka-code-migration", editable = "packages/sanka-code-migration" },
     { name = "sanka-drf-replay", editable = "packages/sanka-drf-replay" },
     { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+]
+
+[[package]]
+name = "sanka-extension-llm-to-jev"
+version = "0.1.0a1"
+source = { editable = "packages/sanka-extension-llm-to-jev" }
+dependencies = [
+    { name = "sanka-extension-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
+
+[[package]]
+name = "sanka-extension-python-to-golang"
+version = "0.1.0a2"
+source = { editable = "packages/sanka-extension-python-to-golang" }
+dependencies = [
+    { name = "sanka-extension-sdk" },
+    { name = "sanka-http-replay" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+    { name = "sanka-http-replay", editable = "packages/sanka-http-replay" },
+]
+
+[[package]]
+name = "sanka-extension-react-native-to-native"
+version = "0.1.0a1"
+source = { editable = "packages/sanka-extension-react-native-to-native" }
+dependencies = [
+    { name = "sanka-extension-sdk" },
+    { name = "sanka-ts-capture" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+    { name = "sanka-ts-capture", editable = "packages/sanka-ts-capture" },
 ]
 
 [[package]]
@@ -1217,6 +1321,23 @@ dependencies = [
 requires-dist = [{ name = "sanka-connector-sdk", editable = "packages/sanka-connector-sdk" }]
 
 [[package]]
+name = "sanka-extension-typescript-to-rust"
+version = "0.1.0a2"
+source = { editable = "packages/sanka-extension-typescript-to-rust" }
+dependencies = [
+    { name = "sanka-extension-sdk" },
+    { name = "sanka-http-replay" },
+    { name = "sanka-ts-capture" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+    { name = "sanka-http-replay", editable = "packages/sanka-http-replay" },
+    { name = "sanka-ts-capture", editable = "packages/sanka-ts-capture" },
+]
+
+[[package]]
 name = "sanka-extensions-workspace"
 version = "0.0.0"
 source = { virtual = "." }
@@ -1224,13 +1345,16 @@ source = { virtual = "." }
 [package.dev-dependencies]
 dev = [
     { name = "aiosqlite" },
+    { name = "alembic" },
     { name = "django" },
+    { name = "django-filter" },
     { name = "djangorestframework" },
     { name = "fastapi" },
     { name = "flask" },
     { name = "httpx" },
     { name = "mypy" },
     { name = "psycopg", extra = ["binary"] },
+    { name = "pyjwt" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pyyaml" },
@@ -1246,13 +1370,16 @@ dev = [
 [package.metadata.requires-dev]
 dev = [
     { name = "aiosqlite", specifier = ">=0.20,<1" },
+    { name = "alembic", specifier = ">=1.16,<2" },
     { name = "django", specifier = ">=5.2,<7" },
+    { name = "django-filter", specifier = ">=25.1,<26" },
     { name = "djangorestframework", specifier = ">=3.16,<4" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "flask", specifier = ">=3.1,<4" },
     { name = "httpx", specifier = ">=0.27,<1" },
     { name = "mypy", specifier = ">=1.14" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
+    { name = "pyjwt", specifier = ">=2.14,<3" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pyyaml", specifier = ">=6" },
@@ -1262,6 +1389,16 @@ dev = [
     { name = "types-pyyaml", specifier = ">=6" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30,<1" },
 ]
+
+[[package]]
+name = "sanka-http-replay"
+version = "0.1.0a2"
+source = { editable = "packages/sanka-http-replay" }
+
+[[package]]
+name = "sanka-ts-capture"
+version = "0.1.0a1"
+source = { editable = "packages/sanka-ts-capture" }
 
 [[package]]
 name = "sqlalchemy"

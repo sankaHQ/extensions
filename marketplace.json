@@ -2,6 +2,22 @@
   "schema_version": "sanka-marketplace/v1",
   "extensions": [
     {
+      "id": "sanka/react-native-to-native",
+      "manifest": "packages/sanka-extension-react-native-to-native/extension.json"
+    },
+    {
+      "id": "sanka/python-to-golang",
+      "manifest": "packages/sanka-extension-python-to-golang/extension.json"
+    },
+    {
+      "id": "sanka/typescript-to-rust",
+      "manifest": "packages/sanka-extension-typescript-to-rust/extension.json"
+    },
+    {
+      "id": "sanka/llm-to-jev",
+      "manifest": "packages/sanka-extension-llm-to-jev/extension.json"
+    },
+    {
       "id": "sanka/drf-to-fastapi",
       "manifest": "packages/sanka-extension-drf-to-fastapi/extension.json"
     },

@@ -1,0 +1,32 @@
+{
+  "recipe_id": "cross-department.sales-delivery-billing",
+  "input": {
+    "assignee_ids": [
+      "502",
+      "501"
+    ],
+    "won_stage": "Closed won"
+  },
+  "expected_configuration": {
+    "process": "sales_delivery_billing",
+    "settings": {
+      "assignee_ids": [
+        "502",
+        "501"
+      ],
+      "due_days": 7,
+      "won_stage": "Closed won",
+      "invoice_due_days": 30
+    }
+  },
+  "expected_node_ids": [
+    "cross-department-sales-delivery-billing/trigger",
+    "cross-department-sales-delivery-billing/prepare-sales-delivery-billing"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "delivery_completion_required": false,
+    "existing_bound_order": "preserve",
+    "existing_invoice": "preserve"
+  }
+}

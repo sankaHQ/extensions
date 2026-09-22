@@ -2,8 +2,115 @@
 
 An Apache-2.0 migration extension using `sanka-extension/v1`. It scans Django's
 resolved DRF routes, creates a deterministic reviewed plan, and emits a native
-Flask target plus ORM-only Django settings and a machine-readable gap inventory.
+Flask target and a machine-readable gap inventory. The existing Django ORM profile
+remains the default; `orm=sqlalchemy` selects independent database and schema ownership.
 It never imports the Sanka runtime or the FastAPI extension.
+
+## Standalone SQLAlchemy profile
+
+Set `orm` to `sqlalchemy` when planning. `generation=minimal` keeps the application
+compact, `generation=full` places it in a `backend` package, and `generation=auto`
+selects from captured application boundaries. Use `--extension-config` for profile
+settings the installed CLI does not expose as flags:
+
+```json
+{
+  "orm": "sqlalchemy",
+  "generation": "auto",
+  "database": {"dialect": "preserve", "schema_mode": "adopt-existing"},
+  "layers": {"services": "auto", "repositories": "auto"},
+  "completion_policy": "strict"
+}
+```
+
+The generated project owns a Flask application factory, synchronous SQLAlchemy
+sessions, model tables, explicit Alembic migrations, dependency pins, configuration
+example, and runnable database/factory tests. Importing or booting the app never
+creates a table or runs a migration. Models are captured independently of serializers,
+including fields omitted from the HTTP interface. SQLite and PostgreSQL are separate
+profiles; changing the database dialect is rejected.
+
+For an empty destination, run the generated Alembic baseline explicitly. For an
+existing destination, run its read-only `database.check_schema(engine)` first, then
+call `database.adopt_existing(engine, reviewed_schema_hash)` only after reviewing the
+schema hash. Adoption refuses mismatches and preserves data; it does not rerun Django
+data migrations. Unsupported schema, application hooks, or HTTP behavior block native
+generation instead of producing successful placeholders.
+
+`architecture.json` explains layout and layer decisions. `migration-inputs.json`
+records effective inputs; `generated-files.json` records generated content hashes.
+The same captured source, configuration, and pinned generator/dependencies produce
+the same files across checkout locations. Existing outputs and hand edits are never
+overwritten. The reviewed plan also binds the local output location, so its review
+hash intentionally differs when that location changes.
+
+The standalone profile currently recognizes JSON CRUD and generic views, Token/owner
+permissions, atomic nested writes, stock page-number/limit-offset/cursor pagination,
+search and ordering, bounded stock django-filter fields, and stock Common/Security/XFrame middleware. Recognized database
+delete policies execute in the request transaction. Each supported contract has
+source/target response and database-effect checks in the converter test suite.
+Token/owner, conditional records, pagination, filtering and nested-write fixtures also
+run against independent PostgreSQL schemas in CI. Built Flask and shared-helper wheels
+are installed and tested separately from their editable source packages. Generic `verify` replay supports SQLite and explicitly configured PostgreSQL
+with isolated seeded database clones; see the [replay configuration](../sanka-drf-replay/README.md#postgresql-replay).
+
+Stock `DjangoFilterBackend` supports qualified automatic scalar filters, including
+repeated parameters, CSV inputs and detail filtering. Custom filtersets, related/date
+filters and unsupported lookups remain blocking gaps. Filter errors preserve field
+order and source validation messages. JSON body-limit behavior is captured from the
+source parser. Enforced limits preserve the source error response without writes;
+a source parser that accepts the request does not acquire an invented rejection.
+
+Stock database sessions are supported when every migrated view uses exact
+`SessionAuthentication` with `IsAuthenticated`, the stock database session backend,
+JSON session serialization, timezone-aware expiry (`USE_TZ=True`), `ModelBackend`,
+and the captured session/auth/CSRF
+middleware. Existing signed sessions, key fallback rotation, expiry, CSRF tokens,
+Origin/HTTPS Referer checks and cookie effects are preserved by the qualified
+contract. Signing keys are explicit target environment inputs, never generated
+values. Login/logout endpoints are not invented. Mixed authentication policies,
+custom user lookup/hash behavior and unrepresented settings remain blocking gaps.
+
+| Authentication profile | Retained Django ORM | Standalone SQLAlchemy |
+| --- | --- | --- |
+| No authentication / AllowAny | Qualified stock ViewSets | Qualified JSON contracts |
+| Default Session then Basic, no middleware | Basic works; session cookies are inert | Blocking gap |
+| Token with captured owner/member permissions | Outside retained ViewSet scope | Qualified captured contracts |
+| Stock database session with IsAuthenticated and CSRF | Middleware remains a gap | Qualified bounded contract above |
+| Custom or combined authenticators | Only the documented APIView subset | Blocking gap |
+
+Explicit scalar validators whose limits, messages or error ordering cannot be
+represented block conversion. Native decimal fields with non-integer bounds,
+custom rounding, localization or normalized output also block conversion rather
+than silently changing validation or response values.
+
+Basic or combined authenticators, browsable HTML, multipart/form parsing, custom middleware,
+signals, arbitrary serializer hooks, and historical RunPython/RunSQL migrations remain
+blocking gaps in this profile. Custom view carryover supports the recognized
+conditional-response recipe or strict literal response transformations after the
+matching stock CRUD call. The latter can set ordinary response headers, choose a
+2xx status (except 204/205), and wrap `response.data` with JSON literals. PATCH
+preserves the source update/partial-update order; validation and permission errors
+bypass successful response transformations. Custom parent method chains,
+renderer-owned/transport headers, dynamic expressions, request mutation and arbitrary
+custom actions remain gaps. `USE_TZ=False` with
+automatic timestamp fields is also blocked until its whole request contract is qualified. Existing APIView/form conversions remain available in
+the Django ORM profile below. Selecting SQLAlchemy never silently drops these features.
+Source introspection imports application code; run scans only in a trusted source
+execution environment. Static inventory flags recognized raw SQL, network, email and storage operations,
+alongside lifecycle hooks and data migrations; it does not resolve arbitrary dynamic
+Python behavior and is not a sandbox for untrusted Python.
+
+Generated dependencies are resolved in checked-in `uv.lock` profiles and hash-locked
+pip requirements. The generated README includes environment setup, migration commands,
+factory tests and a production WSGI command. These runtime dependencies are installed
+in the destination project, independently of the extension's own environment.
+
+This profile is qualified by its explicit supported contracts, not by the size
+of an application. Run independent source/target scenarios and database-effect checks
+before cutover. A successful syntax or startup check is not production qualification.
+
+## Existing Django ORM profile
 
 This alpha converts recognized JSON APIView handlers, configuration-only
 APIView inheritance, and the stock ModelViewSet JSON scope described below. It preserves JSON parsing, isolated Django ORM modules,

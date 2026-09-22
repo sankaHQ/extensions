@@ -2,18 +2,57 @@
 """Public marketplace contract for runtime extension discovery."""
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import yaml
 
-RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a26/"
+RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/"
+NEW_RELEASE_PREFIX = RELEASE_PREFIX + "extensions-v0.1.0a31/"
 EXPECTED = {
+    "sanka/react-native-to-native": {
+        "kind": "migration",
+        "protocol_version": "sanka-extension/v1",
+        "distribution": {
+            "name": "sanka-extension-react-native-to-native",
+            "version": "0.1.0a1",
+            "executable": "sanka-extension-react-native-to-native",
+        },
+    },
+    "sanka/python-to-golang": {
+        "kind": "migration",
+        "protocol_version": "sanka-extension/v1",
+        "distribution": {
+            "name": "sanka-extension-python-to-golang",
+            "version": "0.1.0a2",
+            "executable": "sanka-extension-python-to-golang",
+        },
+    },
+    "sanka/typescript-to-rust": {
+        "kind": "migration",
+        "protocol_version": "sanka-extension/v1",
+        "distribution": {
+            "name": "sanka-extension-typescript-to-rust",
+            "version": "0.1.0a2",
+            "executable": "sanka-extension-typescript-to-rust",
+        },
+    },
+    "sanka/llm-to-jev": {
+        "kind": "migration",
+        "protocol_version": "sanka-extension/v1",
+        "distribution": {
+            "name": "sanka-extension-llm-to-jev",
+            "version": "0.1.0a1",
+            "executable": "sanka-extension-llm-to-jev",
+        },
+    },
     "sanka/drf-to-flask": {
         "kind": "migration",
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-flask",
-            "version": "0.1.0a7",
+            "version": "0.1.0a12",
             "executable": "sanka-extension-drf-to-flask",
         },
     },
@@ -22,7 +61,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-fastapi",
-            "version": "0.1.0a13",
+            "version": "0.1.0a17",
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },
@@ -89,14 +128,28 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
         expected = EXPECTED[item["id"]]
         assert manifest["schema_version"] == "sanka-extension-manifest/v2"
         assert manifest["id"] == item["id"]
-        assert manifest["runtime"] == {"sanka_cli": ">=0.2.0,<0.3"}
+        cli = "==0.2.12" if item["id"] == "sanka/llm-to-jev" else ">=0.2.0,<0.3"
+        if item["id"] in {
+            "sanka/react-native-to-native",
+            "sanka/python-to-golang",
+            "sanka/typescript-to-rust",
+        }:
+            cli = ">=0.2.12,<0.3"
+        assert manifest["runtime"] == {"sanka_cli": cli}
         assert manifest["kind"] == expected["kind"]
         assert manifest["protocol_version"] == expected["protocol_version"]
         assert manifest["distribution"] == expected["distribution"]
         if "providers" in expected:
             assert manifest["providers"] == expected["providers"]
         assert manifest["wheels"]
-        assert all(wheel["url"].startswith(RELEASE_PREFIX) for wheel in manifest["wheels"])
+        expected_prefix = NEW_RELEASE_PREFIX if expected["kind"] == "migration" else RELEASE_PREFIX
+        if item["id"] == "sanka/llm-to-jev":
+            expected_prefix = RELEASE_PREFIX + "llm-to-jev-v0.1.0a1/"
+        if item["id"] in {"sanka/python-to-golang", "sanka/typescript-to-rust"}:
+            expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a2/"
+        if item["id"] == "sanka/react-native-to-native":
+            expected_prefix = RELEASE_PREFIX + "mobile-converters-v0.1.0a1/"
+        assert all(wheel["url"].startswith(expected_prefix) for wheel in manifest["wheels"])
         assert all(len(wheel["sha256"]) == 64 for wheel in manifest["wheels"])
 
 
@@ -111,6 +164,10 @@ def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> No
         if line.startswith("cp packages/") and line.endswith(".json")
     ]
     assert destinations == [
+        "release-assets/sanka-extension-react-native-to-native.json",
+        "release-assets/sanka-extension-python-to-golang.json",
+        "release-assets/sanka-extension-typescript-to-rust.json",
+        "release-assets/sanka-extension-llm-to-jev.json",
         "release-assets/sanka-extension-drf-to-fastapi.json",
         "release-assets/sanka-extension-drf-to-flask.json",
         "release-assets/sanka-connector-markdown.json",
@@ -120,3 +177,25 @@ def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> No
         "release-assets/sanka-connector-clickhouse.json",
     ]
     assert len(destinations) == len(set(destinations))
+
+
+def test_release_workflow_only_accepts_current_candidate_tag() -> None:
+    workflow = yaml.safe_load(Path(".github/workflows/publish.yml").read_text())
+    guard = next(
+        step["run"]
+        for step in workflow["jobs"]["build"]["steps"]
+        if "GITHUB_REF_TYPE" in step.get("run", "")
+    )
+    tag = NEW_RELEASE_PREFIX.removeprefix(RELEASE_PREFIX).rstrip("/")
+    for ref_type, ref_name, allowed in [
+        ("tag", tag, True),
+        ("branch", tag, False),
+        ("tag", "extensions-v0.1.0a27", False),
+        ("branch", "main", False),
+    ]:
+        result = subprocess.run(
+            ["sh", "-c", guard],
+            env={**os.environ, "GITHUB_REF_TYPE": ref_type, "GITHUB_REF_NAME": ref_name},
+            check=False,
+        )
+        assert (result.returncode == 0) is allowed

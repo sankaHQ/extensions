@@ -7,6 +7,8 @@ import hashlib
 import io
 import json
 import shutil
+import subprocess
+import sys
 import tomllib
 import zipfile
 from pathlib import Path
@@ -15,10 +17,11 @@ import pytest
 
 from scripts import build_release
 from scripts.build_release import _prepare_output
-from scripts.check_release_artifacts import validate_release
+from scripts.check_release_artifacts import REQUIRED_PACKAGE_FILES, validate_release
 from scripts.update_marketplace_hashes import (
     MANIFEST_DEPENDENCIES,
     MANIFEST_WHEELS,
+    UPDATED_MANIFESTS,
     update_manifests,
 )
 
@@ -32,14 +35,14 @@ def test_hash_updater_records_each_manifest_dependency_closure(tmp_path: Path) -
         for name in names:
             _wheel(tmp_path, name)
 
-    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a26")
+    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a31")
 
-    assert set(manifests) == set(MANIFEST_WHEELS)
+    assert set(manifests) == UPDATED_MANIFESTS
     for package, payload in manifests.items():
         assert [wheel["name"] for wheel in payload["wheels"]] == list(MANIFEST_WHEELS[package])
         assert all(
             wheel["url"].startswith(
-                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a26/"
+                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a31/"
             )
             and len(wheel["sha256"]) == 64
             for wheel in payload["wheels"]
@@ -133,9 +136,9 @@ def test_hash_updater_rejects_an_incomplete_or_wrongly_tagged_wheel_set(tmp_path
     _wheel(tmp_path, "sanka_connector_sdk-0.1.0a12-py3-none-any.whl")
 
     with pytest.raises(RuntimeError, match="complete marketplace wheel set"):
+        update_manifests(tmp_path, release_tag="extensions-v0.1.0a31")
+    with pytest.raises(RuntimeError, match=r"extensions-v0\.1\.0a31"):
         update_manifests(tmp_path, release_tag="extensions-v0.1.0a26")
-    with pytest.raises(RuntimeError, match=r"extensions-v0\.1\.0a16"):
-        update_manifests(tmp_path, release_tag="extensions-v0.1.0a16")
 
 
 def test_build_release_cleanup_is_limited_to_known_wheels(tmp_path: Path) -> None:
@@ -172,6 +175,7 @@ def _metadata_wheel(
     filename: str,
     requirements: tuple[str, ...] = (),
     entry_points: str = "",
+    members: tuple[str, ...] = (),
 ) -> Path:
     path = directory / filename
     metadata = ["Metadata-Version: 2.4", f"Name: {name}", f"Version: {version}"]
@@ -181,6 +185,8 @@ def _metadata_wheel(
         archive.writestr(f"{dist_info}/METADATA", "\n".join(metadata) + "\n")
         if entry_points:
             archive.writestr(f"{dist_info}/entry_points.txt", entry_points)
+        for member in members:
+            archive.writestr(member, "")
     return path
 
 
@@ -198,18 +204,27 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
     release = root / "dist"
     release.mkdir(parents=True)
     shutil.copy2(Path("marketplace.json"), root / "marketplace.json")
+    jev_path = Path("packages/sanka-extension-llm-to-jev")
+    (root / jev_path).mkdir(parents=True)
+    for name in ("extension.json", "extension.template.json"):
+        shutil.copy2(jev_path / name, root / jev_path / name)
     packages = {
-        "sanka-drf-replay": ("0.1.0a2", "sanka_drf_replay-0.1.0a2-py3-none-any.whl", ""),
+        "sanka-drf-replay": ("0.1.0a4", "sanka_drf_replay-0.1.0a4-py3-none-any.whl", ""),
+        "sanka-code-migration": (
+            "0.1.0a3",
+            "sanka_code_migration-0.1.0a3-py3-none-any.whl",
+            "",
+        ),
         "sanka-extension-drf-to-flask": (
-            "0.1.0a7",
-            "sanka_extension_drf_to_flask-0.1.0a7-py3-none-any.whl",
+            "0.1.0a12",
+            "sanka_extension_drf_to_flask-0.1.0a12-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-flask = sanka_extension_drf_to_flask.__main__:main\n",
         ),
         "sanka-extension-sdk": ("0.1.0a4", "sanka_extension_sdk-0.1.0a4-py3-none-any.whl", ""),
         "sanka-extension-drf-to-fastapi": (
-            "0.1.0a12",
-            "sanka_extension_drf_to_fastapi-0.1.0a13-py3-none-any.whl",
+            "0.1.0a17",
+            "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-fastapi = sanka_extension_drf_to_fastapi.__main__:main\n",
         ),
@@ -247,7 +262,11 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
             f'[project]\nname = "{package}"\nversion = "{version}"\n'
         )
         requirements = (
-            ("sanka-extension-sdk==0.1.0a4", "sanka-drf-replay==0.1.0a2")
+            (
+                "sanka-code-migration==0.1.0a3",
+                "sanka-drf-replay==0.1.0a4",
+                "sanka-extension-sdk==0.1.0a4",
+            )
             if package in {"sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask"}
             else ("sanka-connector-sdk==0.1.0a12",)
             if package == "sanka-extension-sdk"
@@ -262,6 +281,7 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
             filename=filename,
             requirements=requirements,
             entry_points=entry_points,
+            members=tuple(sorted(REQUIRED_PACKAGE_FILES.get(package, set()))),
         )
     for wheel in build_release.LOCKED_DEPENDENCY_WHEELS:
         _wheel(release, wheel.name)
@@ -278,11 +298,52 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
 
 
 @pytest.mark.parametrize(
+    ("distribution", "version"),
+    [
+        ("sanka-extension-drf-to-fastapi", "0.1.0a17"),
+        ("sanka-extension-drf-to-flask", "0.1.0a12"),
+    ],
+)
+def test_converter_dependency_closures_resolve_without_an_index(
+    tmp_path: Path, distribution: str, version: str
+) -> None:
+    _, release = _release_snapshot(tmp_path)
+
+    result = subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--dry-run",
+            "--no-index",
+            "--no-python-downloads",
+            "--find-links",
+            str(release),
+            "--target",
+            str(tmp_path / "install"),
+            "--python",
+            sys.executable,
+            f"{distribution}=={version}",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "sanka-code-migration==0.1.0a3" in result.stderr
+    assert "sanka-drf-replay==0.1.0a4" in result.stderr
+    assert "sanka-extension-sdk==0.1.0a4" in result.stderr
+
+
+@pytest.mark.parametrize(
     ("case", "expected"),
     [
         ("connector_entry_point", "exact connector entry point"),
         ("dependency", "does not depend on the exact Extension SDK"),
         ("hash", "manifest hash does not match release artifact"),
+        ("package_data", "missing required package data"),
         ("path", "outside the marketplace snapshot"),
     ],
 )
@@ -316,6 +377,25 @@ def test_release_validator_rejects_invalid_release_boundaries(
         manifest = json.loads(manifest_path.read_text())
         manifest["wheels"][1]["sha256"] = "0" * 64
         manifest_path.write_text(json.dumps(manifest))
+    elif case == "package_data":
+        fastapi = release / "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl"
+        _metadata_wheel(
+            release,
+            name="sanka-extension-drf-to-fastapi",
+            version="0.1.0a17",
+            filename=fastapi.name,
+            requirements=(
+                "sanka-code-migration==0.1.0a3",
+                "sanka-drf-replay==0.1.0a4",
+                "sanka-extension-sdk==0.1.0a4",
+            ),
+            entry_points=(
+                "[console_scripts]\n"
+                "sanka-extension-drf-to-fastapi = "
+                "sanka_extension_drf_to_fastapi.__main__:main\n"
+            ),
+        )
+        _set_manifest_hash(root, "sanka-extension-drf-to-fastapi", fastapi)
     else:
         catalog_path = root / "marketplace.json"
         catalog = json.loads(catalog_path.read_text())
@@ -371,3 +451,15 @@ def test_dependency_cache_does_not_reuse_symlinks(
     build_release.download_locked_wheel(tmp_path, wheel)
     assert not target.is_symlink()
     assert source.read_bytes() == target.read_bytes() == content
+
+
+def test_manifest_wheel_builders_are_exactly_pinned() -> None:
+    # Both release targets compare immutable wheel hashes, including WHEEL metadata.
+    for package in (*build_release.MARKETPLACE_PACKAGES, "sanka-extension-business-flows"):
+        project = tomllib.loads(
+            (build_release.ROOT / "packages" / package / "pyproject.toml").read_text()
+        )
+        requirements = project["build-system"]["requires"]
+        assert len(requirements) == 1
+        assert requirements[0].startswith("hatchling=="), package
+        assert all(part.isdigit() for part in requirements[0].split("==")[1].split("."))

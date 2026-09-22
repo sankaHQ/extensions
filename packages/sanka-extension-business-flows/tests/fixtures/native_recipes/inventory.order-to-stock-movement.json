@@ -1,0 +1,21 @@
+{
+  "recipe_id": "inventory.order-to-stock-movement",
+  "input": {},
+  "expected_configuration": {
+    "conversion": "order_to_stock_out",
+    "settings": {
+      "rotate_inventory": true,
+      "subtract_from_components": false,
+      "require_all_components_in_stock": true
+    }
+  },
+  "expected_node_ids": [
+    "inventory-order-to-stock-movement/trigger",
+    "inventory-order-to-stock-movement/stock-out"
+  ],
+  "policy_checks": {
+    "construction": "inactive",
+    "result": "stock_out",
+    "missing_inventory": "do_not_create"
+  }
+}

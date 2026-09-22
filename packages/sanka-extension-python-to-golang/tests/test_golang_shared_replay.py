@@ -1,0 +1,396 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Shared write replay checks, including real source/Go/database acceptance."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import uuid
+from collections.abc import Callable
+from itertools import pairwise
+from pathlib import Path
+
+import pytest
+from sanka_extension_python_to_golang.capture import SOURCES, TARGETS, capture, configuration
+from sanka_extension_python_to_golang.replay import _client_lifecycle, replay
+from sanka_extension_python_to_golang.write_replay import (
+    SOURCE_WRITES,
+    normalize_bodies,
+    scenarios_for,
+    write_probe,
+)
+from test_golang_async_persistence import async_source, factory_source, injected_source
+from test_golang_async_reads import async_read_backend, read_scenarios
+from test_golang_drf_validation import drf_field_serializer_source, drf_serializer_source
+from test_golang_routing import group_backend
+from test_golang_schema import generate, schema_dsn
+from test_golang_validation import captured_source, native_fastapi_schema_source, schema_source
+from test_golang_write_parity import SCENARIOS, requires_database
+
+
+def test_shared_write_contract_and_guards(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = captured_source(tmp_path, "fastapi")
+    scenarios = scenarios_for(tmp_path, captured)
+    assert scenarios == scenarios_for(tmp_path, captured)
+    assert any(s["method"] == "PATCH" for s in scenarios)
+    assert any(s["id"].endswith("create.after") for s in scenarios)
+    compile(_client_lifecycle(SOURCE_WRITES), "source-probe", "exec")
+    monkeypatch.delenv("SANKA_GO_TARGET_TEST_DATABASE_URL", raising=False)
+    with pytest.raises(ValueError, match="resettable PostgreSQL fixtures"):
+        replay(tmp_path, tmp_path / "missing", captured, "verify")
+    captured["configuration"]["schema_mode"] = "adopt-existing"
+    with pytest.raises(ValueError, match="schema_mode=empty"):
+        replay(tmp_path, tmp_path / "missing", captured, "verify")
+    captured["routes"][0]["write"]["constraints"] = {"count": {"ge": 10}}
+    with pytest.raises(ValueError, match=r"explicit sanka-verify\.json"):
+        scenarios_for(tmp_path, captured)
+    (tmp_path / "sanka-verify.json").write_text(
+        json.dumps(
+            {
+                "scenarios": [
+                    {
+                        "id": "create",
+                        "method": "POST",
+                        "path": "/widgets",
+                        "body": {},
+                        "expected_source_status": 400,
+                    }
+                ]
+            }
+        )
+    )
+    assert scenarios_for(tmp_path, captured)[0]["expected_status"] == 400
+
+
+def test_bigint_body_normalization_keeps_errors_and_types(tmp_path: Path) -> None:
+    captured = captured_source(tmp_path, "fastapi")
+    observed = [
+        {
+            "method": "POST",
+            "path": "/widgets",
+            "status": 201,
+            "body": {"id": 9223372036854775807, "count": 3},
+        }
+    ]
+    normalize_bodies(observed, captured)
+    assert observed[0]["body"] == {"id": "9223372036854775807", "count": 3}
+    errors = [{"method": "POST", "path": "/widgets", "status": 400, "body": {"id": 2}}]
+    normalize_bodies(errors, captured)
+    assert errors[0]["body"]["id"] == 2
+
+
+def test_native_validation_requires_explicit_scenarios(tmp_path: Path) -> None:
+    captured = captured_source(tmp_path, "fastapi", text=native_fastapi_schema_source())
+    with pytest.raises(ValueError, match=r"explicit sanka-verify\.json"):
+        scenarios_for(tmp_path, captured)
+
+
+@pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="requires qualified Go toolchain")
+@pytest.mark.parametrize("target", TARGETS)
+def test_shared_probe_compiles(tmp_path: Path, target: str) -> None:
+    output = generate(tmp_path, "fastapi", target, app_source=schema_source("fastapi"))
+    captured = capture(
+        tmp_path,
+        configuration(
+            {"source_framework": "fastapi", "target_framework": target, "database_layer": "pgx"}
+        ),
+    )
+    (output / "sanka_contract_probe_test.go").write_text(write_probe(captured))
+    result = subprocess.run(
+        ["go", "test", "-mod=readonly", "-p=2", "-run", "^$", "./..."],
+        cwd=output,
+        env=os.environ | {"GOTOOLCHAIN": "local", "GOWORK": "off", "GOMAXPROCS": "2"},
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def prepare_write_fixture(root: Path, framework: str, target: str) -> tuple[Path, dict]:
+    cases = [
+        {
+            "id": f"step{index}",
+            "method": case["method"],
+            "path": case["path"],
+            "expected_status": case["status"],
+            **({"body": case["body"]} if "body" in case else {}),
+        }
+        for index, case in enumerate(SCENARIOS)
+    ]
+    (root / "sanka-verify.json").write_text(
+        json.dumps({"schema": "sanka.http-scenarios/v1", "scenarios": cases})
+    )
+    source = drf_serializer_source() if framework == "drf" else schema_source(framework)
+    output = generate(root, framework, target, app_source=group_backend(source, framework))
+    captured = capture(
+        root,
+        configuration(
+            {"source_framework": framework, "target_framework": target, "database_layer": "pgx"}
+        ),
+    )
+    return output, captured
+
+
+def test_write_fixture_capture_is_stable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    output, captured = prepare_write_fixture(tmp_path, "fastapi", "fiber")
+    assert capture(tmp_path, captured["configuration"]) == captured
+    scenarios = json.loads((tmp_path / "sanka-verify.json").read_text())
+    scenarios["scenarios"][0]["id"] = "changed-after-capture"
+    (tmp_path / "sanka-verify.json").write_text(json.dumps(scenarios))
+    monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", "postgresql://fixture@localhost/target")
+    with pytest.raises(ValueError, match="source changed before replay"):
+        replay(tmp_path, output, captured, "test")
+
+
+@requires_database
+@pytest.mark.parametrize("framework", SOURCES)
+@pytest.mark.parametrize("target", TARGETS)
+def test_public_write_verify(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, framework: str, target: str
+) -> None:
+    import psycopg
+    from psycopg import sql
+
+    output, captured = prepare_write_fixture(tmp_path, framework, target)
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    created = []
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        try:
+            for _ in range(2):
+                name = "go_shared_" + uuid.uuid4().hex
+                admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(name)))
+                created.append(name)
+            source_url, target_url = [schema_dsn(dsn, name) for name in created]
+            if framework != "drf":
+                source_url = source_url.replace("postgresql://", "postgresql+psycopg://", 1)
+            monkeypatch.setenv("SANKA_GO_SOURCE_TEST_DATABASE_URL", source_url)
+            monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", target_url)
+            report = replay(tmp_path, output, captured, "verify")
+            assert report["ok"], report["steps"]
+            assert report["candidate"] == report["source"]
+            assert report["candidate"][-1]["sequences"]["widgets"][0] == "2"
+            assert report["complete_backend"] is False
+            # Replaying resets both populated fixtures, including identity state.
+            if framework == "fastapi" and target == "fiber":
+                separator = "&" if "?" in target_url else "?"
+                alias = (
+                    target_url.replace("postgresql://", "postgresql+psycopg://", 1)
+                    + separator
+                    + "application_name=source-alias"
+                )
+                monkeypatch.setenv("SANKA_GO_SOURCE_TEST_DATABASE_URL", alias)
+                with pytest.raises(ValueError, match="same database schema"):
+                    replay(tmp_path, output, captured, "verify")
+                with psycopg.connect(target_url) as connection:
+                    assert connection.execute("SELECT count(*) FROM widgets").fetchone()[0] == 1
+                monkeypatch.setenv("SANKA_GO_SOURCE_TEST_DATABASE_URL", source_url)
+                repeated = replay(tmp_path, output, captured, "verify")
+                assert repeated["candidate"] == report["candidate"]
+                # Keep HTTP output identical while changing the persisted row.
+                app = output / "app.go"
+                app.write_text(
+                    app.read_text().replace(
+                        "return saved, err",
+                        "if err == nil { _, err = pool.Exec(ctx, "
+                        "\"UPDATE widgets SET note='tampered'\") }; return saved, err",
+                    )
+                )
+                changed = replay(tmp_path, output, captured, "verify")
+                assert not changed["ok"]
+                assert any(
+                    "$.tables" in problem
+                    for step in changed["steps"]
+                    for problem in step["problems"]
+                )
+        finally:
+            for name in created:
+                admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
+
+
+@requires_database
+@pytest.mark.parametrize(
+    ("framework", "app_source", "invalid_status"),
+    [
+        ("fastapi", native_fastapi_schema_source, 422),
+        ("fastapi", async_source, 422),
+        ("fastapi", lambda: async_source(True), 422),
+        ("fastapi", lambda: injected_source("direct"), 422),
+        ("fastapi", injected_source, 422),
+        ("fastapi", lambda: injected_source("class"), 422),
+        ("fastapi", lambda: factory_source("direct", "default"), 422),
+        ("fastapi", lambda: factory_source("function", "inline"), 422),
+        ("fastapi", factory_source, 422),
+        ("drf", drf_field_serializer_source, 400),
+    ],
+)
+@pytest.mark.parametrize("target", TARGETS)
+def test_native_validation_public_write_verify(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    framework: str,
+    app_source: Callable[[], str],
+    invalid_status: int,
+    target: str,
+) -> None:
+    import psycopg
+    from psycopg import sql
+    from test_golang_schema import generate
+
+    scenarios = [
+        {
+            "id": "invalid",
+            "method": "POST",
+            "path": "/widgets",
+            "body": {},
+            "expected_status": invalid_status,
+        },
+        {
+            "id": "create",
+            "method": "POST",
+            "path": "/widgets",
+            "body": {"name": "alpha", "count": "7", "enabled": "true", "extra": 1},
+            "expected_status": 201,
+        },
+        {
+            "id": "patch",
+            "method": "PATCH",
+            "path": "/widgets/1",
+            "body": {"count": "9", "enabled": "false", "extra": 1},
+            "expected_status": 200,
+        },
+        {
+            "id": "replace",
+            "method": "PUT",
+            "path": "/widgets/1",
+            "body": {"name": "beta", "count": 2.0, "enabled": 1},
+            "expected_status": 200,
+        },
+        {
+            "id": "empty-patch",
+            "method": "PATCH",
+            "path": "/widgets/1",
+            "body": {},
+            "expected_status": 200,
+        },
+        {
+            "id": "null-and-false",
+            "method": "PATCH",
+            "path": "/widgets/1",
+            "body": {"note": None, "enabled": False, "count": 0},
+            "expected_status": 200,
+        },
+        {
+            "id": "invalid-null",
+            "method": "PATCH",
+            "path": "/widgets/1",
+            "body": {"name": None},
+            "expected_status": invalid_status,
+        },
+        {"id": "delete", "method": "DELETE", "path": "/widgets/1", "expected_status": 204},
+        {"id": "delete-again", "method": "DELETE", "path": "/widgets/1", "expected_status": 404},
+        {
+            "id": "create-after",
+            "method": "POST",
+            "path": "/widgets",
+            "body": {"name": "gamma", "count": "3.0", "enabled": "no"},
+            "expected_status": 201,
+        },
+    ]
+    (tmp_path / "sanka-verify.json").write_text(
+        json.dumps({"schema": "sanka.http-scenarios/v1", "scenarios": scenarios})
+    )
+    output = generate(tmp_path, framework, target, app_source=app_source())
+    captured = capture(
+        tmp_path,
+        configuration(
+            {
+                "source_framework": framework,
+                "target_framework": target,
+                "database_layer": "pgx",
+            }
+        ),
+    )
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    created = []
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        try:
+            for _ in range(2):
+                name = "go_native_" + uuid.uuid4().hex
+                admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(name)))
+                created.append(name)
+            source_url, target_url = [schema_dsn(dsn, name) for name in created]
+            if framework != "drf":
+                source_url = source_url.replace("postgresql://", "postgresql+psycopg://", 1)
+            monkeypatch.setenv("SANKA_GO_SOURCE_TEST_DATABASE_URL", source_url)
+            monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", target_url)
+            report = replay(tmp_path, output, captured, "verify")
+            assert report["ok"], report["steps"]
+            assert report["candidate"] == report["source"]
+            assert report["candidate"][-1]["sequences"]["widgets"] == ["2", True]
+        finally:
+            for name in created:
+                admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
+
+
+@requires_database
+@pytest.mark.parametrize("style", ["owned", "function", "class", "factory", "packaged"])
+@pytest.mark.parametrize("target", TARGETS)
+def test_async_reads_and_pagination_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, style: str, target: str
+) -> None:
+    import psycopg
+    from psycopg import sql
+
+    scenarios = read_scenarios()
+    (tmp_path / "sanka-verify.json").write_text(
+        json.dumps({"schema": "sanka.http-scenarios/v1", "scenarios": scenarios})
+    )
+    if style == "packaged":
+        from test_golang_project import packaged_backend
+
+        scenarios = [dict(case, path="/api/backend/v1" + case["path"]) for case in scenarios]
+        (tmp_path / "sanka-verify.json").write_text(
+            json.dumps({"schema": "sanka.http-scenarios/v1", "scenarios": scenarios})
+        )
+        # Scenarios are part of the source digest: plan after the final scenario document.
+        output, captured = packaged_backend(tmp_path, target)
+    else:
+        output = generate(tmp_path, "fastapi", target, app_source=async_read_backend(style))
+        captured = capture(
+            tmp_path,
+            configuration(
+                {
+                    "source_framework": "fastapi",
+                    "target_framework": target,
+                    "database_layer": "pgx",
+                }
+            ),
+        )
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    created = []
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        try:
+            for _ in range(2):
+                name = "go_reads_" + uuid.uuid4().hex
+                admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(name)))
+                created.append(name)
+            source_url, target_url = [schema_dsn(dsn, name) for name in created]
+            monkeypatch.setenv(
+                "SANKA_GO_SOURCE_TEST_DATABASE_URL",
+                source_url.replace("postgresql://", "postgresql+psycopg://", 1),
+            )
+            monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", target_url)
+            report = replay(tmp_path, output, captured, "verify")
+            assert report["ok"], report["steps"]
+            assert report["candidate"] == report["source"]
+            observed = report["candidate"]
+            for previous, current in pairwise(observed):
+                if current["method"] == "GET":
+                    assert current["tables"] == previous["tables"]
+                    assert current["sequences"] == previous["sequences"]
+            assert observed[-1]["body"][0]["id"] == "3"
+        finally:
+            for name in created:
+                admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
