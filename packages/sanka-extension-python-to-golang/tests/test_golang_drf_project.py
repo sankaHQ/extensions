@@ -379,7 +379,7 @@ def test_conventional_drf_capture(tmp_path, target):
         (
             "orders/views.py",
             "queryset = Order.objects.all()",
-            "queryset = Order.objects.filter(status='paid')",
+            "queryset = Order.objects.filter(status__contains='paid')",
         ),
         ("orders/serializers.py", "return order", "order.memo = 'changed'\n        return order"),
         (

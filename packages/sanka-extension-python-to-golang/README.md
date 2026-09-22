@@ -1061,6 +1061,22 @@ encoding error. The qualification runner sets this; JSON values round-trip uncha
 The marketplace listener and disposable PostgreSQL schemas run only in the explicitly
 enabled qualification job. No original source tests or production application are executed.
 
+The same installed-wheel matrix includes composed DRF, Flask and sync/async FastAPI
+projects with signed identity, read/write permissions, response-header hooks, related
+models, filtered/paginated reads and tenant-guarded transaction services in separate
+repository/service modules. Source policy is preserved per operation; this does not
+invent tenant restrictions for source routes that do not declare them. Denied writes,
+rollback, null/absent updates and response headers are compared against the source.
+Native authentication can compose with literal response-header hooks: Flask
+`after_request`, FastAPI response-only HTTP middleware, and DRF response middleware
+decorating every captured view. Hook order is retained; arbitrary side effects block.
+
+Process qualification additionally starts the compiled generated application on each
+router, checks invalid configuration and unavailable-database failures without exposing
+credentials, then verifies SIGTERM drains an in-flight database request and closes
+the pool. Transaction cancellation is checked separately with explicit cancelled and
+expired contexts; client-disconnect cancellation is not implied by graceful shutdown.
+
 Boundary probes separately verify that accepted extreme timestamps and PostgreSQL-invalid
 JSON preserve lookup ordering and committed rows/sequences. These probes qualify storage
 behavior, not parity of framework-specific unhandled-500 response bodies.
@@ -1081,7 +1097,7 @@ pgx and Goose on all four routers. It captures string choices/defaults, integer,
 boolean and decimal fields, unique fields, cascade foreign keys, and one explicit
 nested serializer. Nested writes require the captured atomic parent/children
 create and aggregate-limit rollback recipe; updates preserve the captured nested
-ignore behavior. Unknown settings, hooks, queryset overrides and schema drift
+ignore behavior. Unknown settings, hooks, queryset behavior and schema drift
 remain blockers. One initial schema migration must match the model declarations.
 Each app requires one initial schema migration; explicit cross-app dependencies and
 CASCADE foreign keys are checked against the model declarations. Module-qualified
@@ -1089,6 +1105,15 @@ model and serializer identities distinguish equal class names across apps. Liter
 nested URL includes retain declaration order; duplicate routes and import/include
 cycles block generation. The standard `main()` startup wrapper and explicit import
 aliases are supported without executing source code during scan or plan.
+
+ViewSets also accept literal, exact scalar `queryset.filter(...)` predicates,
+stock `OrderingFilter` with explicit scalar `ordering_fields`, and stock
+`LimitOffsetPagination` with an optional static `PAGE_SIZE` (1–1000). Filters apply
+to detail lookups before updates/deletes as well as lists. Pagination uses SQL
+COUNT/LIMIT/OFFSET and preserves DRF response links, repeated query parameters and
+invalid-parameter defaults. It adds no service layer. Custom filter/pagination
+classes, relationship traversal, search/regex backends and random ordering remain
+blockers. Database-overflow pagination errors remain outside JSON error-body parity.
 
 The executable contract is in `tests/test_golang_drf_project.py`. Executable
 annotations, writable identity overrides, nested uniqueness validators, and

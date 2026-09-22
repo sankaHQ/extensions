@@ -245,6 +245,7 @@ def normalize_native_security(
         value.values = [ast.Constant("") for _ in value.values]
     if not routes:
         raise ValueError("unused native authentication policy")
+    headers = _response_headers(tree, framework)
     tree.body = [n for n in tree.body if n not in consumed]
     referenced = {
         n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
@@ -262,8 +263,108 @@ def normalize_native_security(
         "native": True,
         "scope": "application" if framework == "flask" else "views",
         "error_key": "error" if framework == "flask" else "detail",
-        "success_headers": {},
-        "denied_headers": {},
+        "success_headers": headers,
+        "denied_headers": headers,
         "projections": projections,
         "receivers": receivers,
     }
+
+
+def _response_headers(tree: ast.Module, framework: str) -> dict[str, str]:
+    """Native authentication runs inside these response-only wrappers."""
+    from .security import _headers, _same, _signature
+
+    hooks: list[ast.stmt] = []
+    headers: dict[str, str] = {}
+    for node in tree.body:
+        body = None
+        if framework == "drf" and isinstance(node, ast.ClassDef):
+            if (
+                node.bases
+                or node.keywords
+                or node.decorator_list
+                or node.type_params
+                or len(node.body) != 2
+            ):
+                continue
+            init, response = node.body
+            if not (
+                isinstance(init, ast.FunctionDef)
+                and isinstance(response, ast.FunctionDef)
+                and init.name == "__init__"
+                and response.name == "process_response"
+                and not init.decorator_list
+                and not response.decorator_list
+                and _signature(init, "self, get_response")
+                and _signature(response, "self, request, response")
+                and _same(init.body, ast.parse("self.get_response = get_response").body)
+                and response.body
+                and ast.unparse(response.body[-1]) == "return response"
+            ):
+                continue
+            body = response.body[:-1]
+            required = ("django.utils.decorators", "decorator_from_middleware")
+            imported = [
+                i
+                for i, n in enumerate(tree.body)
+                if isinstance(n, ast.ImportFrom)
+                and not n.level
+                and n.module == required[0]
+                and any(a.name == required[1] and a.asname is None for a in n.names)
+            ]
+            if len(imported) != 1:
+                raise ValueError("response middleware requires its explicit decorator import")
+            count = 0
+            for view in tree.body:
+                if not isinstance(view, ast.FunctionDef) or not any(
+                    ast.unparse(d).startswith("api_view(") for d in view.decorator_list
+                ):
+                    continue
+                wanted = f"decorator_from_middleware({node.name})"
+                if (
+                    not view.decorator_list
+                    or ast.unparse(view.decorator_list[0]) != wanted
+                    or tree.body.index(view) <= max(imported[0], tree.body.index(node))
+                ):
+                    raise ValueError(
+                        "response middleware must wrap every DRF view before authentication"
+                    )
+                view.decorator_list.pop(0)
+                count += 1
+            if not count:
+                raise ValueError("unused response middleware")
+        elif (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and len(node.decorator_list) == 1
+        ):
+            decorator = ast.unparse(node.decorator_list[0])
+            if framework == "flask" and decorator == "app.after_request":
+                if (
+                    not _signature(node, "response")
+                    or ast.unparse(node.body[-1]) != "return response"
+                ):
+                    raise ValueError("unqualified native response hook")
+                body = node.body[:-1]
+            elif framework == "fastapi" and decorator == "app.middleware('http')":
+                if (
+                    not _signature(node, "request: Request, call_next", asynchronous=True)
+                    or ast.unparse(node.body[0]) != "response = await call_next(request)"
+                    or ast.unparse(node.body[-1]) != "return response"
+                ):
+                    raise ValueError(
+                        "native authentication only composes with response-only middleware"
+                    )
+                body = node.body[1:-1]
+        if body is not None:
+            hooks.append(node)
+            current = _headers(body, framework)
+            # Flask reverses registration; accepted DRF decorators unwind from
+            # inner to outer. FastAPI's newest middleware writes its headers last.
+            headers = headers | current if framework == "fastapi" else current | headers
+    tree.body = [n for n in tree.body if n not in hooks]
+    if framework == "drf" and hooks:
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom) and node.module == "django.utils.decorators":
+                node.names = [a for a in node.names if a.name != "decorator_from_middleware"]
+        tree.body = [n for n in tree.body if not isinstance(n, ast.ImportFrom) or n.names]
+    return headers

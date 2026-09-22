@@ -110,8 +110,16 @@ if __name__ == "__main__":
         raise ValueError("DEBUG must be static")
     if _literal(values["MIDDLEWARE"]) != []:
         raise ValueError("custom Django middleware requires capture")
-    if _literal(values["REST_FRAMEWORK"]) != {"UNAUTHENTICATED_USER": None}:
+    rest = _literal(values["REST_FRAMEWORK"])
+    if (
+        not isinstance(rest, dict)
+        or set(rest) - {"UNAUTHENTICATED_USER", "PAGE_SIZE"}
+        or rest.get("UNAUTHENTICATED_USER", False) is not None
+    ):
         raise ValueError("DRF settings require separate capture")
+    page_size = rest.get("PAGE_SIZE")
+    if page_size is not None and (type(page_size) is not int or not 0 < page_size <= 1000):
+        raise ValueError("PAGE_SIZE must be a positive integer up to 1000")
     if _literal(values["USE_TZ"]) is not True or _literal(values["TIME_ZONE"]) != "UTC":
         raise ValueError("only explicit UTC settings are qualified")
     auto = _literal(values["DEFAULT_AUTO_FIELD"])
@@ -207,6 +215,7 @@ if __name__ == "__main__":
             "hosts": hosts,
             "database": database,
             "secret_environment": secret_environment,
+            "page_size": page_size,
         },
         {"manage.py", filename},
     )
@@ -247,6 +256,8 @@ def capture_project(
             "django.db": {"models": "models", "transaction": "transaction"},
             "rest_framework": {"serializers": "serializers"},
             "rest_framework.viewsets": {"ModelViewSet": "ModelViewSet"},
+            "rest_framework.filters": {"OrderingFilter": "OrderingFilter"},
+            "rest_framework.pagination": {"LimitOffsetPagination": "LimitOffsetPagination"},
         }
         for app in apps:
             for role in ("models", "serializers", "views"):
@@ -391,21 +402,28 @@ def capture_project(
                 raise ValueError("duplicate router view")
             used.add(view_name)
             attrs = _assignments(views[view_name].body)
-            if set(attrs) != {"queryset", "serializer_class"} or not isinstance(
-                attrs["serializer_class"], ast.Name
-            ):
+            if set(attrs) - {
+                "queryset",
+                "serializer_class",
+                "filter_backends",
+                "ordering_fields",
+                "ordering",
+                "pagination_class",
+            } or not isinstance(attrs.get("serializer_class"), ast.Name):
                 raise ValueError("viewset overrides require capture")
-            serializer_name = attrs["serializer_class"].id
+            serializer_node = attrs["serializer_class"]
+            assert isinstance(serializer_node, ast.Name)
+            serializer_name = serializer_node.id
             if serializer_name not in serializers:
                 raise ValueError("unresolved serializer")
             contract = _serializer(serializers[serializer_name], model_map, serializers)
-            if ast.unparse(attrs["queryset"]) != contract["model"] + ".objects.all()":
-                raise ValueError("viewset queryset must be the complete captured model")
+            query = _view_query(attrs, model_map[contract["model"]], settings["page_size"])
             contracts.append(
                 {
                     "path": registration["path"],
                     "basename": registration["basename"],
                     "serializer": contract,
+                    "query": query,
                 }
             )
         if (
@@ -489,6 +507,67 @@ def capture_project(
         result["gaps"] = ["DRF project: " + str(error)]
         result["generation_ready"] = False
     return result
+
+
+def _view_query(
+    attrs: dict[str, ast.expr], model: dict[str, Any], page_size: int | None
+) -> dict[str, Any]:
+    fields = {f["name"]: f for f in model["fields"]}
+    node = attrs.get("queryset")
+    if not isinstance(node, ast.Call) or node.args:
+        raise ValueError("queryset requires all() or exact scalar filter()")
+    filters = {}
+    if ast.unparse(node.func) == model["name"] + ".objects.filter":
+        for keyword in node.keywords:
+            if keyword.arg not in fields or keyword.arg in filters:
+                raise ValueError("queryset filter requires distinct model fields")
+            value = _literal(keyword.value)
+            field = fields[keyword.arg]
+            kind = field["go_type"]
+            if not (
+                (kind == "string" and type(value) is str)
+                or (kind == "bool" and type(value) is bool)
+                or (kind in {"int32", "int64"} and type(value) is int and -(2**31) <= value < 2**31)
+            ):
+                raise ValueError("queryset filter requires a literal matching the field type")
+            filters[keyword.arg] = value
+    elif ast.unparse(node.func) != model["name"] + ".objects.all" or node.keywords:
+        raise ValueError("queryset requires all() or exact scalar filter()")
+    ordering_fields = []
+    ordering: Any = ["id"]
+    if "filter_backends" in attrs:
+        if ast.unparse(attrs["filter_backends"]) != "[OrderingFilter]":
+            raise ValueError("only the stock OrderingFilter backend is qualified")
+        ordering_fields = _literal(attrs.get("ordering_fields"))
+        if (
+            not isinstance(ordering_fields, list)
+            or not ordering_fields
+            or any(type(f) is not str or f not in fields for f in ordering_fields)
+        ):
+            raise ValueError("OrderingFilter requires explicit scalar ordering_fields")
+        ordering = _literal(attrs["ordering"]) if "ordering" in attrs else None
+        if isinstance(ordering, str):
+            ordering = [ordering]
+        if ordering is None:
+            ordering = ["id"]
+        if (
+            not isinstance(ordering, list)
+            or not ordering
+            or any(type(f) is not str or f.removeprefix("-") not in fields for f in ordering)
+        ):
+            raise ValueError("ordering requires captured scalar fields")
+    elif {"ordering_fields", "ordering"} & attrs.keys():
+        raise ValueError("ordering declarations require OrderingFilter")
+    pagination = "pagination_class" in attrs
+    if pagination and ast.unparse(attrs["pagination_class"]) != "LimitOffsetPagination":
+        raise ValueError("only stock LimitOffsetPagination is qualified")
+    return {
+        "filters": filters,
+        "ordering_fields": ordering_fields,
+        "ordering": ordering,
+        "pagination": pagination,
+        "page_size": page_size,
+    }
 
 
 def _literal(node: ast.AST | None) -> Any:

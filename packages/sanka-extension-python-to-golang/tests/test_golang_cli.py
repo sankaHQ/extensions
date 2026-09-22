@@ -24,6 +24,11 @@ PROJECT_SOURCES = (
     "drf-multiapp",
     "drf-crossapp",
     "drf-postgresql",
+    "drf-queries",
+    "drf-complete",
+    "flask-complete",
+    "fastapi-complete",
+    "fastapi-async-complete",
 )
 
 
@@ -86,6 +91,14 @@ def installed_cli(tmp_path_factory):
 
 
 def cli_project(root, framework, target):
+    if framework.endswith("-complete"):
+        from test_golang_complete_projects import complete_project
+
+        return complete_project(root, framework.split("-")[0], target, "async" in framework)
+    if framework == "drf-queries":
+        from test_golang_drf_queries import query_project
+
+        return query_project(root) | {"target_framework": target}
     if framework in {"drf-project", "drf-multiapp", "drf-crossapp", "drf-postgresql"}:
         from test_golang_drf_project import (
             crossapp_project,
