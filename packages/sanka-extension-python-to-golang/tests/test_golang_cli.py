@@ -56,7 +56,14 @@ def installed_cli(tmp_path_factory):
         targets=["fiber", "chi", "mux", "gin"],
         match_file="app.py",
     ) as candidate:
-        candidate.env.update(SANKA_GO_SOURCE_PYTHON=sys.executable, GOMAXPROCS="2", GOFLAGS="-p=2")
+        # CLI 0.2.12 prints JSON with ensure_ascii=False. Escape lone surrogates
+        # at stdout rather than corrupting or dropping their scenario values.
+        candidate.env.update(
+            SANKA_GO_SOURCE_PYTHON=sys.executable,
+            GOMAXPROCS="2",
+            GOFLAGS="-p=2",
+            PYTHONIOENCODING="utf-8:backslashreplace",
+        )
         yield candidate, report, report_path
         report["candidate"] = candidate.report
         report["outcome"] = (

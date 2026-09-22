@@ -1055,6 +1055,9 @@ and ordered HTTP/database observations for invalid input, create, PATCH, replace
 delete and recreation. The retained `go-project-acceptance.json` records each source/target
 pair and its evidence. The CLI fixture explicitly supplies both `--to` and
 `target_framework`; it does not claim that older CLI versions forward `--to` automatically.
+For malformed-Unicode scenarios, the pinned CLI 0.2.12 requires
+`PYTHONIOENCODING=utf-8:backslashreplace` to print its JSON report without a surrogate
+encoding error. The qualification runner sets this; JSON values round-trip unchanged.
 The marketplace listener and disposable PostgreSQL schemas run only in the explicitly
 enabled qualification job. No original source tests or production application are executed.
 
