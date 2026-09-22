@@ -177,6 +177,10 @@ func TestLoadConfig(t *testing.T) {{
 def render(captured: dict[str, Any]) -> dict[str, str]:
     if captured["gaps"]:
         raise ValueError("resolve source capture gaps before generation")
+    if captured.get("drf_project"):
+        from .drf_render import render_project
+
+        return render_project(captured)
     target = captured["configuration"]["target_framework"]
     has_writes = any("write" in route for route in captured["routes"])
     has_patch = any(

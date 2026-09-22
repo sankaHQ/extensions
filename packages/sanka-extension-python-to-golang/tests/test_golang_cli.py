@@ -68,13 +68,17 @@ def installed_cli(tmp_path_factory):
         report["candidate"] = candidate.report
         report["outcome"] = (
             "passed"
-            if len(report["cases"]) == 16 and all(c["outcome"] == "passed" for c in report["cases"])
+            if len(report["cases"]) == 20 and all(c["outcome"] == "passed" for c in report["cases"])
             else "failed"
         )
         report_path.write_text(json.dumps(report, indent=2) + "\n")
 
 
 def cli_project(root, framework, target):
+    if framework == "drf-project":
+        from test_golang_drf_project import project
+
+        return project(root) | {"target_framework": target}
     if framework != "flask":
         return temporal_project(root, framework, target)
     package = root / "src/backend"
@@ -141,7 +145,7 @@ def cli_project(root, framework, target):
     }
 
 
-@pytest.mark.parametrize("framework", ["drf", "flask", "fastapi", "fastapi-async"])
+@pytest.mark.parametrize("framework", ["drf", "flask", "fastapi", "fastapi-async", "drf-project"])
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
 def test_installed_cli_database_lifecycle(tmp_path, installed_cli, framework, target):
     import psycopg
@@ -209,7 +213,10 @@ def test_installed_cli_database_lifecycle(tmp_path, installed_cli, framework, ta
             verified = cli("verify")["data"]
             assert verified["ok"] and verified["source"] == verified["candidate"]
             assert verified["qualification"]["source_compared"]
-            assert all("tables" in row and "sequences" in row for row in verified["candidate"])
+            observations = verified["candidate"]
+            if framework == "drf-project":
+                observations = [row for group in observations for row in group]
+            assert all("tables" in row and "sequences" in row for row in observations)
             assert hashes(tmp_path) == before
             assert hashes(output) == generated
             case.update(

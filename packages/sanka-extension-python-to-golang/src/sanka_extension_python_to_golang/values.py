@@ -470,7 +470,9 @@ func nativeDecimal(raw []byte, precision, scale int, drf bool) (DecimalValue, er
         places = min(places, originalPlaces)
         whole = min(whole, originalWhole)
     }
-    if total > int64(precision) || places > int64(scale) || whole > int64(precision-scale) { return "", invalid }
+    if total > int64(precision) { return "", fmt.Errorf("Ensure that there are no more than %d digits in total.", precision) }
+    if places > int64(scale) { return "", fmt.Errorf("Ensure that there are no more than %d decimal places.", scale) }
+    if whole > int64(precision-scale) { return "", fmt.Errorf("Ensure that there are no more than %d digits before the decimal point.", precision-scale) }
     if !drf {
         sign := ""; if match[1] == "-" { sign = "-" }
         return DecimalValue(sign + originalDigits + "e" + strconv.FormatInt(originalExponent, 10)), nil
