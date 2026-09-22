@@ -143,6 +143,8 @@ def test_installed_cli_database_lifecycle(tmp_path, installed_cli, framework, ta
     candidate, report, report_path = installed_cli
     candidate.project = tmp_path
     config = cli_project(tmp_path, framework, target)
+    # Installation locks belong to each project, even when the wheel cache is shared.
+    candidate.cli("extension", "add", "sanka/python-to-golang", "--marketplace", "release")
     before = hashes(tmp_path)
     case = {"source": framework, "target": target, "outcome": "failed"}
     report["cases"].append(case)
