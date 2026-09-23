@@ -1,156 +1,126 @@
 # Sanka Extensions
 
-Apache-2.0 extensions and the Sanka Extension SDK for the [shared Sanka CLI and migration runtime](https://github.com/sankaHQ/sanka). This is a Python 3.12+ `uv` workspace.
+Extensions for the open source [Sanka CLI](https://github.com/sankaHQ/sanka).
+Install one and `sanka scan`, `plan`, `apply`, `test` and `verify` gain a
+migration path (for example Django REST Framework to FastAPI) or a data endpoint
+type (for example PostgreSQL). Apache-2.0, Python 3.12+.
 
-**Extensions add data, workflow or code capabilities. Data endpoints identify the source or destination databases, files and SaaS accounts.** One PostgreSQL extension can serve several independently configured data endpoints.
+Extensions add capabilities to Sanka (data migrations), Sanka Flow (workflow
+migrations) and Sanka Code (code migrations); data endpoints are the configured
+sources and destinations those capabilities read from and write to.
 
-| Product | Work |
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Catalog](https://img.shields.io/badge/catalog-docs%2Fcatalog.md-ff5a1f)](docs/catalog.md)
+[![CLI](https://img.shields.io/pypi/v/sanka-cli?label=sanka-cli)](https://pypi.org/project/sanka-cli/)
+
+## What you can install today
+
+| Extension | What it does |
 | --- | --- |
-| Sanka | Data migrations: records, schemas, relationships and attachments |
-| Sanka Flow | Workflow migrations and reconstruction: automations, triggers, actions and conditions |
-| Sanka Code | Code migrations: applications, SQL dialects, ORM and dbt models |
+| `sanka/drf-to-fastapi` | Converts a Django REST Framework app to native async FastAPI ([guide](https://sanka.com/docs/developers/migrate/django-to-fastapi/)) |
+| `sanka/drf-to-flask` | Converts a Django REST Framework app to Flask ([guide](https://sanka.com/docs/developers/migrate/django-to-flask/)) |
+| `sanka/postgres` | Reads and writes PostgreSQL records for data migrations |
+| `sanka/sqlite` | Reads and writes SQLite records |
+| `sanka/csv` | Reads CSV files as a migration source |
+| `sanka/markdown` | Reads Markdown documents as a migration source |
+| `sanka/clickhouse` | Writes to ClickHouse as a migration destination |
 
-The PostgreSQL extension reads and writes database records. Application SQL or ORM changes belong to Sanka Code; a project can require both products. These responsibilities do not imply support for every database-service migration route. DRF-to-FastAPI and DRF-to-Flask are code extensions that convert applications.
+The generated [catalog](docs/catalog.md) is the authoritative list, with roles
+and versions checked against `marketplace.json` and each manifest. Experimental
+converters are published as scoped prereleases outside the default catalog:
+`sanka/python-to-golang` and `sanka/typescript-to-rust`
+([`api-converters-v0.1.0a1`](docs/api-converter-release.md)) and
+`sanka/react-native-to-native`
+([`mobile-converters-v0.1.0a1`](docs/mobile-converter-release.md)); each package
+README shows how to pin them.
 
-## Available extensions
+## Install
 
-The [catalog](docs/catalog.md) groups extensions into **Data**, **Workflow**, and **Code**, generated and checked against `marketplace.json` and each manifest. Data and Code packages are available; Workflow currently has an SDK definition contract and no executable marketplace packages.
+```bash
+uv tool install --python 3.12 sanka-cli      # the CLI, if you do not have it yet
+sanka extension add sanka/drf-to-fastapi     # this marketplace is preconfigured and trusted
+sanka extension list
+```
 
-## Sanka Extension SDK
+Each extension is an immutable GitHub release wheel. Before anything runs, the
+CLI checks the manifest, the release URL, the SHA-256 digest and the CLI
+compatibility range, then installs the wheel into an isolated environment with
+`pip --isolated --no-index --no-deps --require-hashes`. PyPI is never a
+fallback, and a missing or mismatched hash stops execution instead of
+substituting another version.
 
-Use `sanka_extensions` to build extensions. The published SDK is distributed as
-GitHub release wheels, including its exact compatibility dependency. Install
-[uv](https://docs.astral.sh/uv/getting-started/installation/) before using these
-macOS/Linux commands:
+Installing a data extension makes a capability available; it does not connect
+to anything. Sources and destinations are configured separately as data
+endpoints with their own credentials. Hosted SaaS systems such as HubSpot,
+Salesforce and SendGrid are capabilities of the hosted Sanka API, not local
+extensions.
+
+Other marketplaces need explicit `--trust`; adding one pins an immutable
+snapshot, and `--revision FULL_COMMIT_SHA` pins a specific catalog:
+
+```bash
+sanka extension marketplace add PATH_OR_GIT_URL --name third-party --trust
+```
+
+## Build your own
+
+The Sanka Extension SDK (`sanka_extensions`) is published as release wheels.
+Install the latest `sdk-v*` release into a Python 3.12 virtual environment, not
+into the CLI's tool environment:
 
 ```bash
 uv venv --python 3.12 .venv
 source .venv/bin/activate
 uv pip install \
-  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a4/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
-  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a4/sanka_extension_sdk-0.1.0a4-py3-none-any.whl
+  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a7/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
+  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a7/sanka_extension_sdk-0.1.0a7-py3-none-any.whl
 ```
 
-This installs published SDK `0.1.0a4` and its exact compatibility dependency.
-The SDK release is independent of the implementing extension bundle. CLI
-`0.2.12` was verified with this SDK and marketplace `extensions-v0.1.0a22`;
-see the [CLI compatibility table](https://github.com/sankaHQ/sanka/blob/main/docs/compatibility.md).
-
-| Interface | Purpose |
+| Interface | Use it for |
 | --- | --- |
-| `sanka_extensions.data` | Data readers, writers, records, capabilities, credentials, and registration |
-| `sanka_extensions.flow` | Declarative business requests with change-preservation and activation requirements |
-| `sanka_extensions.code` | Typed requests and responses for code migration |
+| `sanka_extensions.code` | Code migrations: typed requests and responses for `scan`, `plan`, `apply`, `test` and `verify` |
+| `sanka_extensions.data` | Data migrations: readers, writers, records, capabilities and registration |
+| `sanka_extensions.flow` | Workflow migrations: a declarative definition contract only; no runnable Flow packages are published yet |
 
-```python
-from sanka_extensions.data import DataReader, DataWriter
-from sanka_extensions.code import ExtensionRequest, ExtensionResponse
-from sanka_extensions import flow
+Start with the [SDK guide](docs/sdk.md) and
+[extension development](docs/extension-development.md), which covers the
+`sanka-extension/v1` protocol. [Flow contracts](docs/flow.md) and the
+[compatibility guide](docs/naming-compatibility.md) explain the published
+identifiers that stay stable across releases.
 
-crm = flow.create(type="crm")
-```
+## Run an experimental extension from this checkout
 
-Flow's `create` constructs an unresolved definition without modifying a data endpoint.
-The source SDK includes its versioned contract; CRM/billing packages and Flow
-execution are not in the published marketplace. See [Flow contracts](docs/flow.md)
-for reapplication, construction, verification and activation requirements.
-
-See the [SDK guide](docs/sdk.md) for development and the [compatibility guide](docs/naming-compatibility.md) for published package identifiers. `sanka-drf-replay` supplies optional request/response replay support for code extensions.
-
-HubSpot, Salesforce, SendGrid, and other hosted SaaS implementations remain private Sanka API capabilities. Their data is accessed through hosted adapters; users do not install them as local extensions.
-
-## Install and inspect
-
-```bash
-sanka extension marketplace add https://github.com/sankaHQ/extensions.git --name sanka --json
-sanka extension marketplace add PATH_OR_GIT_URL --name third-party --trust --json
-sanka extension add sanka/postgres --marketplace sanka --json
-sanka extension list --json
-```
-
-CLI versions before the published-catalog default support follow the Git default
-branch. For those versions, clone the published `extensions-v0.1.0a22` tag and add
-that directory with `--trust`. On CLI versions supporting `--revision`, use the
-full published commit `37873d18970e7ffe4c55bfa1663e7c4c36fd4d12` to pin this bundle.
-Development `main` may reference wheels awaiting publication.
-
-Installation makes a capability available. It does not authenticate any data endpoint or verify its reachability. Configure each data source or destination with its own endpoint and credential references before planning a data migration. Code extensions operate on projects and do not require a authenticated data endpoint.
-
-## Catalog and manifests
-
-`marketplace.json` uses `sanka-marketplace/v1`. Each manifest uses `sanka-extension-manifest/v2` and pins:
-
-- extension ID and version;
-- compatible `sanka-cli` versions;
-- exact distribution identity and executable or data entry point;
-- code lifecycle commands and project matching, or supported endpoint types and read/write roles;
-- wheel filenames, immutable release URLs, and SHA-256 digests.
-
-The published manifest values `kind="connector"` (Data) and `kind="migration"` (Code), the `providers` field, and `sanka.connectors` entry points remain wire compatibility contracts. Keep the two typed execution protocols distinct. See [the transition map](docs/naming-compatibility.md).
-
-## Execution and trust
-
-Sanka owns discovery, planning, execution, and verification. Extensions expose typed data readers and writers through the isolated extension host. Code extensions exchange validated JSON over standard input/output using `sanka-extension/v1`; diagnostics go to standard error.
-
-A code-extension request contains:
-
-```text
-schema_version, request_id, command, project_root, artifact_root,
-extension { id, version, manifest_digest }, fingerprint, configuration,
-prior_artifacts, reviewed_plan_hash
-```
-
-The response contains:
-
-```text
-schema_version, request_id, command, extension { id, version }, outcome,
-data, artifacts, limitations, next_actions
-```
-
-Error responses include `error { code, message, details }`. The runtime checks request identity, command, extension identity, artifact paths, and the complete response shape. Missing or extra fields fail the request.
-
-The official `github.com/sankaHQ/extensions` marketplace is trusted. Other marketplaces require explicit `--trust`. Adding a marketplace pins an immutable snapshot. Installing an extension records exact manifest, artifact, configuration, and protocol identities in `.sanka/extensions.lock`; refreshing a marketplace does not rewrite existing project pins.
-
-Only manifest-listed wheels are installed, with `pip --isolated --no-index --no-deps --require-hashes`. The runtime verifies wheel metadata, dependency closure, entry points, cached hashes, and the installed environment before execution. A subprocess is an execution boundary, not a complete operating-system sandbox.
-
-Missing trust, artifacts, compatibility, or matching hashes stops execution. The runtime does not silently substitute another version or implementation.
-
-## Run an experimental extension
-
-The experimental converters are published as scoped prereleases outside the CLI's
-default marketplace snapshot: `sanka/python-to-golang` and `sanka/typescript-to-rust`
-in [`api-converters-v0.1.0a1`](docs/api-converter-release.md) and
-`sanka/react-native-to-native` in
-[`mobile-converters-v0.1.0a1`](docs/mobile-converter-release.md). Install them by
-adding this repository as a marketplace pinned to the release commit, as each
-package README documents. An extension that is not catalogued yet, or a working
-copy you are developing, can still run from this checkout through the same
-`sanka-extension/v1` protocol the CLI uses:
+An extension that is not catalogued yet, or one you are developing, runs through
+the same protocol the CLI uses:
 
 ```bash
 uv sync --frozen --all-packages
-uv run python scripts/fetch_typescript_bundle.py   # TypeScript-based extensions
-uv run python scripts/run_extension.py sanka/typescript-to-rust scan --project ~/app --config database_layer=sqlx
-uv run python scripts/run_extension.py sanka/typescript-to-rust plan --project ~/app --config database_layer=sqlx
+uv run python scripts/fetch_typescript_bundle.py   # TypeScript-based extensions only
+uv run python scripts/run_extension.py sanka/typescript-to-rust scan  --project ~/app --config database_layer=sqlx
+uv run python scripts/run_extension.py sanka/typescript-to-rust plan  --project ~/app --config database_layer=sqlx
 uv run python scripts/run_extension.py sanka/typescript-to-rust apply --project ~/app --config database_layer=sqlx --plan-hash sha256:...
 ```
 
-`apply` requires the exact hash that `plan` printed, artifacts live under
-`<project>/.sanka/<extension name>/`, and `test` and `verify` need the toolchains
-and fixture databases documented in each package README.
+`apply` requires the exact hash that `plan` printed; artifacts live under
+`<project>/.sanka/<extension name>/`; `test` and `verify` need the toolchains and
+fixture databases documented in each package README.
 
-## Development and release validation
+## Development
 
 ```bash
 uv sync --frozen --all-packages
-make check
-make build-release
+make check          # format, types, boundaries, terminology, catalog, tests
+make build-release  # builds and validates every wheel; does not publish
 ```
 
-`make check` runs formatting, type checks, dependency boundaries, terminology/catalog checks, package tests, and catalog updater tests. Database integration tests require their documented test endpoints and skip when absent.
+After changing a package, run `make update-marketplace-hashes`, review the
+manifest diff and validate again. Releases are documented in
+[releasing.md](docs/releasing.md); ownership and licensing boundaries in
+[AGENTS.md](AGENTS.md). Converter changes also pass the converter benchmark gate
+described in [converter-regression.md](docs/converter-regression.md).
 
-`make build-release` builds and validates artifacts; it does not publish. After intentional wheel changes, run `make update-marketplace-hashes`, review the manifest diff, and validate again. Publish the SDK compatibility dependency, then the Sanka Extension SDK, then implementing extensions, and publish SDK changes before advancing runtime dependency pins. Release publication requires a reviewed release and separate authorization.
+## Contributing
 
-See [extension development](docs/extension-development.md) and [AGENTS.md](AGENTS.md) for ownership and licensing boundaries.
-
-The converter benchmark gate pins a reviewed benchmark revision and covers DRF-to-FastAPI and DRF-to-Flask. Fully generated candidates must pass the generated-scope tests and independent benchmark gates. Partial candidates disclose route gaps. Private benchmark fixtures and reports remain outside this repository.
+Open or reuse an issue first, agree on scope for substantial changes, and keep
+every source file Apache-2.0 with its SPDX header. See
+[CONTRIBUTING.md](CONTRIBUTING.md) and [SUPPORT.md](SUPPORT.md).
