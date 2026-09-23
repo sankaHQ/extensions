@@ -38,9 +38,10 @@ manifest hashes only after wheel changes; the CLI 0.3 compatibility update
 reuses the reviewed a31 Data/Code wheel bytes. Finish code review, then run `make check build-release`
 as the final broad gate. The build verifies all 194 wheel filenames, locked
 third-party hashes, package versions, dependency and entry-point boundaries, and
-manifest URLs and hashes. The builder resumes interrupted dependency downloads by
-reusing existing wheels only when their locked size and SHA-256 match; it always
-rebuilds the local implementing packages. All previous release tags and artifacts
+manifest URLs and hashes. The builder resumes interrupted downloads by
+reusing published wheels only when their locked size and SHA-256 match. The a31
+implementing wheels are pinned to their published bytes; source changes require new
+package versions and release URLs. All previous release tags and artifacts
 remain immutable.
 
 Merge the exact human-approved head using `sanka-pr-flow`. Do not recreate the
