@@ -92,7 +92,7 @@ MIGRATION_MANIFEST: dict[str, Any] = {
         ],
     },
     "targets": ["fastapi"],
-    "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+    "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
 }
 CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
     "sanka-connector-markdown": {
@@ -106,7 +106,7 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
             "entry_point": "markdown",
         },
         "protocol_version": "sanka-connector/v1",
-        "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+        "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
         "providers": [{"name": "markdown", "roles": ["source"]}],
     },
     "sanka-connector-csv": {
@@ -120,7 +120,7 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
             "entry_point": "csv",
         },
         "protocol_version": "sanka-connector/v1",
-        "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+        "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
         "providers": [{"name": "csv", "roles": ["source"]}],
     },
     "sanka-connector-sqlite": {
@@ -134,7 +134,7 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
             "entry_point": "sqlite",
         },
         "protocol_version": "sanka-connector/v1",
-        "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+        "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
         "providers": [{"name": "sqlite", "roles": ["source", "destination"]}],
     },
     "sanka-connector-postgres": {
@@ -148,7 +148,7 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
             "entry_point": "postgres",
         },
         "protocol_version": "sanka-connector/v1",
-        "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+        "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
         "providers": [{"name": "postgres", "roles": ["source", "destination"]}],
     },
     "sanka-connector-clickhouse": {
@@ -162,7 +162,7 @@ CONNECTOR_MANIFESTS: dict[str, dict[str, Any]] = {
             "entry_point": "clickhouse",
         },
         "protocol_version": "sanka-connector/v1",
-        "runtime": {"sanka_cli": ">=0.2.0,<0.3"},
+        "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
         "providers": [{"name": "clickhouse", "roles": ["destination"]}],
     },
 }

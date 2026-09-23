@@ -20,7 +20,7 @@ from sanka_extensions.flow import (
 )
 
 EXTENSION_ID = "sanka/business-flows"
-EXTENSION_VERSION = "0.1.0a1"
+EXTENSION_VERSION = "0.1.0a2"
 RECIPE_ID = "billing.hubspot-deal-invoices"
 SELECTOR = "sanka/hubspot-deal-invoices"
 WORKFLOW_ID = "hubspot-order-billing"
