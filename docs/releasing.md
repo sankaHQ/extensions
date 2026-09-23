@@ -16,8 +16,9 @@ the catalog and explicitly adds the extension again.
 
 `extensions-v0.1.0a31` bundles DRF-to-Flask 0.1.0a12, DRF-to-FastAPI
 0.1.0a17, shared code migration helper 0.1.0a3 and DRF replay 0.1.0a4.
-It adds qualified native Flask behavior and isolated PostgreSQL replay.
-The published SDK and connector wheels remain unchanged.
+It adds qualified native Flask behavior, isolated PostgreSQL replay, and a
+Python-mismatch error that points at reinstalling the CLI on the project's Python
+(sankaHQ/sanka#127). The published SDK and connector wheels remain unchanged.
 
 The [a31 release](https://github.com/sankaHQ/extensions/releases/tag/extensions-v0.1.0a31)
 was published from merge `6f49f7f30acdcad98ae26b05049591662307975b` after the
