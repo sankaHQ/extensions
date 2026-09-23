@@ -56,3 +56,25 @@ HubSpot, Salesforce, SendGrid, and other hosted SaaS implementations belong in t
 ## Code conversion
 
 Use `sanka_extensions.code.ExtensionRequest` and `ExtensionResponse` for the code migration lifecycle. Requests and responses use the versioned `sanka-extension/v1` JSON contract; diagnostics belong on standard error. See the [SDK guide](sdk.md).
+
+## Code extension protocol
+
+Code extensions exchange validated JSON with the runtime over standard input and
+output using the `sanka-extension/v1` protocol. A request contains:
+
+```text
+schema_version, request_id, command, project_root, artifact_root,
+extension { id, version, manifest_digest }, fingerprint, configuration,
+prior_artifacts, reviewed_plan_hash
+```
+
+The response contains:
+
+```text
+schema_version, request_id, command, extension { id, version }, outcome,
+data, artifacts, limitations, next_actions
+```
+
+Error responses include `error { code, message, details }`. The runtime checks
+request identity, command, extension identity, artifact paths, and the complete
+response shape; missing or extra fields fail the exchange.
