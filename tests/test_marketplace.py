@@ -128,13 +128,13 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
         expected = EXPECTED[item["id"]]
         assert manifest["schema_version"] == "sanka-extension-manifest/v2"
         assert manifest["id"] == item["id"]
-        cli = "==0.2.12" if item["id"] == "sanka/llm-to-jev" else ">=0.2.0,<0.3"
+        cli = "==0.2.12" if item["id"] == "sanka/llm-to-jev" else ">=0.2.0,<0.4"
         if item["id"] in {
             "sanka/react-native-to-native",
             "sanka/python-to-golang",
             "sanka/typescript-to-rust",
         }:
-            cli = ">=0.2.12,<0.3"
+            cli = ">=0.2.12,<0.4"
         assert manifest["runtime"] == {"sanka_cli": cli}
         assert manifest["kind"] == expected["kind"]
         assert manifest["protocol_version"] == expected["protocol_version"]

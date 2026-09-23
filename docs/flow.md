@@ -420,8 +420,9 @@ published SDK dependency hashes. `--update-manifest` on its build script is only
 for intentional candidate changes before publication. After publication, changed
 bytes require a new package version and reviewed catalog; do not overwrite assets.
 The dispatch-only `publish-business-flows.yml` requires the exact reviewed
-`business-flows-v0.1.0a1` tag. Publish this package before the companion CLI 0.2.13
-release; the CLI publisher verifies its real package through public artifact URLs.
+`business-flows-v0.1.0a2` tag for the CLI 0.3 compatibility update. The a1 release
+remains immutable for existing installations. Publish a2 before CLI 0.3.0; the
+CLI publisher verifies its real package through public artifact URLs.
 This separate catalog does not change the default Data/Code marketplace.
 
 ## Native billing verification contract (SDK a6 candidate)

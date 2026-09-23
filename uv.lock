@@ -1225,7 +1225,7 @@ source = { editable = "packages/sanka-drf-replay" }
 
 [[package]]
 name = "sanka-extension-business-flows"
-version = "0.1.0a1"
+version = "0.1.0a2"
 source = { editable = "packages/sanka-extension-business-flows" }
 dependencies = [
     { name = "sanka-extension-sdk" },

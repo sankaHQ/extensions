@@ -37,7 +37,7 @@
   },
   "protocol_version": "sanka-extension/v1",
   "runtime": {
-    "sanka_cli": ">=0.2.0,<0.3"
+    "sanka_cli": ">=0.2.0,<0.4"
   },
   "schema_version": "sanka-extension-manifest/v2",
   "targets": [
@@ -67,7 +67,7 @@
     },
     {
       "name": "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl",
-      "sha256": "f07bafcd615126e26e26f3abb40f10de870c25614c04b4d3957980e73222e700",
+      "sha256": "8e468688140d9ae3876b63d3ec544411f9e7eec4adc4f67dbccb73a871eb893b",
       "url": "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a31/sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl"
     }
   ]
