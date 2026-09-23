@@ -1,35 +1,97 @@
-# Python to Golang (experimental)
+# Python to Go
 
-Extension ID: `sanka/python-to-golang`. Sources: DRF, FastAPI, Flask.
-Targets: Fiber (default), chi, Gorilla mux, Gin.
+`sanka/python-to-golang` converts captured DRF, Flask, and FastAPI APIs to Fiber
+(the default), chi, Gorilla mux, or Gin. It generates a Go `backend` package and a
+runnable `cmd/api`. Choose `database_layer: "none"` for literal JSON endpoints or
+`"pgx"` for the supported PostgreSQL models, reads, and writes.
 
-The current implementation produces a Go `backend` package exposing `NewApp` for
-literal public JSON GET endpoints, bounded PostgreSQL reads, and the first qualified
-create/PUT/PATCH/DELETE profile. Every target includes a runnable `cmd/api`. It is **not a complete backend migration**,
-available as an experimental prerelease, and not qualified for production cutover.
-The full backend implementation remains in progress.
+This is an experimental converter. It handles the source patterns documented below,
+including conventional DRF projects, flat CRUD, and explicit auth and transaction
+recipes. It does not promise to convert an arbitrary Python application, move
+existing data, or make a generated service ready for production cutover. A ready
+scan means the captured code can be generated; it is not a cutover verdict.
 
-Use the existing extension JSON subprocess protocol via
-`sanka-extension-python-to-golang`, with configuration:
+The main contracts are [routing and package imports](#project-routing),
+[database models and migration setup](#postgresql-schema-profile),
+[reads](#database-reads), [writes](#flat-crud),
+[authentication](#authentication-and-row-access), and
+[conventional Django projects](#conventional-django-project-profile).
+
+## Install the published prerelease
+
+The published `api-converters-v0.1.0a1` GitHub prerelease contains the converter
+and dependency wheels with SHA-256 manifests. With the published CLI 0.2.12, pin it
+in a separate marketplace entry:
+
+```bash
+RELEASE_COMMIT=$(git ls-remote https://github.com/sankaHQ/extensions.git refs/tags/api-converters-v0.1.0a1 | cut -f1)
+test "${#RELEASE_COMMIT}" -eq 40
+sanka extension marketplace add https://github.com/sankaHQ/extensions.git \
+  --revision "$RELEASE_COMMIT" --name api-converters --trust
+sanka extension add sanka/python-to-golang --marketplace api-converters
+```
+
+This does not change the CLI's default catalog or install an unpublished candidate.
+The public release check runs the small literal-GET example through Scan, Plan,
+Apply, Test, and Verify and compares source and target HTTP responses. See
+[sanka-examples](https://github.com/sankaHQ/sanka-examples) for that example's
+setup and plan review. That published wheel predates the conventional DRF and
+composed-backend support described below. Those contracts require a wheel built
+from this source until a newer version is published; the public literal-GET
+example does not test them.
+
+## Start with a project
+
+Point `source_file` at the app entrypoint. For a database-backed project, also set
+`models_file` to the model module. For example:
+
+```json
+{"source_framework":"drf","target_framework":"fiber","source_file":"shop_config/urls.py","models_file":"orders/models.py","database_layer":"pgx"}
+```
+
+For a small Flask app without database code, use:
 
 ```json
 {"source_framework":"flask","target_framework":"fiber","source_file":"app.py","database_layer":"none"}
 ```
 
-`scan` reports unsupported constructs. `plan` contains deterministic generated
-files and a `plan_hash`. `apply` requires the runtime review attestation (`reviewed_plan_hash`) and that
-hash as `extension_plan_hash`,
-recomputes the plan from the current source and configuration, and refuses changed
-plans or existing output. Artifacts must be inside the project's `.sanka`
-directory; output is `golang/` within that artifact directory.
+The CLI runs the extension through its JSON subprocess command,
+`sanka-extension-python-to-golang`. Run Scan first and read its `gaps` and
+`generation_ready` fields. Plan records the exact generated files and a stable
+`plan_hash`. Review that plan before Apply. Apply requires the runtime's
+`reviewed_plan_hash` and the matching `extension_plan_hash`; it recomputes the plan
+and refuses changed source, changed configuration, or an existing output directory.
+Generated files live under the project's `.sanka/.../golang` artifact directory.
 
-`scan`, `plan`, and `apply` parse source without importing or executing it. The current capture accepts
-an entrypoint plus explicitly imported top-level Python modules (up to 32 files),
-and the selected models module for pgx. Unknown imports, decorators, configuration,
-request parameters, unsupported dynamic handlers, unreferenced Python modules, and
-source symlinks block generation. DRF endpoints require explicit public APIView permission,
-empty APIView authentication and JSON renderer declarations; the bounded security profile
-below wraps those views with an explicit access policy. Unsupported behavior blocks generation.
+With a candidate wheel that includes the conventional DRF profile, run:
+
+```bash
+CONFIG='{"source_framework":"drf","target_framework":"fiber","source_file":"shop_config/urls.py","models_file":"orders/models.py","database_layer":"pgx"}'
+sanka scan . --extension-config "$CONFIG"
+sanka plan . --to fiber --extension-config "$CONFIG"
+```
+
+Review the returned plan hash and files before `sanka apply --plan-hash <hash>`.
+Then run `sanka test` and `sanka verify` with the fixture environment variables
+described below. CLI 0.2.12 needs both `--to fiber` and the matching
+`target_framework` configuration; `--to` alone does not reach the extension in
+that version.
+
+Scan, Plan, and Apply parse Python source without importing or executing it. They
+follow statically resolvable local imports, with at most 32 executable modules and
+10 MB in that module graph. The wider source inventory can contain up to 20,000
+regular files and 256 MiB. Unknown executable code, dynamic handlers, unsupported
+decorators or configuration, and source symlinks stop generation. The public
+APIView profile requires explicit permissions, empty authentication, and a JSON
+renderer; the signed-auth profiles below add their own explicit policies.
+
+Test runs the generated Go candidate. Verify also runs the captured Python source
+and compares the selected HTTP scenarios. Both execute code, so use trusted source
+and disposable fixture databases. See [verification and fixtures](#write-qualification)
+for database checks and [the conventional DRF project profile](#conventional-django-project-profile)
+for `ModelViewSet` projects.
+
+## Authentication and row access
 
 ### Explicit bearer middleware
 
@@ -136,7 +198,7 @@ qualified filtering/pagination remain in place.
 
 Detail reads, updates and deletes use the existing explicit lookup followed by
 `if item is None or item.tenant_id != principal["tenant"]:` and the existing 404
-response. Writes additionally require this guard immediately after strict body
+response. Writes require this guard immediately after strict body
 validation and before persistence:
 
 ```python
@@ -167,29 +229,31 @@ Generated Go dependencies and checksums are pinned in this package; Go 1.26.5 is
 the qualification toolchain. No Go dependencies are installed into Sanka's Python
 environment. No services or repository interfaces are generated for these direct operations.
 
-The current integration matrix compares successful JSON GET responses with the
-actual Python framework clients across all twelve source/target combinations.
-It does not establish default errors, HEAD/OPTIONS, redirects, arbitrary middleware,
-content negotiation, deployment, or whole-backend parity.
+The literal-GET matrix compares successful JSON responses with real Python
+framework clients for all three sources and four Go routers. That test does not
+establish default-error, HEAD/OPTIONS, redirect, content-negotiation, or deployment
+parity. The larger installed-wheel matrix covers the additional profiles below.
 
-`test` runs Go tests and exercises every captured GET route in a temporary copy of
-its generated package. `verify` additionally executes the captured Python module
-with its framework test client and compares status, parsed JSON body, and media
-type. Both require an unchanged saved plan, generated output, and Go 1.26.5 on
-PATH. By default the extension interpreter needs the source framework and its test-client
-dependencies installed. For a CLI-installed converter, install those dependencies
-in a separate source virtual environment, set `SANKA_GO_SOURCE_PYTHON` to its
-absolute `bin/python` path, and pass `--extension-env SANKA_GO_SOURCE_PYTHON`
-to `sanka verify`. The interpreter path is explicit and must be executable; it is
-not discovered from the working directory. Replay retains Python `-I` isolation,
-so `PYTHONPATH` does not inject source dependencies. The report records the source
-interpreter path and version. This leaves the locked converter wheel environment
-unchanged. Go may download the checksum-pinned dependencies.
+For literal GET routes, Test runs Go tests against a temporary copy of the
+generated package. Verify also runs the captured Python module through its
+framework test client and compares status, JSON body, and media type. Both require
+the saved plan and generated output to be unchanged. Go 1.26.5 is required; the
+[toolchain setup](#target-selection-and-go-toolchain) installs it locally when
+needed. Go may download checksum-pinned modules.
+
+Verify needs a Python interpreter with the source framework and test-client
+dependencies. For a CLI-installed converter, put those dependencies in a separate
+virtual environment, set `SANKA_GO_SOURCE_PYTHON` to its absolute `bin/python`,
+and pass `--extension-env SANKA_GO_SOURCE_PYTHON` to `sanka verify`. The converter
+does not search the project for an interpreter. Replay uses Python `-I`, so
+`PYTHONPATH` cannot inject dependencies. The report records the interpreter path
+and version; the locked converter wheel environment stays unchanged.
 
 Replay executes source and candidate code; the temporary directory is not a
 security sandbox. It does not start listening servers or alter candidate files.
-For DRF, the qualified fixture settings use no installed apps and no unauthenticated
-user model; external application settings and middleware are not captured.
+The literal DRF APIView fixture uses no installed apps or unauthenticated user
+model. The [conventional Django project profile](#conventional-django-project-profile)
+has separate settings and model rules.
 Reports include source and candidate digests. Manual handler repairs are tested,
 but changes to Go locks or the captured contract are rejected. A mismatch returns
 an error with a report path. Each rerun invalidates its old report first, so a
@@ -211,6 +275,8 @@ those bodies into Go method routes while source tests retain Django URL dispatch
 Overlapping Django URL registrations are blocked: separate views at the same
 path do not provide method-based dispatch in Django.
 
+### Local imports and source inventory
+
 Explicit imports such as `from routes import api` or `from views import health`
 are captured without importing source. Every consumed file participates in the
 plan hash and is copied unchanged into the source replay environment. Explicit
@@ -226,6 +292,8 @@ regular files and 256 MiB of source deterministically. Python modules outside th
 qualified semantic graph produce one bounded gap with representative paths; they
 never disappear from the source digest or become generated placeholders.
 
+### FastAPI topology and persistence
+
 FastAPI plans also inventory a static application factory, lifespan expression,
 middleware registration order, installed exception handlers, nested APIRouter graph,
 route order, and application/router/include/decorator/parameter `Depends` and `Security`
@@ -233,7 +301,7 @@ lists in their source order. Local and package imports are resolved without impo
 source. Dynamic router factories, prefixes, paths or dependency lists remain explicit
 topology gaps; topology capture alone does not enable lowering.
 
-FastAPI scans additionally inventory conventional persistence declarations throughout
+FastAPI scans also inventory conventional persistence declarations throughout
 the project. The static capture records Pydantic v2 field annotations, required versus
 nullable state, literal defaults, aliases, constraints and model configuration;
 SQLAlchemy 2 mapped columns, exact type expressions, foreign keys and relationships;
@@ -261,13 +329,15 @@ passed unchanged by name and a single session scope. Explicit flat-module import
 are supported. The complete expanded body must match the qualified CRUD recipe;
 missing awaits, extra side effects, changed commits and unknown operations block
 generation. This emits the existing direct Go operations without extra layers.
+
 Handlers may also receive `session: AsyncSession = Depends(get_session)`, where the
 zero-argument async provider only yields a session from `AsyncSession(engine)`.
 The handler can use the session directly, pass it unchanged as the first argument
 of a plain async repository function, or construct `repository = WidgetRepository(session)`
 and directly await one method. A repository class must have only an exact session-storing
 constructor and qualified async methods; all methods must be consumed. Repository
-arguments must keep their names and order. Explicit flat-module imports are supported.
+arguments must keep their names and order.
+
 Provider side effects, extra dependency options, inherited repositories, unconsumed methods,
 nested transactions and arbitrary orchestration remain unsupported. Commits must occur
 explicitly within the operation, never in dependency teardown.
@@ -283,7 +353,7 @@ arguments qualify; factory reconfiguration, custom session classes, bind overrid
 and automatic-commit `factory.begin()` scopes remain blocked. Existing explicit
 commit and refresh requirements still apply.
 
-The same async session and repository forms now accept primary-key lookups and
+Async session and repository forms accept primary-key lookups and
 primary-key-ordered lists using `await session.get(...)` or
 `(await session.execute(select(...))).mappings()`. Lists retain the existing captured
 projection, string equality filter and source limit. Streaming results, joins,
@@ -307,6 +377,8 @@ database rows and sequences after every GET.
 Replay executes the original async Python source and awaits
 engine cleanup; normalization is used only for static contract checking.
 
+### Application factories and lifespan
+
 Flask and FastAPI support a zero-argument `create_app` that constructs the app,
 registers completed blueprints/routers, and returns it, followed by
 `app = create_app()` at module scope. Literal uppercase string, integer and boolean
@@ -315,7 +387,7 @@ may initialize the database engine. Values, imports and initializers are hashed;
 configuration is never evaluated during capture. Computed settings, rebinding and
 custom factory side effects remain blocked.
 
-FastAPI additionally qualifies this explicit lifespan recipe:
+FastAPI accepts this explicit lifespan recipe:
 
 ```python
 @asynccontextmanager
@@ -342,7 +414,7 @@ targets.
 ## Process entrypoint
 
 Every target includes `cmd/api/main.go` and a configuration test. `PORT` defaults to 8080 and
-must be an integer from 1 through 65535. Database-backed handlers additionally require
+must be an integer from 1 through 65535. Database-backed handlers also require
 `DATABASE_URL`; startup parses and pings the pgx pool with a ten-second bound. The process owns
 and closes that pool. Each server enforces a body limit plus read, write, and idle timeouts; the
 standard servers also cap headers. Fiber uses its native shutdown configuration; chi, mux, and Gin
@@ -423,8 +495,9 @@ compares every captured table and sequence after every request, and independentl
 requires 409 responses to leave table rows unchanged. Sequence allocations may
 advance on failed inserts. The integration corpus exercises parent/child CRUD,
 unique and foreign-key failures, reassignment, restricted and cascading deletion,
-and subsequent ID allocation across the source/target matrix. These are individual
-CRUD operations. Explicit business transactions are also qualified:
+and subsequent ID allocation across the source/target matrix.
+
+Explicit business transactions use
 Django `transaction.atomic()` or SQLAlchemy `Session(engine)` with `session.begin()`,
 strictly validated nested input objects, and two or more ordered operations. Supported
 operations are creates, primary-key lookups, full replacements, partial updates and
@@ -440,15 +513,16 @@ Partial updates require an explicit lookup key; omitted fields stay unchanged, n
 is accepted only for nullable fields, and an empty update performs no UPDATE.
 
 Generated key bindings are excluded from client input. A lookup whose key comes
-from an earlier operation accepts an empty input object. Explicit ordered replay scenarios are required. Tests
-combine authorization, permission checks, response middleware, related schemas,
+from an earlier operation accepts an empty input object. Tests use explicit ordered
+replay scenarios and combine authorization, permission checks, response middleware, related schemas,
 validation, successful writes, whole-transaction rollback, and recovery across all
 three Python sources and four Go targets. PostgreSQL cases require the documented
 isolated fixture and run in CI; local compilation alone does not prove parity.
 
-Nested transactions, conditional workflows beyond the explicit missing-record guard
-and partial-field assignments, arbitrary service calls, and external effects still block capture. The bounded async,
-service delegation and row-policy profiles below extend this contract.
+Nested transactions, conditional workflows beyond the missing-record guard and
+partial-field assignments, arbitrary service calls, and external effects still
+block capture. The async, service-delegation, and row-policy forms below extend
+this contract.
 SQLAlchemy lookups of a previously loaded model after an intervening deletion also
 block capture until its identity-map behavior is modeled, including cascading and
 SET NULL deletion effects. A model or module binding cannot shadow `LookupError`. No service/repository scaffolding is added for inline source orchestration.
@@ -474,7 +548,7 @@ match mode, deferral, and validation state; a mismatching constraint blocks adop
 PostgreSQL schema, constraint, apply/reapply and rollback equivalence are checked
 separately by the opt-in integration suite.
 
-## Bounded database reads
+## Database reads
 
 The pgx profile also captures synchronous public GET handlers that return every
 field of one flat model, explicitly ordered by its primary key and limited to a
@@ -527,37 +601,62 @@ ID and compares the real Python and Go responses against independently seeded
 PostgreSQL schemas.
 Malformed or negative path-parameter parity remains outside this bounded profile.
 
-## First write profile
+Generated `NewApp(pool *pgxpool.Pool)` takes a non-nil pool for database-backed
+routes. Its caller opens, configures, and closes the pool. Literal-only projects
+retain `NewApp()`. Read handlers use the request context, scan nullable fields,
+check iteration errors, close rows, and encode the complete result before writing
+a response. Empty results are `[]`; database failures return a generic JSON 500
+without driver details. That error is a target safety contract, not Python
+default-error parity.
 
-Fiber, chi, mux, and Gin with pgx accept one bounded create/PUT/PATCH/DELETE recipe for a captured flat model. DRF uses
-`objects.create(...)`, `filter(primary_key=...).first()`, explicit field assignment and
-`save(update_fields=...)`. Flask and FastAPI use a synchronous SQLAlchemy `Session`, `add`,
-`get`, `commit`, and `refresh`. Routes must expose POST on a literal collection path and PUT/PATCH
-on one integer primary-key path. The source handler must explicitly reject unknown fields,
-missing required create fields, nulls for non-null fields, wrong JSON scalar types, and integers
-outside the captured PostgreSQL width. Any changed statement, validation bound, response shape,
-status, side effect, unqualified async shape, custom hook, or unsupported field leaves a capture gap.
-DELETE on the same integer path must explicitly load the row, return the captured 404 for a
-missing row, delete and commit it, then return an empty 204 response.
-PUT on that path must validate the complete replacement, assign every writable field, save or
-commit it, and return the replaced row with 200.
+For read-only replay, Test needs `SANKA_GO_TARGET_TEST_DATABASE_URL`; Verify also
+needs `SANKA_GO_SOURCE_TEST_DATABASE_URL`. Use separate fixture databases with
+matching seed data and already-applied schemas. Ordinary `DATABASE_URL` is never
+used as an implicit replay destination. DRF/Go use PostgreSQL URLs; SQLAlchemy
+sources use `postgresql+psycopg://`. Keep fixture credentials out of migration
+configuration and plans. Read-only credentials are sufficient for this read
+profile. Replay executes source and candidate code, so it is not a sandbox. It
+does not create, migrate, or seed these read-only fixtures.
 
-Generated handlers parse JSON without float conversion, distinguish missing from null/false/zero/
-empty string, enforce a 1 MiB request body limit, use parameterized SQL, and execute each write through `pgx.BeginFunc`. Create returns
-the inserted row with 201. PATCH updates only present fields, permits `{}` as a read-back, returns
-404 for a missing row, and returns the updated row with 200. Invalid input returns 400; other
-database failures return a generic 500. PUT replaces all writable fields and returns 404 or the
-updated row with 200. DELETE returns 404 or an empty 204 and commits through the
-same transaction primitive. Each router uses its native path-parameter API and passes
-the same generated lifecycle contract.
+Both commands require the captured successful status and JSON media type. Verify
+also compares Python and Go response bodies. Reports cover the supplied fixture
+rows, not unseen data or full schema equivalence. CI checks empty and populated
+results, nulls, Unicode, integer bounds, order, source limits, fixture mismatch,
+and safe database errors across all three Python sources and four Go routers.
 
-Public `test`/`verify` use `sanka-http-replay` for captured writes. Supply dedicated,
-resettable fixtures through `SANKA_GO_TARGET_TEST_DATABASE_URL` and, for `verify`,
-`SANKA_GO_SOURCE_TEST_DATABASE_URL`. Both must identify PostgreSQL hosts and databases;
-SQLAlchemy source URLs use `postgresql+psycopg://`. Source and target must resolve to
-different database schemas. Never use a customer or production database: the runner
-resets captured tables and identity sequences before executing requests. Final fixture
-effects remain available for inspection. `schema_mode=adopt-existing` is rejected.
+## Flat CRUD
+
+The flat pgx profile accepts create, PUT, PATCH, and DELETE for a captured model
+on all four Go routers. POST uses a literal collection path; the other methods
+use one integer primary-key path. DRF source handlers use `objects.create(...)`,
+`filter(primary_key=...).first()`, field assignments, and
+`save(update_fields=...)`. Flask and FastAPI use synchronous SQLAlchemy `Session`,
+`add`, `get`, `commit`, and `refresh` calls. The later async profile has its own
+source recipe.
+
+Source handlers must explicitly reject unknown fields, missing required create
+fields, null for nonnullable fields, wrong JSON scalar types, and integers beyond
+the captured PostgreSQL width. PUT validates a full replacement and assigns every
+writable field. DELETE loads the row, returns the source's 404 if absent, commits
+the delete, then returns an empty 204. Changed statements, validation bounds,
+response shapes, statuses, side effects, custom hooks, and uncaptured fields stop
+generation.
+
+Generated handlers retain missing, null, false, zero, and empty string as distinct
+inputs. They parse JSON without float conversion, cap bodies at 1 MiB, bind SQL
+parameters, and use `pgx.BeginFunc` for each write. Create returns the inserted
+row with 201. PATCH changes only present fields; `{}` reads the unchanged row.
+PUT and PATCH return the row with 200 or a 404 for a missing ID. DELETE returns an
+empty 204 or a 404. Invalid input returns 400, and other database failures return
+a generic 500. Each router uses its own path-parameter API for this same contract.
+
+Test and Verify use `sanka-http-replay` for captured writes. Set
+`SANKA_GO_TARGET_TEST_DATABASE_URL` for Test and also
+`SANKA_GO_SOURCE_TEST_DATABASE_URL` for Verify. Both must identify PostgreSQL
+hosts and databases; SQLAlchemy source URLs use `postgresql+psycopg://`. Source
+and target must resolve to different schemas. Use disposable databases: the runner
+resets captured tables and identity sequences before requests. It leaves final
+fixture effects available for inspection. It rejects `schema_mode=adopt-existing`.
 
 Requests run in order without TCP listeners. Responses, all captured table rows and
 sequence state are compared using the versioned shared observation contract. Bigint
@@ -577,37 +676,12 @@ Place an ordered `sanka-verify.json` in the source root to provide explicit scen
 ]}
 ```
 
-Without that file the shared generator supplies deterministic default scenarios.
-Field-constrained endpoints require explicit scenarios because generic sample values
-may violate their constraints. Default scenarios may expose unsupported native errors
-(such as invalid path parameters); a failed comparison remains a failure, not a claim
-of parity. Choose scenarios covering the source contract, including negative cases.
-The acceptance matrix exercises all three Python sources and four Go routers.
-
-When a captured route reads data, generated `NewApp(pool *pgxpool.Pool)` takes an
-existing non-nil pool; its caller owns opening, configuring, and closing that
-pool. Pure schema/literal-endpoint projects retain `NewApp()`. Handlers use the
-request context, scan typed nullable fields, check iteration errors, close query
-rows, and encode the complete result before writing a response. Empty results
-are `[]`; database failures return a generic JSON 500 without driver details.
-That error response is a target safety contract, not Python default-error parity.
-
-Public `test` requires `SANKA_GO_TARGET_TEST_DATABASE_URL` for these handlers.
-`verify` additionally requires `SANKA_GO_SOURCE_TEST_DATABASE_URL`. Supply dedicated
-fixture databases with matching data and already-applied source/target schemas;
-ordinary `DATABASE_URL` is never used as an implicit replay destination. Use a
-PostgreSQL URL for DRF/Go and a `postgresql+psycopg://` SQLAlchemy URL for
-Flask/FastAPI. Keep fixture credentials outside migration configuration and plans.
-Use read-only fixture credentials: replay executes candidate code and is not a
-sandbox. The replay runner does not create schemas, migrate, or seed these databases.
-
-Both lifecycle commands require the captured successful status and JSON media
-type. Verify also compares real Python and Go response bodies. Reports describe
-only the supplied fixture observations, not unseen rows, transactional writes,
-or full schema equivalence. CI owns isolated source/target schemas and checks
-empty/populated results, nulls, Unicode, integer boundaries, order, source limits,
-fixture mismatch detection, and safe database-error responses for all twelve
-source/target combinations.
+Without the file, the shared generator supplies deterministic default scenarios.
+Field-constrained endpoints need explicit cases because generic values may violate
+their constraints. Defaults may also expose unsupported native errors, such as
+invalid path parameters. A failed comparison remains a failure. Include negative
+cases that matter to the source contract. CI exercises all three Python sources
+and four Go routers.
 
 ## Request-driven string filters
 
@@ -643,7 +717,7 @@ HTTP responses for those requests against the supplied fixtures. Populate fixtur
 values to exercise matching and non-matching rows; an empty fixture proves only
 empty-result behavior. CI seeds both varchar and nullable-text predicates,
 checks filter/order/limit behavior and unchanged row counts, and verifies that a
-changed candidate fixture is detected. Native parser tests additionally compare
+changed candidate fixture is detected. Native parser tests compare
 all single-byte encodings and malformed UTF-8 boundaries with real Python clients.
 
 ## Strict Pydantic write schemas
@@ -703,8 +777,8 @@ Coercion, custom validators/serializers, aliases, nested schemas, different defa
 unsupported constraints, unused classes and inheritance beyond `BaseModel` block capture.
 Tests compare Pydantic outcomes and values with native Go decoders for all four
 routers, check invalid-object responses through original Python test clients, and
-exercise generated CRUD on PostgreSQL in CI. Public ordered write replay is now
-available; malformed/non-object body parity, native framework validation errors and
+exercise generated CRUD on PostgreSQL in CI. Public ordered write replay covers
+these routes; malformed/non-object body parity, native framework validation errors and
 general DRF serializer behavior remain open.
 
 FastAPI also accepts a bounded conventional request-model form. The handler injects
@@ -784,22 +858,12 @@ PostgreSQL schemas, including repeated baseline resets and a database-only mutat
 that must fail comparison. Authentication, malformed-body/lookup parity,
 custom database errors and general business operations remain outside this corpus.
 
-## Remaining backend work
+## Target selection and Go toolchain
 
-1. Capture whole projects into a framework-neutral contract, with stable model,
-   field, relationship, operation, validation and policy identities.
-2. Extend the initial pgx/Goose profile to richer schemas, data migration and
-   transactional CRUD. Qualify each supported combination against a real database before
-   advertising it; reject incompatible combinations.
-3. Preserve validation/errors, auth/permissions, middleware, richer filtering,
-   pagination, transactions and configuration. Introduce services only for
-   captured business orchestration and repositories only for persistence needs.
-4. Extend source/Go replay through the public lifecycle to cover failure paths,
-   database effects, rollback, generated deployment entrypoints and shutdown.
-5. Package/install verification and CI must pass before catalog publication.
-
-Do not infer support from a framework appearing in the target choices: supported
-behavior is defined by the capture gaps and independently exercised contracts.
+Selecting a framework does not imply that every source behavior is supported.
+Scan reports the actual capture gaps; generation stops on any unclassified
+executable behavior. Existing-data transfer, custom source policies and production
+cutover need separate work and evidence.
 
 The extension accepts `target` as an alias for `target_framework` for CLI integration.
 Both must agree when supplied together; invalid or conflicting values are rejected.
@@ -828,28 +892,11 @@ SANKA_GO_BOOTSTRAP_TESTS=1 uv run python -m pytest \
 ```
 
 The [transaction qualification contract](../../docs/python-to-golang-transactions.md)
-covers rollback, commit failure, cancellation, and connection reuse for the pgx primitive used
-by the first create/PUT/PATCH/DELETE profile. Broader serializer/schema validation remains
-outside the qualified profile.
+covers rollback, commit failure, cancellation, and connection reuse for the pgx
+transaction primitive. Serializer and schema support is limited to the source
+forms documented above.
 
-## Experimental public release
-
-The scoped `api-converters-v0.1.0a1` GitHub prerelease contains the reviewed
-wheel closure and SHA-256 manifests. Install with the published CLI 0.2.12:
-
-```bash
-RELEASE_COMMIT=$(git ls-remote https://github.com/sankaHQ/extensions.git refs/tags/api-converters-v0.1.0a1 | cut -f1)
-test "${#RELEASE_COMMIT}" -eq 40
-sanka extension marketplace add https://github.com/sankaHQ/extensions.git --revision "$RELEASE_COMMIT" --name api-converters --trust
-sanka extension add sanka/python-to-golang --marketplace api-converters
-```
-
-This explicit marketplace pin does not change the CLI default catalog. The release
-gate reproduces the small public literal-GET example through all five CLI stages
-and compares actual source/target HTTP responses. See the
-[examples](https://github.com/sankaHQ/sanka-examples) for source setup, reviewed-plan
-checks, target toolchains and supported behavior. Database/write scenarios remain
-outside that example qualification; broader package fixtures are tested separately.
+## Composed backend contracts
 
 The representative backend fixture in `tests/test_golang_mixed_transactions.py`
 combines CRUD, filtered reads, authentication, write permissions, response middleware
@@ -963,7 +1010,7 @@ forms reuse the same scoped session lowering. Additional keyword-only parameters
 dependency metadata, default values on Annotated dependencies, and dependency
 teardown commits remain blockers.
 
-Native FastAPI Pydantic bodies now preserve narrower integer `ge`/`le` bounds and
+Native FastAPI Pydantic bodies preserve narrower integer `ge`/`le` bounds and
 string `min_length`/`max_length`, including nullable and partial fields. Constraint
 checks follow the existing native scalar coercion and retain the captured 422
 response. Rich native field coercion remains unqualified; rich values still require
@@ -1023,14 +1070,14 @@ A ready scan means the captured project can be generated, not that it is ready
 for production cutover. Test/verify reports include `qualification` flags for
 candidate execution, source comparison, original-test execution and cutover
 qualification. `test` executes the Go candidate; `verify` also compares the
-captured Python source. PostgreSQL write verification additionally compares rows
+captured Python source. PostgreSQL write verification compares rows
 and sequences in independent resettable fixture schemas. Neither command marks
 arbitrary application behavior or production deployment as qualified.
 
 
-## Native dates, timestamps and JSON
+### Native dates, timestamps and JSON
 
-The native DRF serializer profile additionally accepts `DateField(input_formats=['iso-8601'])`,
+The native DRF serializer profile accepts `DateField(input_formats=['iso-8601'])`,
 `DateTimeField(input_formats=['iso-8601'], default_timezone=timezone.utc)`, and `JSONField`.
 The explicit UTC policy avoids guessing the application's active Django timezone.
 The FastAPI profile accepts `date`, Pydantic `AwareDatetime`, and `JsonValue` on flat
@@ -1053,13 +1100,31 @@ FastAPI projects against Fiber, chi, mux and Gin. It checks all five CLI command
 repeated-plan hashes, rejected unreviewed apply, generated-file hashes, source preservation,
 and ordered HTTP/database observations for invalid input, create, PATCH, replacement,
 delete and recreation. The retained `go-project-acceptance.json` records each source/target
-pair and its evidence. The CLI fixture explicitly supplies both `--to` and
-`target_framework`; it does not claim that older CLI versions forward `--to` automatically.
+pair and its evidence.
+
+The CLI fixture supplies both `--to` and `target_framework`; CLI 0.2.12 does not
+forward `--to` to the extension by itself.
 For malformed-Unicode scenarios, the pinned CLI 0.2.12 requires
 `PYTHONIOENCODING=utf-8:backslashreplace` to print its JSON report without a surrogate
 encoding error. The qualification runner sets this; JSON values round-trip unchanged.
 The marketplace listener and disposable PostgreSQL schemas run only in the explicitly
 enabled qualification job. No original source tests or production application are executed.
+
+The same installed-wheel matrix includes composed DRF, Flask and sync/async FastAPI
+projects with signed identity, read/write permissions, response-header hooks, related
+models, filtered/paginated reads and tenant-guarded transaction services in separate
+repository/service modules. Source policy is preserved per operation; this does not
+invent tenant restrictions for source routes that do not declare them. Denied writes,
+rollback, null/absent updates and response headers are compared against the source.
+Native authentication can compose with literal response-header hooks: Flask
+`after_request`, FastAPI response-only HTTP middleware, and DRF response middleware
+decorating every captured view. Hook order is retained; arbitrary side effects block.
+
+Process qualification starts the compiled generated application on each
+router, checks invalid configuration and unavailable-database failures without exposing
+credentials, then verifies SIGTERM drains an in-flight database request and closes
+the pool. Transaction cancellation is checked separately with explicit cancelled and
+expired contexts; client-disconnect cancellation is not implied by graceful shutdown.
 
 Boundary probes separately verify that accepted extreme timestamps and PostgreSQL-invalid
 JSON preserve lookup ordering and committed rows/sequences. These probes qualify storage
@@ -1068,7 +1133,7 @@ behavior, not parity of framework-specific unhandled-500 response bodies.
 
 ## Conventional Django project profile
 
-A bounded DRF 3.18 project can use `manage.py`, static settings, an installed app,
+A bounded DRF 3.18 project can use `manage.py`, static settings, multiple installed apps,
 `DefaultRouter`, `ModelViewSet`, and `ModelSerializer`. Configure the actual URL
 and model modules:
 
@@ -1076,25 +1141,49 @@ and model modules:
 {"source_framework":"drf","target_framework":"fiber","source_file":"shop_config/urls.py","models_file":"orders/models.py","database_layer":"pgx"}
 ```
 
-This profile accepts a SQLite source and an empty PostgreSQL destination, using
+This profile accepts a SQLite or PostgreSQL source and an empty PostgreSQL destination, using
 pgx and Goose on all four routers. It captures string choices/defaults, integer,
 boolean and decimal fields, unique fields, cascade foreign keys, and one explicit
 nested serializer. Nested writes require the captured atomic parent/children
 create and aggregate-limit rollback recipe; updates preserve the captured nested
-ignore behavior. Unknown settings, hooks, queryset overrides and schema drift
-remain blockers. One initial schema migration must match the model declarations.
+ignore behavior. Unknown settings, hooks, queryset behavior and schema drift
+remain blockers. Each app needs one initial schema migration that matches its
+models.
+
+Explicit cross-app dependencies and CASCADE foreign keys are checked against
+the model declarations. Module-qualified
+model and serializer identities distinguish equal class names across apps. Literal
+nested URL includes retain declaration order; duplicate routes and import/include
+cycles block generation. The standard `main()` startup wrapper and explicit import
+aliases are supported without executing source code during scan or plan.
+
+### ViewSet queries
+
+ViewSets also accept literal, exact scalar `queryset.filter(...)` predicates,
+stock `OrderingFilter` with explicit scalar `ordering_fields`, and stock
+`LimitOffsetPagination` with an optional static `PAGE_SIZE` (1–1000). Filters apply
+to detail lookups before updates/deletes as well as lists. Pagination uses SQL
+COUNT/LIMIT/OFFSET and preserves DRF response links, repeated query parameters and
+invalid-parameter defaults. It adds no service layer. Custom filter/pagination
+classes, relationship traversal, search/regex backends and random ordering remain
+blockers. Database-overflow pagination errors remain outside JSON error-body parity.
+
 The executable contract is in `tests/test_golang_drf_project.py`. Executable
 annotations, writable identity overrides, nested uniqueness validators, and
 optional aggregate fields are blocked rather than silently changed.
 
-Generated writes use transactional identity counters because SQLite rolls back
+For SQLite sources, generated writes use transactional identity counters because SQLite rolls back
 AUTOINCREMENT allocation with failed writes. IDs are allocated by the generated
-handlers; direct SQL writers must not invent their own allocation. Application
-startup, database migrations and shutdown reuse the existing runtime. No service
+handlers; direct SQL writers must not invent their own allocation. PostgreSQL sources
+retain native sequence allocation, including values consumed by rolled-back writes.
+Application startup, database migrations and shutdown reuse the existing runtime. No service
 or repository layer is added for this CRUD profile.
 
+### Source comparison
+
 `verify` copies the classified source into an isolated process, checks DRF 3.18,
-migrates a disposable SQLite database, and compares JSON responses, captured rows
+migrates a disposable SQLite database or newly created PostgreSQL source schema,
+and compares JSON responses, captured rows
 and logical identity state with an explicitly resettable PostgreSQL fixture.
 Hosted-style `sanka-verify.json` cases with `setup` retain independent resets;
 setup requests are observed too. Ordinary shared scenarios run in order. Original
@@ -1103,8 +1192,20 @@ Forward the fixture DSN and source interpreter through the CLI using
 `--extension-env SANKA_GO_TARGET_TEST_DATABASE_URL` and
 `--extension-env SANKA_GO_SOURCE_PYTHON` for test/verify.
 
-This is an anonymous JSON CRUD qualification, not full Django compatibility.
-Credential-bearing requests fail closed with 501; Django authentication/session
+For a PostgreSQL source, the captured Django database configuration must declare
+`ENGINE = django.db.backends.postgresql` and `NAME`, `USER`, `PASSWORD`, `HOST`,
+and `PORT` as distinct `os.environ["VARIABLE_NAME"]` lookups inside `DATABASES`.
+Only variable names enter the contract. Verify also requires
+`--extension-env SANKA_GO_SOURCE_TEST_DATABASE_URL`, pointing at an explicitly
+owned PostgreSQL fixture where the source probe can create and remove its own
+schema. Connection values come from that fixture URL, never the application's
+database environment. This does not adopt or transfer existing application data.
+
+### What this profile leaves out
+
+This conventional `ModelViewSet` profile is anonymous JSON CRUD. It does not
+use the separate signed-auth recipe above. Credential-bearing requests fail
+closed with 501; Django authentication/session
 identity is not migrated. Browsable HTML, form parsers, router root/OPTIONS/format
 suffixes, framework-specific malformed-JSON and unhandled-error bodies, host
 validation, arbitrary middleware, custom validators, and existing-data cutover
