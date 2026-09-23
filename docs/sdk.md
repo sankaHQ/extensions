@@ -8,11 +8,11 @@ running these macOS/Linux shell commands.
 uv venv --python 3.12 .venv
 source .venv/bin/activate
 uv pip install \
-  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a4/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
-  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a4/sanka_extension_sdk-0.1.0a4-py3-none-any.whl
+  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a7/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
+  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a7/sanka_extension_sdk-0.1.0a7-py3-none-any.whl
 ```
 
-This installs published SDK `0.1.0a4` and its exact compatibility dependency.
+This installs published SDK `0.1.0a7` and its exact compatibility dependency.
 Use a Python 3.12+ virtual environment for extension development; do not install
 the SDK into the CLI tool environment. CLI `0.2.12` is a verified consumer of
 this SDK. SDK availability does not imply native Flow execution.
