@@ -16,7 +16,7 @@
     }
   ],
   "runtime": {
-    "sanka_cli": ">=0.2.0,<0.3"
+    "sanka_cli": ">=0.2.0,<0.4"
   },
   "schema_version": "sanka-extension-manifest/v2",
   "version": "0.1.0a14",

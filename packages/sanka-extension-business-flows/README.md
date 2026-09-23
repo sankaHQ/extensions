@@ -32,4 +32,4 @@ Run `make build-business-flows` from the repository root to build the candidate
 wheel and verify its dependency closure and manifest. Its separate marketplace
 snapshot is `business-flows/`; the current Data/Code marketplace and published
 wheels remain unchanged. Publication requires reviewed source and separate
-authorization; the intended package tag is `business-flows-v0.1.0a1`.
+authorization; the compatibility update uses `business-flows-v0.1.0a2`.

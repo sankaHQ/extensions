@@ -18,7 +18,7 @@ jobs:
           version: "0.11.21"
           python-version: "3.12"
       - name: Require the reviewed release tag
-        run: test "$GITHUB_REF_TYPE" = tag && test "$GITHUB_REF_NAME" = business-flows-v0.1.0a1
+        run: test "$GITHUB_REF_TYPE" = tag && test "$GITHUB_REF_NAME" = business-flows-v0.1.0a2
       - run: uv sync --frozen --all-packages
       - run: make check build-business-flows
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -41,7 +41,7 @@ jobs:
         run: >-
           gh release create "$GITHUB_REF_NAME" release/*
           --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease
-          --title "Business Flow definitions 0.1.0a1"
-          --notes "Nine categories and 28 recipe definitions. One HubSpot order/billing Blueprint generator. Requires CLI 0.2.13 or later. Native execution, verification and activation require a hosted adapter; this package performs no provider operations."
+          --title "Business Flow definitions 0.1.0a2"
+          --notes "Nine categories and 28 recipe definitions. One HubSpot order/billing Blueprint generator. Supports CLI 0.2.13 through 0.3.x. Native execution, verification and activation require a hosted adapter; this package performs no provider operations."
         env:
           GH_TOKEN: ${{ github.token }}

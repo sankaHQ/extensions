@@ -23,7 +23,7 @@ from scripts.build_release import LockedWheel, download_locked_wheel  # noqa: E4
 from scripts.check_release_artifacts import _entry_points, _wheel_metadata  # noqa: E402
 
 PACKAGE = "sanka-extension-business-flows"
-VERSION = "0.1.0a1"
+VERSION = "0.1.0a2"
 TAG = f"business-flows-v{VERSION}"
 WHEEL = f"sanka_extension_business_flows-{VERSION}-py3-none-any.whl"
 SDK_WHEELS = (
@@ -61,7 +61,7 @@ def manifest(sha256: str) -> dict[str, Any]:
         "protocol_version": "sanka-flow-extension/v1",
         "commands": ["blueprint"],
         "capabilities": [capability().to_dict()],
-        "runtime": {"sanka_cli": ">=0.2.13,<0.3"},
+        "runtime": {"sanka_cli": ">=0.2.13,<0.4"},
         "distribution": {"name": PACKAGE, "version": VERSION, "executable": PACKAGE},
         "wheels": [
             *({"name": w.name, "url": w.url, "sha256": w.sha256} for w in SDK_WHEELS),

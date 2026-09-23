@@ -46,7 +46,7 @@ def request(*, selected=None, capabilities=None, extension=None, template=None):
     )
     return BlueprintRequest(
         "request-one",
-        extension or ArtifactIdentity("sanka/business-flows", "0.1.0a1", "sha256:" + "b" * 64),
+        extension or ArtifactIdentity("sanka/business-flows", "0.1.0a2", "sha256:" + "b" * 64),
         selected,
         TargetIdentity(
             "workspace-one",
@@ -172,6 +172,6 @@ def test_changed_template_or_extension_identity_is_rejected():
     with pytest.raises(ValueError, match="exact installed extension"):
         generate(
             request(
-                extension=ArtifactIdentity("sanka/business-flows", "0.1.0a2", "sha256:" + "b" * 64)
+                extension=ArtifactIdentity("sanka/business-flows", "0.1.0a1", "sha256:" + "b" * 64)
             )
         )

@@ -1,21 +1,30 @@
 # Releasing Sanka extension packages
 
-## Current candidate
+## CLI 0.3 compatibility update
+
+The existing Data/Code wheel assets in `extensions-v0.1.0a31` remain immutable.
+The reviewed marketplace manifests widen their CLI range through 0.3.x while
+retaining support for 0.2.14. `sanka/llm-to-jev` retains its exact 0.2.12 pin;
+it has not been qualified for 0.3. The separate Business Flow package advances
+to `0.1.0a2` at `business-flows-v0.1.0a2` with the same SDK contract and a
+manifest that accepts CLI 0.2.13 through 0.3.x. Publish a2 only after the
+reviewed merge and exact-head checks. A new CLI can then pin the merged catalog
+commit. Existing project locks keep their prior manifests until the user refreshes
+the catalog and explicitly adds the extension again.
+
+## Published a31 baseline
 
 `extensions-v0.1.0a31` bundles DRF-to-Flask 0.1.0a12, DRF-to-FastAPI
 0.1.0a17, shared code migration helper 0.1.0a3 and DRF replay 0.1.0a4.
 It adds qualified native Flask behavior and isolated PostgreSQL replay.
 The published SDK and connector wheels remain unchanged.
 
-The candidate is not published. The merged converter revision `cad41241bd4e2ca9e741d1cdd5ac174c9217f66e`
-passed [CI](https://github.com/sankaHQ/extensions/actions/runs/35169260045):
-963 workspace tests, 106 installed-wheel tests, modern Django parity and
-194 verified wheel hashes. These results cover the declared synthetic contracts;
+The [a31 release](https://github.com/sankaHQ/extensions/releases/tag/extensions-v0.1.0a31)
+was published from merge `6f49f7f30acdcad98ae26b05049591662307975b` after the
+exact-merge converter regression. Its results cover declared synthetic contracts;
 they do not establish support for arbitrary application behavior.
 
-Before publication, require a successful converter regression run at the exact
-release commit, explicit publication authorization, and successful immutable SDK
-verification. The current private benchmark exercises Flask's retained-Django
+The private a31 regression exercises Flask's retained-Django
 profile. Its result must not be described as standalone SQLAlchemy acceptance.
 The broader Go entry gate in the backend migration plan also requires native
 SQLAlchemy benchmark qualification; that work remains open. Do not mark the Go
@@ -24,8 +33,8 @@ gate complete merely because the marketplace release succeeds.
 ## Preparation and review
 
 Use the repository uv workspace and focused checks while editing. Regenerate
-manifest hashes with `make update-marketplace-hashes` after final package changes.
-Finish code review, then let the workspace PR helper run `make check build-release`
+manifest hashes only after wheel changes; the CLI 0.3 compatibility update
+reuses the reviewed a31 Data/Code wheel bytes. Finish code review, then run `make check build-release`
 as the final broad gate. The build verifies all 194 wheel filenames, locked
 third-party hashes, package versions, dependency and entry-point boundaries, and
 manifest URLs and hashes. The builder resumes interrupted dependency downloads by
@@ -33,18 +42,18 @@ reusing existing wheels only when their locked size and SHA-256 match; it always
 rebuilds the local implementing packages. All previous release tags and artifacts
 remain immutable.
 
-Merge the exact human-approved head using `sanka-pr-flow`. Publication requires
-user authorization separately from preparing the candidate. Create and push
-`extensions-v0.1.0a31` at the reviewed merge, then dispatch `publish.yml` at that tag.
-The workflow rejects every other tag. This repository currently publishes GitHub
-release wheels; it does not publish these versions to PyPI.
+Merge the exact human-approved head using `sanka-pr-flow`. Do not recreate the
+existing a31 tag or release. After merge, the separately authorized Business Flow
+a2 publication uses the new immutable `business-flows-v0.1.0a2` tag and
+`publish-business-flows.yml`. This repository publishes GitHub release wheels,
+not these versions to PyPI.
 
-## SDK before implementing packages
+## a31 SDK provenance
 
-The publication workflow builds and verifies the complete bundle, then checks
+The a31 publication workflow built and verified the complete bundle, then checked
 that the existing `sdk-v0.1.0a4` tag still identifies its reviewed source and that
 both SDK wheels in the bundle are byte-identical to their published assets.
-The SDK verification job is read-only. It does not move the tag or re-upload
+The SDK verification job was read-only. It did not move the tag or re-upload
 unchanged SDK packages. Only after verification succeeds may the marketplace
 job publish implementing packages under `extensions-v0.1.0a31`.
 

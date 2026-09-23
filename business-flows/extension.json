@@ -1,7 +1,7 @@
 {
   "schema_version": "sanka-extension-manifest/v2",
   "id": "sanka/business-flows",
-  "version": "0.1.0a1",
+  "version": "0.1.0a2",
   "kind": "flow",
   "protocol_version": "sanka-flow-extension/v1",
   "commands": [
@@ -21,11 +21,11 @@
     }
   ],
   "runtime": {
-    "sanka_cli": ">=0.2.13,<0.3"
+    "sanka_cli": ">=0.2.13,<0.4"
   },
   "distribution": {
     "name": "sanka-extension-business-flows",
-    "version": "0.1.0a1",
+    "version": "0.1.0a2",
     "executable": "sanka-extension-business-flows"
   },
   "wheels": [
@@ -40,9 +40,9 @@
       "sha256": "34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e"
     },
     {
-      "name": "sanka_extension_business_flows-0.1.0a1-py3-none-any.whl",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/business-flows-v0.1.0a1/sanka_extension_business_flows-0.1.0a1-py3-none-any.whl",
-      "sha256": "9128a3a532f7873b2ee62a2a2d0442e7a1f298fdc1d74ad5bdc8cc5a819c1516"
+      "name": "sanka_extension_business_flows-0.1.0a2-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/business-flows-v0.1.0a2/sanka_extension_business_flows-0.1.0a2-py3-none-any.whl",
+      "sha256": "fe5649599980a03b4c35ba3eb843750fb69d12d21f000846832049375ffb1a2e"
     }
   ]
 }
