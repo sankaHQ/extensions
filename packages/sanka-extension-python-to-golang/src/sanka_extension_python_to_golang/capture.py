@@ -1563,6 +1563,10 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 and source != root / config.get("models_file", "")
             ):
                 unconsumed.append(relative.as_posix())
+    if framework == "drf" and (root / "manage.py").is_file():
+        from .drf_project import capture_project
+
+        return capture_project(root, config, records, total)
     # Only modules outside the statically imported graph can be source tests.
     # They remain fingerprinted; their assertions are not translated or executed.
     source_tests = sorted(

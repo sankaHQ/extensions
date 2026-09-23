@@ -1129,6 +1129,16 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
         )
     except ReplayError as error:
         return failure_response(request, code="SANKA_EXTENSION_REPLAY_INVALID", message=str(error))
+    except ModuleNotFoundError as error:
+        return failure_response(
+            request,
+            code="SANKA_SOURCE_DEPENDENCY_MISSING",
+            message=(
+                f"Missing source dependency {error.name!r} in {sys.executable}. "
+                "Create the project's .venv with the same Python version as the extension "
+                "and install its requirements, including Django and Django REST framework."
+            ),
+        )
     except Exception as error:
         return failure_response(
             request, code="SANKA_EXTENSION_EXECUTION_FAILED", message=str(error)

@@ -15,6 +15,21 @@ from test_golang_schema import model_source, schema_dsn
 from test_golang_writes import flask_write_source
 
 ROOT = Path(__file__).resolve().parents[3]
+PROJECT_SOURCES = (
+    "drf",
+    "flask",
+    "fastapi",
+    "fastapi-async",
+    "drf-project",
+    "drf-multiapp",
+    "drf-crossapp",
+    "drf-postgresql",
+    "drf-queries",
+    "drf-complete",
+    "flask-complete",
+    "fastapi-complete",
+    "fastapi-async-complete",
+)
 
 
 def hashes(root):
@@ -68,21 +83,92 @@ def installed_cli(tmp_path_factory):
         report["candidate"] = candidate.report
         report["outcome"] = (
             "passed"
-            if len(report["cases"]) == 16 and all(c["outcome"] == "passed" for c in report["cases"])
+            if len(report["cases"]) == len(PROJECT_SOURCES) * 4
+            and all(c["outcome"] == "passed" for c in report["cases"])
             else "failed"
         )
         report_path.write_text(json.dumps(report, indent=2) + "\n")
 
 
 def cli_project(root, framework, target):
+    if framework.endswith("-complete"):
+        from test_golang_complete_projects import complete_project
+
+        return complete_project(root, framework.split("-")[0], target, "async" in framework)
+    if framework == "drf-queries":
+        from test_golang_drf_queries import query_project
+
+        return query_project(root) | {"target_framework": target}
+    if framework in {"drf-project", "drf-multiapp", "drf-crossapp", "drf-postgresql"}:
+        from test_golang_drf_project import (
+            crossapp_project,
+            multiapp_project,
+            postgres_project,
+            project,
+        )
+
+        factory = {
+            "drf-project": project,
+            "drf-multiapp": multiapp_project,
+            "drf-crossapp": crossapp_project,
+            "drf-postgresql": postgres_project,
+        }[framework]
+        config = factory(root) | {"target_framework": target}
+        scenario = root / "sanka-verify.json"
+        document = json.loads(scenario.read_text())
+        if framework == "drf-multiapp":
+            document = json.loads(json.dumps(document).replace("/api/", "/shop/"))
+            sales = json.loads(json.dumps(document["scenarios"]).replace("/shop/", "/sales/"))
+            for case in sales:
+                case["id"] = "sales-" + case["id"]
+            document["scenarios"] += sales
+        if framework == "drf-postgresql":
+            document.pop("db_env", None)
+        scenario.write_text(json.dumps(document))
+        return config
     if framework != "flask":
-        return temporal_project(root, framework, target)
+        config = temporal_project(root, framework, target)
+        if framework.startswith("fastapi"):
+            package = root / "src/backend"
+            source = (package / "main.py").read_text()
+            source = source.replace(
+                "from fastapi import FastAPI,", "from fastapi import APIRouter,"
+            )
+            source = source.replace(
+                "app = FastAPI(exception_handlers={RequestValidationError: invalid_request})",
+                "api = APIRouter()",
+            ).replace("@app.", "@api.")
+            (package / "routes.py").write_text(source)
+            (package / "main.py").write_text("""from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from .routes import api, invalid_request
+def create_app():
+    app = FastAPI(exception_handlers={RequestValidationError: invalid_request})
+    app.include_router(api)
+    return app
+app = create_app()
+""")
+        return config
     package = root / "src/backend"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("")
     (package / "models.py").write_text(model_source("flask"))
+    (package / "routes.py").write_text(
+        flask_write_source()
+        .replace("from models import", "from .models import")
+        .replace("from flask import Flask,", "from flask import Blueprint,")
+        .replace("app = Flask(__name__)", 'api = Blueprint("api", __name__)')
+        .replace("@app.", "@api.")
+    )
     (package / "main.py").write_text(
-        flask_write_source().replace("from models import", "from .models import")
+        """from flask import Flask
+from .routes import api
+def create_app():
+    app = Flask(__name__)
+    app.register_blueprint(api)
+    return app
+app = create_app()
+"""
     )
     body = {"name": "first", "count": 1, "enabled": True}
     scenarios = [
@@ -141,7 +227,7 @@ def cli_project(root, framework, target):
     }
 
 
-@pytest.mark.parametrize("framework", ["drf", "flask", "fastapi", "fastapi-async"])
+@pytest.mark.parametrize("framework", PROJECT_SOURCES)
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
 def test_installed_cli_database_lifecycle(tmp_path, installed_cli, framework, target):
     import psycopg
@@ -162,7 +248,7 @@ def test_installed_cli_database_lifecycle(tmp_path, installed_cli, framework, ta
             for name in schemas:
                 admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(name)))
             source_url, target_url = [schema_dsn(dsn, name) for name in schemas]
-            if framework != "drf":
+            if not framework.startswith("drf"):
                 source_url = source_url.replace("postgresql://", "postgresql+psycopg://", 1)
             candidate.env.update(
                 SANKA_GO_SOURCE_TEST_DATABASE_URL=source_url,
@@ -209,7 +295,10 @@ def test_installed_cli_database_lifecycle(tmp_path, installed_cli, framework, ta
             verified = cli("verify")["data"]
             assert verified["ok"] and verified["source"] == verified["candidate"]
             assert verified["qualification"]["source_compared"]
-            assert all("tables" in row and "sequences" in row for row in verified["candidate"])
+            observations = verified["candidate"]
+            if "drf_project" in planned["capture"]:
+                observations = [row for group in observations for row in group]
+            assert all("tables" in row and "sequences" in row for row in observations)
             assert hashes(tmp_path) == before
             assert hashes(output) == generated
             case.update(
