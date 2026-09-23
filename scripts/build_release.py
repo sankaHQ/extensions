@@ -16,12 +16,7 @@ from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_DEPENDENCY_WHEEL_BYTES = 128 * 1024 * 1024
-MARKETPLACE_PACKAGES = (
-    "sanka-drf-replay",
-    "sanka-code-migration",
-    "sanka-extension-drf-to-fastapi",
-    "sanka-extension-drf-to-flask",
-)
+MARKETPLACE_PACKAGES: tuple[str, ...] = ()
 LOCAL_WHEELS = (
     "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
     "sanka_code_migration-0.1.0a3-py3-none-any.whl",
@@ -100,6 +95,40 @@ PINNED_EXTENSION_SDK = LockedWheel(
 )
 PINNED_LOCAL_WHEELS = (
     PINNED_EXTENSION_SDK,
+    # These a31 assets are published; rebuilding changed source under the same
+    # wheel filenames would make the catalog point at bytes users cannot fetch.
+    LockedWheel(
+        "sanka-drf-replay",
+        "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
+        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a31/"
+        "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
+        "a60f2124202efe75b10c5c71e6dd3681a77cdd8fbb3568424bd8c18362e5c2bf",
+        26608,
+    ),
+    LockedWheel(
+        "sanka-code-migration",
+        "sanka_code_migration-0.1.0a3-py3-none-any.whl",
+        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a31/"
+        "sanka_code_migration-0.1.0a3-py3-none-any.whl",
+        "e510b981e5ddcad3a269106a69565d034486abed275aaf4217537c6b6b1efe11",
+        75727,
+    ),
+    LockedWheel(
+        "sanka-extension-drf-to-fastapi",
+        "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl",
+        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a31/"
+        "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl",
+        "f07bafcd615126e26e26f3abb40f10de870c25614c04b4d3957980e73222e700",
+        78894,
+    ),
+    LockedWheel(
+        "sanka-extension-drf-to-flask",
+        "sanka_extension_drf_to_flask-0.1.0a12-py3-none-any.whl",
+        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a31/"
+        "sanka_extension_drf_to_flask-0.1.0a12-py3-none-any.whl",
+        "1bd9cc1d1d38a49bd58a7578afe8313914c02d4508bacf0680ba101420b5e891",
+        119228,
+    ),
     LockedWheel(
         "sanka-connector-sdk",
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
@@ -157,8 +186,8 @@ MARKETPLACE_WHEELS = LOCAL_WHEELS + tuple(wheel.name for wheel in LOCKED_DEPENDE
 def download_locked_wheel(output_dir: Path, wheel: LockedWheel) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     destination = output_dir / wheel.name
-    # Reuse only immutable dependency bytes, verified on every invocation. Own
-    # packages are still rebuilt from source. Failed downloads cannot enter this cache.
+    # Reuse only immutable published bytes, verified on every invocation.
+    # Failed downloads cannot enter this cache.
     if (
         not destination.is_symlink()
         and destination.is_file()
@@ -205,7 +234,10 @@ def _prepare_output(output_dir: Path, *, root: Path = ROOT) -> Path:
     if not relative.parts or relative.parts[0] not in {"dist", "release"}:
         raise ValueError("release output directory must be repository-owned")
     output_dir.mkdir(parents=True, exist_ok=True)
+    pinned = {wheel.name for wheel in PINNED_LOCAL_WHEELS}
     for name in LOCAL_WHEELS:
+        if name in pinned:
+            continue
         (output_dir / name).unlink(missing_ok=True)
     return output_dir
 
