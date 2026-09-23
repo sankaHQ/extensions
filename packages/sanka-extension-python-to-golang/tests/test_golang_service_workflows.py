@@ -272,8 +272,10 @@ def test_workflow_unsupported(tmp_path: Path, mutation: str) -> None:
     assert workflow_capture(tmp_path, source.replace(before, after))["gaps"]
 
 
-def write_project(root: Path, framework: str, asynchronous: bool = False) -> None:
-    tree = ast.parse(service_source(framework, asynchronous))
+def write_project(
+    root: Path, framework: str, asynchronous: bool = False, *, source: str | None = None
+) -> None:
+    tree = ast.parse(service_source(framework, asynchronous, source))
     repository = [
         n
         for n in tree.body
