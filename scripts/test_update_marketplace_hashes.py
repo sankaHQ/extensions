@@ -154,7 +154,7 @@ def test_build_release_cleanup_is_limited_to_known_wheels(tmp_path: Path) -> Non
 
     _prepare_output(output, root=root)
 
-    assert not stale_wheel.exists()
+    assert stale_wheel.read_bytes() == b"stale"
     assert dependency.exists()
     assert keep.read_text() == "keep"
     with pytest.raises(ValueError, match="repository-owned"):
