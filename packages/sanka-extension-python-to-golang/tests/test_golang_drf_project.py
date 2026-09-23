@@ -2,6 +2,7 @@
 # ruff: noqa: E501
 """Conventional Django projects must retain serializer and transaction semantics."""
 
+import ast
 import json
 import os
 import shutil
@@ -14,6 +15,333 @@ from sanka_extension_python_to_golang.drf_replay import replay_project, scenario
 from sanka_extension_python_to_golang.render import render
 
 FIXTURE = Path(__file__).parent / "fixtures/drf_project"
+
+
+def multiapp_project(tmp_path):
+    config = project(tmp_path)
+    shutil.copytree(tmp_path / "orders", tmp_path / "sales")
+    for path in (tmp_path / "sales").rglob("*.py"):
+        path.write_text(path.read_text().replace("orders", "sales"))
+    settings = tmp_path / "shop_config/settings.py"
+    settings.write_text(settings.read_text().replace('"orders",', '"orders", "sales",'))
+    for app in ("orders", "sales"):
+        (tmp_path / app / "urls.py").write_text(
+            "from django.urls import path, include\n"
+            "from rest_framework.routers import DefaultRouter\n"
+            f"from {app}.views import OrderViewSet as View\n"
+            "router = DefaultRouter()\n"
+            "router.register('orders', View, basename='order')\n"
+            "urlpatterns = [path('', include(router.urls))]\n"
+        )
+    (tmp_path / "shop_config/urls.py").write_text(
+        "from django.urls import path, include\n"
+        "urlpatterns = [path('shop/', include('orders.urls')), "
+        "path('sales/', include('sales.urls'))]\n"
+    )
+    return config
+
+
+def test_multiapp_drf_duplicate_model_names_and_nested_urls(tmp_path):
+    config = multiapp_project(tmp_path)
+    result = capture(tmp_path, config)
+    assert result["gaps"] == []
+    assert len({m["name"] for m in result["models"]}) == 4
+    assert {m["table"] for m in result["models"]} == {
+        "orders_order",
+        "orders_orderitem",
+        "sales_order",
+        "sales_orderitem",
+    }
+    assert [v["path"] for v in result["drf_project"]["views"]] == [
+        "/shop/orders/",
+        "/sales/orders/",
+    ]
+    assert capture(tmp_path, config) == result
+
+
+def test_conventional_main_wrapper_and_safe_aliases(tmp_path):
+    config = project(tmp_path)
+    (tmp_path / "manage.py").write_text(
+        "import os as environment\nimport sys\n"
+        "def main():\n"
+        '    environment.environ.setdefault("DJANGO_SETTINGS_MODULE", "shop_config.settings")\n'
+        "    from django.core.management import execute_from_command_line as execute\n"
+        "    execute(sys.argv)\n"
+        'if __name__ == "__main__":\n    main()\n'
+    )
+    assert capture(tmp_path, config)["gaps"] == []
+
+
+def test_standard_django_startup_and_environment_secret(tmp_path):
+    config = project(tmp_path)
+    (tmp_path / "manage.py").write_text('''import os
+import sys
+def main():
+    """Run administrative tasks."""
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "shop_config.settings")
+    try:
+        from django.core.management import execute_from_command_line
+    except ImportError as exc:
+        raise ImportError("Could not import Django") from exc
+    execute_from_command_line(sys.argv)
+if __name__ == "__main__":
+    main()
+''')
+    path = tmp_path / "shop_config/settings.py"
+    tree = ast.parse(path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and node.targets[0].id == "SECRET_KEY":
+            node.value = ast.parse('os.environ["FIXTURE_SECRET"]', mode="eval").body
+    path.write_text(ast.unparse(tree))
+    assert capture(tmp_path, config)["gaps"] == []
+
+
+def test_startup_import_fallback_cannot_execute_custom_code(tmp_path):
+    config = project(tmp_path)
+    path = tmp_path / "manage.py"
+    path.write_text(path.read_text() + '\nopen("executed", "w").write("bad")\n')
+    assert capture(tmp_path, config)["gaps"]
+    assert not (tmp_path / "executed").exists()
+
+
+def test_multiapp_url_cycle_has_location(tmp_path):
+    config = multiapp_project(tmp_path)
+    (tmp_path / "orders/urls.py").write_text(
+        "from django.urls import path, include\n"
+        "urlpatterns = [path('', include('shop_config.urls'))]\n"
+    )
+    result = capture(tmp_path, config)
+    assert not result["generation_ready"]
+    assert "orders/urls.py" in str(result["gaps"])
+    assert "cycle" in str(result["gaps"]).lower()
+
+
+def test_multiapp_import_cycle_rejected(tmp_path):
+    config = multiapp_project(tmp_path)
+    for app, other in (("orders", "sales"), ("sales", "orders")):
+        path = tmp_path / app / "models.py"
+        path.write_text(f"from {other}.models import Order as Foreign\n" + path.read_text())
+    result = capture(tmp_path, config)
+    assert "import cycle" in str(result["gaps"])
+
+
+def test_duplicate_basename_on_one_router_rejected(tmp_path):
+    config = multiapp_project(tmp_path)
+    (tmp_path / "shop_config/urls.py").write_text("""from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from orders.views import OrderViewSet as First
+from sales.views import OrderViewSet as Second
+router = DefaultRouter()
+router.register('orders', First, basename='order')
+router.register('sales', Second, basename='order')
+urlpatterns = [path('', include(router.urls))]
+""")
+    # Remove the now-unreachable modules rather than hiding them from inventory.
+    for app in ("orders", "sales"):
+        (tmp_path / app / "urls.py").unlink()
+    assert capture(tmp_path, config)["gaps"]
+
+
+def test_multiapp_generation_is_location_and_hashseed_independent(tmp_path):
+    roots = [tmp_path / "a", tmp_path / "b"]
+    results = []
+    for seed, root in enumerate(roots):
+        config = multiapp_project(root)
+        completed = subprocess.run(
+            [
+                os.sys.executable,
+                "-c",
+                "import json,sys; from pathlib import Path; from sanka_extension_python_to_golang.capture import capture; from sanka_extension_python_to_golang.render import render; print(json.dumps(render(capture(Path(sys.argv[1]),json.loads(sys.argv[2]))),sort_keys=True))",
+                str(root),
+                json.dumps(config),
+            ],
+            env=os.environ | {"PYTHONHASHSEED": str(seed)},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        results.append(completed.stdout)
+    assert results[0] == results[1]
+
+
+def crossapp_project(tmp_path):
+    config = project(tmp_path)
+    (tmp_path / "shipping/migrations").mkdir(parents=True)
+    for name in ("shipping/__init__.py", "shipping/migrations/__init__.py"):
+        (tmp_path / name).write_text("")
+    settings = tmp_path / "shop_config/settings.py"
+    settings.write_text(settings.read_text().replace('"orders",', '"orders", "shipping",'))
+    path = tmp_path / "orders/models.py"
+    tree = ast.parse(path.read_text())
+    child = tree.body.pop()
+    child.body[0].value.args[0] = ast.Constant("orders.Order")
+    path.write_text(ast.unparse(tree))
+    (tmp_path / "shipping/models.py").write_text(
+        "from django.db import models\n" + ast.unparse(child)
+    )
+    path = tmp_path / "orders/serializers.py"
+    path.write_text(
+        path.read_text().replace(
+            "from orders.models import Order, OrderItem",
+            "from orders.models import Order\nfrom shipping.models import OrderItem",
+        )
+    )
+    path = tmp_path / "orders/migrations/0001_initial.py"
+    tree = ast.parse(path.read_text())
+    operations = next(
+        n.value
+        for n in tree.body[-1].body
+        if isinstance(n, ast.Assign) and n.targets[0].id == "operations"
+    )
+    child = operations.elts.pop()
+    path.write_text(ast.unparse(tree))
+    operations.elts = [child]
+    dependency = next(
+        n
+        for n in tree.body[-1].body
+        if isinstance(n, ast.Assign) and n.targets[0].id == "dependencies"
+    )
+    dependency.value = ast.parse("[('orders', '0001_initial')]", mode="eval").body
+    (tmp_path / "shipping/migrations/0001_initial.py").write_text(ast.unparse(tree))
+    return config
+
+
+def test_crossapp_foreign_key_and_initial_migrations(tmp_path):
+    config = crossapp_project(tmp_path)
+    result = capture(tmp_path, config)
+    assert result["gaps"] == []
+    child = next(m for m in result["models"] if m["table"] == "shipping_orderitem")
+    assert (
+        next(f for f in child["fields"] if f["name"] == "order_id")["references"]["table"]
+        == "orders_order"
+    )
+    assert result["drf_project"]["views"][0]["serializer"]["nested"]
+
+
+def test_crossapp_missing_migration_dependency_rejected(tmp_path):
+    config = crossapp_project(tmp_path)
+    path = tmp_path / "shipping/migrations/0001_initial.py"
+    path.write_text(path.read_text().replace("[('orders', '0001_initial')]", "[]"))
+    assert capture(tmp_path, config)["gaps"]
+
+
+def test_initial_dependency_cannot_reference_package_initializer(tmp_path):
+    config = crossapp_project(tmp_path)
+    path = tmp_path / "shipping/migrations/0001_initial.py"
+    path.write_text(path.read_text().replace("'0001_initial'", "'__init__'"))
+    assert capture(tmp_path, config)["gaps"]
+
+
+def test_nested_router_cannot_shadow_a_prior_detail_route(tmp_path):
+    config = multiapp_project(tmp_path)
+    path = tmp_path / "shop_config/urls.py"
+    path.write_text(path.read_text().replace("'sales/'", "'shop/orders/'"))
+    assert capture(tmp_path, config)["gaps"]
+
+
+def postgres_project(tmp_path):
+    config = crossapp_project(tmp_path)
+    path = tmp_path / "shop_config/settings.py"
+    tree = ast.parse(path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and node.targets[0].id == "DATABASES":
+            node.value = ast.parse(
+                "{'default': {'ENGINE': 'django.db.backends.postgresql', "
+                + ", ".join(
+                    repr(k) + ": os.environ[" + repr("FIXTURE_PG_" + k) + "]"
+                    for k in ("NAME", "USER", "PASSWORD", "HOST", "PORT")
+                )
+                + "}}",
+                mode="eval",
+            ).body
+    path.write_text(ast.unparse(tree))
+    serializer = tmp_path / "orders/serializers.py"
+    serializer.write_text(
+        serializer.read_text().replace("    quantity = serializers.IntegerField(min_value=1)\n", "")
+    )
+    path = tmp_path / "sanka-verify.json"
+    document = json.loads(path.read_text())
+    document["scenarios"].append(
+        {
+            "id": "integer-overflow",
+            "method": "POST",
+            "path": "/api/orders/",
+            "expected_status": 400,
+            "body": {
+                "reference": "overflow",
+                "items": [{"sku": "a", "quantity": 2147483648, "price": "1.00"}],
+            },
+        }
+    )
+    huge = json.loads(json.dumps(document["scenarios"][-1]))
+    huge["id"] = "integer-huge"
+    huge["body"]["items"][0]["quantity"] = 2**70
+    document["scenarios"].append(huge)
+    path.write_text(json.dumps(document))
+    return config
+
+
+def test_postgres_conventional_capture_preserves_native_sequences(tmp_path):
+    result = capture(tmp_path, postgres_project(tmp_path))
+    assert result["gaps"] == []
+    assert result["drf_project"]["database"]["engine"] == "postgresql"
+    generated = render(result)
+    assert "migration_identity" not in generated["migrations/00001_initial.sql"]
+    assert "GENERATED BY DEFAULT AS IDENTITY" in generated["migrations/00001_initial.sql"]
+    assert "nextval" in generated["drf.go"]
+
+
+@pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
+@pytest.mark.parametrize("factory", [multiapp_project, crossapp_project, postgres_project])
+def test_general_project_native_replay(tmp_path, monkeypatch, target, factory):
+    dsn = os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN")
+    if os.getenv("SANKA_GO_TESTS") != "1" or not dsn:
+        pytest.skip("requires native Go and isolated PostgreSQL fixture")
+    import uuid
+
+    import psycopg
+    from psycopg import sql
+    from test_golang_schema import schema_dsn
+
+    config = factory(tmp_path) | {"target_framework": target}
+    scenario = tmp_path / "sanka-verify.json"
+    if factory is multiapp_project:
+        document = json.loads(scenario.read_text().replace("/api/", "/shop/"))
+        sales = json.loads(json.dumps(document["scenarios"]).replace("/shop/", "/sales/"))
+        for case in sales:
+            case["id"] = "sales-" + case["id"]
+        document["scenarios"] += sales
+        document["scenarios"].append(
+            {
+                "id": "missing-order",
+                "method": "GET",
+                "path": "/shop/orders/999/",
+                "expected_status": 404,
+            }
+        )
+        scenario.write_text(json.dumps(document))
+    elif factory is postgres_project:
+        document = json.loads(scenario.read_text())
+        document.pop("db_env", None)
+        scenario.write_text(json.dumps(document))
+    captured = capture(tmp_path, config)
+    assert not captured["gaps"], captured["gaps"]
+    output = tmp_path / ".sanka/candidate"
+    for name, contents in render(captured).items():
+        path = output / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents)
+    name = "general_" + uuid.uuid4().hex
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(name)))
+        try:
+            monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", schema_dsn(dsn, name))
+            monkeypatch.setenv("SANKA_GO_SOURCE_TEST_DATABASE_URL", dsn)
+            report = replay_project(tmp_path, output, captured, "verify")
+            assert report["ok"], report["failures"]
+            assert report["candidate"] == report["source"]
+        finally:
+            admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
 
 
 def project(tmp_path):
@@ -51,7 +379,7 @@ def test_conventional_drf_capture(tmp_path, target):
         (
             "orders/views.py",
             "queryset = Order.objects.all()",
-            "queryset = Order.objects.filter(status='paid')",
+            "queryset = Order.objects.filter(status__contains='paid')",
         ),
         ("orders/serializers.py", "return order", "order.memo = 'changed'\n        return order"),
         (

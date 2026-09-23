@@ -42,7 +42,9 @@ def _assignments(body: list[ast.stmt]) -> dict[str, ast.expr]:
 
 
 def _settings(root: Path) -> tuple[str, dict[str, Any], set[str]]:
-    manage = ast.parse((root / "manage.py").read_text())
+    from .drf_modules import startup
+
+    manage = startup(ast.parse((root / "manage.py").read_text()))
     calls = [
         n
         for n in ast.walk(manage)
@@ -65,9 +67,13 @@ if __name__ == "__main__":
     if ast.dump(manage) != ast.dump(expected):
         raise ValueError("manage.py contains uncaptured startup behavior")
     filename, tree = _module(root, name)
+    tree = startup(tree)
     imports = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
     allowed = {"from __future__ import annotations", "import os", "from pathlib import Path"}
-    if {ast.unparse(n) for n in imports} != allowed:
+    if not {ast.unparse(n) for n in imports} <= allowed or not {
+        "import os",
+        "from pathlib import Path",
+    } <= {ast.unparse(n) for n in imports}:
         raise ValueError("settings requires explicit os/Path imports")
     values = _assignments([n for n in tree.body if n not in imports])
     required = {
@@ -88,15 +94,32 @@ if __name__ == "__main__":
         raise ValueError("settings contains unqualified configuration")
     if ast.unparse(values["BASE_DIR"]) != "Path(__file__).resolve().parent.parent":
         raise ValueError("unsupported project base directory")
-    if (
-        not isinstance(_literal(values["SECRET_KEY"]), str)
-        or type(_literal(values["DEBUG"])) is not bool
-    ):
-        raise ValueError("settings key/debug must be static")
+    secret_environment = None
+    secret = values["SECRET_KEY"]
+    if isinstance(secret, ast.Subscript) and ast.unparse(secret.value) == "os.environ":
+        secret_environment = _literal(secret.slice)
+        if (
+            not isinstance(secret_environment, str)
+            or not re.fullmatch(r"[A-Z][A-Z_0-9]*", secret_environment)
+            or secret_environment in {"HOME", "PATH", "PYTHONPATH", "DJANGO_SETTINGS_MODULE"}
+        ):
+            raise ValueError("unsafe secret environment variable")
+    elif not isinstance(_literal(secret), str):
+        raise ValueError("SECRET_KEY must be a literal or explicit environment lookup")
+    if type(_literal(values["DEBUG"])) is not bool:
+        raise ValueError("DEBUG must be static")
     if _literal(values["MIDDLEWARE"]) != []:
         raise ValueError("custom Django middleware requires capture")
-    if _literal(values["REST_FRAMEWORK"]) != {"UNAUTHENTICATED_USER": None}:
+    rest = _literal(values["REST_FRAMEWORK"])
+    if (
+        not isinstance(rest, dict)
+        or set(rest) - {"UNAUTHENTICATED_USER", "PAGE_SIZE"}
+        or rest.get("UNAUTHENTICATED_USER", False) is not None
+    ):
         raise ValueError("DRF settings require separate capture")
+    page_size = rest.get("PAGE_SIZE")
+    if page_size is not None and (type(page_size) is not int or not 0 < page_size <= 1000):
+        raise ValueError("PAGE_SIZE must be a positive integer up to 1000")
     if _literal(values["USE_TZ"]) is not True or _literal(values["TIME_ZONE"]) != "UTC":
         raise ValueError("only explicit UTC settings are qualified")
     auto = _literal(values["DEFAULT_AUTO_FIELD"])
@@ -107,8 +130,10 @@ if __name__ == "__main__":
     if not isinstance(apps, list) or len(set(apps)) != len(apps) or not builtin <= set(apps):
         raise ValueError("unsupported installed apps")
     local = [a for a in apps if a not in builtin]
-    if len(local) != 1 or not re.fullmatch(r"[a-z][a-z0-9_]*", local[0]):
-        raise ValueError("one conventional Django application is qualified")
+    if not local or any(
+        not isinstance(a, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", a) for a in local
+    ):
+        raise ValueError("installed apps require explicit local package names")
     db = values["DATABASES"]
     if (
         not isinstance(db, ast.Dict)
@@ -118,36 +143,65 @@ if __name__ == "__main__":
     ):
         raise ValueError("one explicit source database is required")
     opts = {_literal(k): v for k, v in zip(db.values[0].keys, db.values[0].values, strict=True)}
-    if set(opts) != {"ENGINE", "NAME"} or _literal(opts["ENGINE"]) != "django.db.backends.sqlite3":
-        raise ValueError("this conventional profile requires a SQLite source")
-    dbname = opts["NAME"]
-    if (
-        not isinstance(dbname, ast.Call)
-        or ast.unparse(dbname.func) != "os.environ.get"
-        or len(dbname.args) != 2
-        or dbname.keywords
-        or not isinstance(dbname.args[0], ast.Constant)
-    ):
-        raise ValueError("SQLite path must use an explicit environment override")
-    env = _literal(dbname.args[0])
-    if (
-        not isinstance(env, str)
-        or not re.fullmatch(r"[A-Z][A-Z_0-9]*", env)
-        or env in {"HOME", "PATH", "PYTHONPATH", "DJANGO_SETTINGS_MODULE"}
-    ):
-        raise ValueError("unsafe database environment variable")
-    fallback = dbname.args[1]
-    if (
-        not isinstance(fallback, ast.Call)
-        or ast.unparse(fallback.func) != "str"
-        or fallback.keywords
-        or len(fallback.args) != 1
-        or not isinstance(fallback.args[0], ast.BinOp)
-        or not isinstance(fallback.args[0].op, ast.Div)
-        or ast.unparse(fallback.args[0].left) != "BASE_DIR"
-        or not isinstance(_literal(fallback.args[0].right), str)
-    ):
-        raise ValueError("unrecognized SQLite fallback path")
+    if _literal(opts.get("ENGINE")) == "django.db.backends.postgresql":
+        if set(opts) != {"ENGINE", "NAME", "USER", "PASSWORD", "HOST", "PORT"}:
+            raise ValueError("PostgreSQL requires explicit environment-backed connection fields")
+        environments = {}
+        for key in ("NAME", "USER", "PASSWORD", "HOST", "PORT"):
+            node = opts[key]
+            if not isinstance(node, ast.Subscript) or ast.unparse(node.value) != "os.environ":
+                raise ValueError("PostgreSQL connection fields must use os.environ names")
+            env = _literal(node.slice)
+            if (
+                not isinstance(env, str)
+                or not re.fullmatch(r"[A-Z][A-Z_0-9]*", env)
+                or env in {"HOME", "PATH", "PYTHONPATH", "DJANGO_SETTINGS_MODULE"}
+            ):
+                raise ValueError("unsafe database environment variable")
+            environments[key] = env
+        if len(set(environments.values())) != len(environments):
+            raise ValueError("database environment names must be independent")
+        database: dict[str, Any] = {"engine": "postgresql", "environments": environments}
+    else:
+        if (
+            set(opts) != {"ENGINE", "NAME"}
+            or _literal(opts["ENGINE"]) != "django.db.backends.sqlite3"
+        ):
+            raise ValueError("this conventional profile requires a SQLite source")
+        dbname = opts["NAME"]
+        if (
+            not isinstance(dbname, ast.Call)
+            or ast.unparse(dbname.func) != "os.environ.get"
+            or len(dbname.args) != 2
+            or dbname.keywords
+            or not isinstance(dbname.args[0], ast.Constant)
+        ):
+            raise ValueError("SQLite path must use an explicit environment override")
+        env = _literal(dbname.args[0])
+        if (
+            not isinstance(env, str)
+            or not re.fullmatch(r"[A-Z][A-Z_0-9]*", env)
+            or env in {"HOME", "PATH", "PYTHONPATH", "DJANGO_SETTINGS_MODULE"}
+        ):
+            raise ValueError("unsafe database environment variable")
+        fallback = dbname.args[1]
+        if (
+            not isinstance(fallback, ast.Call)
+            or ast.unparse(fallback.func) != "str"
+            or fallback.keywords
+            or len(fallback.args) != 1
+            or not isinstance(fallback.args[0], ast.BinOp)
+            or not isinstance(fallback.args[0].op, ast.Div)
+            or ast.unparse(fallback.args[0].left) != "BASE_DIR"
+            or not isinstance(_literal(fallback.args[0].right), str)
+        ):
+            raise ValueError("unrecognized SQLite fallback path")
+        database = {"engine": "sqlite", "environment": env}
+    if secret_environment and secret_environment in {
+        database.get("environment"),
+        *database.get("environments", {}).values(),
+    }:
+        raise ValueError("secret and database environment names must be independent")
     hosts = _literal(values["ALLOWED_HOSTS"])
     if not isinstance(hosts, list) or not hosts or any(not isinstance(h, str) for h in hosts):
         raise ValueError("ALLOWED_HOSTS must be static strings")
@@ -155,10 +209,13 @@ if __name__ == "__main__":
         name,
         {
             "app": local[0],
+            "apps": local,
             "urls": _literal(values["ROOT_URLCONF"]),
             "auto": auto,
             "hosts": hosts,
-            "database": {"engine": "sqlite", "environment": env},
+            "database": database,
+            "secret_environment": secret_environment,
+            "page_size": page_size,
         },
         {"manage.py", filename},
     )
@@ -190,126 +247,184 @@ def capture_project(
         if config["database_layer"] != "pgx" or config["schema_mode"] != "empty":
             raise ValueError("conventional DRF migration requires pgx and an empty target schema")
         settings_name, settings, consumed = _settings(root)
-        app = settings["app"]
-        models_file, model_tree = _module(root, app + ".models")
-        if config["models_file"] != models_file:
-            raise ValueError("models_file must match the installed Django application")
-        models = _models(model_tree, app, settings["auto"])
-        model_map = {m["name"]: m for m in models}
-        serializers_file, serializer_tree = _module(root, app + ".serializers")
-        serializers = _classes(
-            serializer_tree,
-            {
-                "django.db": {"transaction"},
-                "rest_framework": {"serializers"},
-                app + ".models": set(model_map),
-            },
-            "serializers.ModelSerializer",
-        )
-        views_file, view_tree = _module(root, app + ".views")
-        views = _classes(
-            view_tree,
-            {
-                "rest_framework.viewsets": {"ModelViewSet"},
-                app + ".models": set(model_map),
-                app + ".serializers": set(serializers),
-            },
-            "ModelViewSet",
-        )
-        url_file, urls = _module(root, settings["urls"])
-        if url_file != config["source_file"]:
-            raise ValueError("source_file must match ROOT_URLCONF")
-        expected_imports = {
-            "django.urls": {"include", "path"},
-            "rest_framework.routers": {"DefaultRouter"},
-            app + ".views": set(views),
+        from .drf_modules import check_imports, normalize, urls
+
+        apps = settings["apps"]
+        qualified = len(apps) > 1
+        trees: dict[str, ast.Module] = {}
+        symbols: dict[str, dict[str, str]] = {
+            "django.db": {"models": "models", "transaction": "transaction"},
+            "rest_framework": {"serializers": "serializers"},
+            "rest_framework.viewsets": {"ModelViewSet": "ModelViewSet"},
+            "rest_framework.filters": {"OrderingFilter": "OrderingFilter"},
+            "rest_framework.pagination": {"LimitOffsetPagination": "LimitOffsetPagination"},
         }
-        imported: set[str] = set()
-        statements: list[ast.stmt] = []
-        for node in urls.body:
-            if (
-                isinstance(node, ast.ImportFrom)
-                and node.module in expected_imports
-                and not node.level
-                and not statements
-            ):
-                for alias in node.names:
-                    if (
-                        alias.asname
-                        or alias.name not in expected_imports[node.module]
-                        or alias.name in imported
-                    ):
-                        raise ValueError("unsupported URL imports")
-                    imported.add(alias.name)
-            else:
-                statements.append(node)
-        if (
-            not {"include", "path", "DefaultRouter", *views} <= imported
-            or len(statements) < 3
-            or not _same(statements[0], "router = DefaultRouter()")
-        ):
-            raise ValueError("URLs require an explicit DefaultRouter")
-        urlpatterns = _assignments([statements[-1]])
-        if (
-            set(urlpatterns) != {"urlpatterns"}
-            or not isinstance(urlpatterns["urlpatterns"], ast.List)
-            or len(urlpatterns["urlpatterns"].elts) != 1
-        ):
-            raise ValueError("one literal router prefix is qualified")
-        prefix_call = urlpatterns["urlpatterns"].elts[0]
-        if not isinstance(prefix_call, ast.Call) or len(prefix_call.args) != 2:
-            raise ValueError("unsupported URL prefix")
-        prefix = _literal(prefix_call.args[0])
-        if (
-            not isinstance(prefix, str)
-            or not re.fullmatch(r"(?:[a-zA-Z0-9_-]+/)*", prefix)
-            or not _same(statements[-1], f"urlpatterns = [path({prefix!r}, include(router.urls))]")
-        ):
-            raise ValueError("URL prefix must be a literal path")
-        used = set()
-        contracts: list[dict[str, Any]] = []
-        for registration in statements[1:-1]:
-            if not isinstance(registration, ast.Expr) or not isinstance(
-                registration.value, ast.Call
-            ):
-                raise ValueError("unsupported router configuration")
-            call = registration.value
-            if (
-                ast.unparse(call.func) != "router.register"
-                or len(call.args) != 2
-                or not isinstance(call.args[1], ast.Name)
-                or len(call.keywords) != 1
-                or call.keywords[0].arg != "basename"
-            ):
-                raise ValueError("router registration requires prefix, viewset and basename")
-            route, view_name, basename = (
-                _literal(call.args[0]),
-                call.args[1].id,
-                _literal(call.keywords[0].value),
+        for app in apps:
+            for role in ("models", "serializers", "views"):
+                module = app + "." + role
+                filename = module.replace(".", "/") + ".py"
+                if not (root / filename).exists() and role != "models":
+                    continue
+                filename, tree = _module(root, module)
+                trees[module] = tree
+                consumed.add(filename)
+                symbols[module] = {
+                    n.name: app + "__" + role + "__" + n.name if qualified else n.name
+                    for n in tree.body
+                    if isinstance(n, ast.ClassDef)
+                }
+        check_imports(trees)
+        if config["models_file"] not in {a + "/models.py" for a in apps}:
+            raise ValueError("models_file must name an installed Django application")
+        models: list[dict[str, Any]] = []
+        # Resolve initial migration dependencies before parsing foreign keys.
+        migration_trees: dict[str, tuple[str, ast.Module]] = {}
+        dependencies: dict[str, set[str]] = {}
+        for app in apps:
+            files = sorted(
+                p for p in (root / app / "migrations").glob("*.py") if p.name != "__init__.py"
             )
-            if (
-                not isinstance(route, str)
-                or not re.fullmatch(r"[a-zA-Z0-9_-]+", route)
-                or not isinstance(basename, str)
-                or not re.fullmatch(r"[a-zA-Z0-9_-]+", basename)
-                or view_name not in views
-                or view_name in used
+            if len(files) != 1:
+                raise ValueError(app + "/migrations: exactly one initial migration is required")
+            relative = files[0].relative_to(root).as_posix()
+            tree = ast.parse(files[0].read_text())
+            migration_trees[app] = (relative, tree)
+            migration_classes = [n for n in tree.body if isinstance(n, ast.ClassDef)]
+            if len(migration_classes) != 1:
+                raise ValueError(relative + ":1: migration class required")
+            deps = _literal(_assignments(migration_classes[0].body).get("dependencies"))
+            if not isinstance(deps, list) or any(
+                not isinstance(d, tuple) or len(d) != 2 or not all(isinstance(x, str) for x in d)
+                for d in deps
             ):
-                raise ValueError("unresolved or duplicate router view")
+                raise ValueError(relative + ":1: explicit migration dependencies required")
+            if len(set(deps)) != len(deps):
+                raise ValueError(relative + ":1: duplicate migration dependency")
+            dependencies[app] = {d[0] for d in deps}
+            for other, revision in deps:
+                if (
+                    other not in apps
+                    or not (root / other / "migrations" / (revision + ".py")).is_file()
+                ):
+                    raise ValueError(relative + ":1: unresolved initial migration dependency")
+        for app, (_, tree) in migration_trees.items():
+            migration_class = next(n for n in tree.body if isinstance(n, ast.ClassDef))
+            for other, revision in _literal(_assignments(migration_class.body)["dependencies"]):
+                if Path(migration_trees[other][0]).stem != revision:
+                    raise ValueError(
+                        migration_trees[app][0]
+                        + ":1: dependency must name the captured initial revision"
+                    )
+        ordered: list[str] = []
+        pending = set(apps)
+        while pending:
+            ready = sorted(a for a in pending if dependencies[a] <= set(ordered))
+            if not ready:
+                raise ValueError("initial migration dependency cycle")
+            ordered.extend(ready)
+            pending.difference_update(ready)
+        for app in ordered:
+            module = app + ".models"
+            try:
+                tree = normalize(trees[module], module, symbols)
+                parsed = _models(
+                    tree,
+                    app,
+                    settings["auto"],
+                    models,
+                    symbols,
+                    symbols[module],
+                    settings["database"]["engine"],
+                )
+                foreign_apps = {
+                    m["source_app"]
+                    for m in models
+                    if any(
+                        f.get("reference_model") == m["name"]
+                        for item in parsed
+                        for f in item["fields"]
+                    )
+                }
+                if not foreign_apps <= dependencies[app]:
+                    raise ValueError("cross-app foreign key requires initial migration dependency")
+                models.extend(parsed)
+                relative, migration = migration_trees[app]
+                _migration(
+                    migration,
+                    parsed,
+                    app,
+                    settings["auto"],
+                    models,
+                    symbols[module],
+                    dependencies[app],
+                    settings["database"]["engine"],
+                )
+            except (ValueError, TypeError, KeyError) as error:
+                raise ValueError(f"{app}/models.py or {app}/migrations: {error}") from error
+        if len({m["table"] for m in models}) != len(models):
+            raise ValueError("duplicate model database table")
+        model_map = {m["name"]: m for m in models}
+        serializers: dict[str, ast.ClassDef] = {}
+        views: dict[str, ast.ClassDef] = {}
+        allowed = {k: set(v.values()) for k, v in symbols.items()}
+        for module, original in trees.items():
+            role = module.rsplit(".", 1)[1]
+            if role == "models":
+                continue
+            try:
+                tree = normalize(original, module, symbols)
+                classes = _classes(
+                    tree,
+                    allowed,
+                    "serializers.ModelSerializer" if role == "serializers" else "ModelViewSet",
+                )
+                (serializers if role == "serializers" else views).update(classes)
+            except (ValueError, TypeError) as error:
+                raise ValueError(f"{module.replace('.', '/')}.py: {error}") from error
+        if config["source_file"] != settings["urls"].replace(".", "/") + ".py":
+            raise ValueError("source_file must match ROOT_URLCONF")
+        registrations, url_files = urls(
+            root, settings["urls"], {k: v for k, v in symbols.items() if k.endswith(".views")}
+        )
+        for index, route in enumerate(registrations):
+            for earlier in registrations[:index]:
+                suffix = route["path"].removeprefix(earlier["path"])
+                if suffix != route["path"] and suffix.endswith("/") and "/" not in suffix[:-1]:
+                    raise ValueError(
+                        "URL collection overlaps an earlier detail route: " + route["path"]
+                    )
+        consumed.update(url_files)
+        contracts: list[dict[str, Any]] = []
+        used = set()
+        for registration in registrations:
+            view_name = registration["view"]
+            if view_name in used:
+                raise ValueError("duplicate router view")
             used.add(view_name)
             attrs = _assignments(views[view_name].body)
-            if set(attrs) != {"queryset", "serializer_class"} or not isinstance(
-                attrs["serializer_class"], ast.Name
-            ):
+            if set(attrs) - {
+                "queryset",
+                "serializer_class",
+                "filter_backends",
+                "ordering_fields",
+                "ordering",
+                "pagination_class",
+            } or not isinstance(attrs.get("serializer_class"), ast.Name):
                 raise ValueError("viewset overrides require capture")
-            serializer_name = attrs["serializer_class"].id
+            serializer_node = attrs["serializer_class"]
+            assert isinstance(serializer_node, ast.Name)
+            serializer_name = serializer_node.id
             if serializer_name not in serializers:
                 raise ValueError("unresolved serializer")
             contract = _serializer(serializers[serializer_name], model_map, serializers)
-            if ast.unparse(attrs["queryset"]) != contract["model"] + ".objects.all()":
-                raise ValueError("viewset queryset must be the complete captured model")
+            query = _view_query(attrs, model_map[contract["model"]], settings["page_size"])
             contracts.append(
-                {"path": "/" + prefix + route + "/", "basename": basename, "serializer": contract}
+                {
+                    "path": registration["path"],
+                    "basename": registration["basename"],
+                    "serializer": contract,
+                    "query": query,
+                }
             )
         if (
             used != set(views)
@@ -325,7 +440,6 @@ def capture_project(
         )
         if used_serializers != set(serializers):
             raise ValueError("unconsumed serializer classes require capture")
-        consumed.update({models_file, serializers_file, views_file, url_file})
         tests: list[str] = []
         migrations: list[str] = []
         for relative in records:
@@ -335,7 +449,8 @@ def capture_project(
             path = Path(relative)
             if path.name == "__init__.py" and not tree.body:
                 consumed.add(relative)
-            elif relative == app + "/apps.py":
+            elif relative in {a + "/apps.py" for a in apps}:
+                app = path.parts[0]
                 classes = _classes(tree, {"django.apps": {"AppConfig"}}, "AppConfig")
                 if len(classes) != 1 or {
                     k: _literal(v)
@@ -345,10 +460,7 @@ def capture_project(
                 consumed.add(relative)
             elif path.name == "tests.py" or path.name.startswith("test_"):
                 tests.append(relative)
-            elif path.parts[:2] == (app, "migrations"):
-                if migrations:
-                    raise ValueError("only one initial schema migration is qualified")
-                _migration(tree, models, app, settings["auto"])
+            elif relative in {v[0] for v in migration_trees.values()}:
                 migrations.append(relative)
             else:
                 raise ValueError("unclassified project module: " + relative)
@@ -360,9 +472,10 @@ def capture_project(
                 "settings_module": settings_name,
                 "drf_version": "3.18",
                 "database": settings["database"],
+                "secret_environment": settings["secret_environment"],
                 "hosts": settings["hosts"],
                 "views": contracts,
-                "router_prefix": "/" + prefix,
+                "router_prefix": "/",
             },
             source_modules=sorted(consumed),
             generation_ready=True,
@@ -394,6 +507,67 @@ def capture_project(
         result["gaps"] = ["DRF project: " + str(error)]
         result["generation_ready"] = False
     return result
+
+
+def _view_query(
+    attrs: dict[str, ast.expr], model: dict[str, Any], page_size: int | None
+) -> dict[str, Any]:
+    fields = {f["name"]: f for f in model["fields"]}
+    node = attrs.get("queryset")
+    if not isinstance(node, ast.Call) or node.args:
+        raise ValueError("queryset requires all() or exact scalar filter()")
+    filters = {}
+    if ast.unparse(node.func) == model["name"] + ".objects.filter":
+        for keyword in node.keywords:
+            if keyword.arg not in fields or keyword.arg in filters:
+                raise ValueError("queryset filter requires distinct model fields")
+            value = _literal(keyword.value)
+            field = fields[keyword.arg]
+            kind = field["go_type"]
+            if not (
+                (kind == "string" and type(value) is str)
+                or (kind == "bool" and type(value) is bool)
+                or (kind in {"int32", "int64"} and type(value) is int and -(2**31) <= value < 2**31)
+            ):
+                raise ValueError("queryset filter requires a literal matching the field type")
+            filters[keyword.arg] = value
+    elif ast.unparse(node.func) != model["name"] + ".objects.all" or node.keywords:
+        raise ValueError("queryset requires all() or exact scalar filter()")
+    ordering_fields = []
+    ordering: Any = ["id"]
+    if "filter_backends" in attrs:
+        if ast.unparse(attrs["filter_backends"]) != "[OrderingFilter]":
+            raise ValueError("only the stock OrderingFilter backend is qualified")
+        ordering_fields = _literal(attrs.get("ordering_fields"))
+        if (
+            not isinstance(ordering_fields, list)
+            or not ordering_fields
+            or any(type(f) is not str or f not in fields for f in ordering_fields)
+        ):
+            raise ValueError("OrderingFilter requires explicit scalar ordering_fields")
+        ordering = _literal(attrs["ordering"]) if "ordering" in attrs else None
+        if isinstance(ordering, str):
+            ordering = [ordering]
+        if ordering is None:
+            ordering = ["id"]
+        if (
+            not isinstance(ordering, list)
+            or not ordering
+            or any(type(f) is not str or f.removeprefix("-") not in fields for f in ordering)
+        ):
+            raise ValueError("ordering requires captured scalar fields")
+    elif {"ordering_fields", "ordering"} & attrs.keys():
+        raise ValueError("ordering declarations require OrderingFilter")
+    pagination = "pagination_class" in attrs
+    if pagination and ast.unparse(attrs["pagination_class"]) != "LimitOffsetPagination":
+        raise ValueError("only stock LimitOffsetPagination is qualified")
+    return {
+        "filters": filters,
+        "ordering_fields": ordering_fields,
+        "ordering": ordering,
+        "pagination": pagination,
+        "page_size": page_size,
+    }
 
 
 def _literal(node: ast.AST | None) -> Any:
@@ -447,14 +621,27 @@ def _classes(tree: ast.Module, imports: dict[str, set[str]], base: str) -> dict[
     return classes
 
 
-def _models(tree: ast.Module, app: str, auto: str) -> list[dict[str, Any]]:
-    classes = _classes(tree, {"django.db": {"models"}}, "models.Model")
+def _models(
+    tree: ast.Module,
+    app: str,
+    auto: str,
+    external: list[dict[str, Any]] | None = None,
+    symbols: dict[str, dict[str, str]] | None = None,
+    identities: dict[str, str] | None = None,
+    engine: str = "sqlite",
+) -> list[dict[str, Any]]:
+    imports = {"django.db": {"models"}}
+    imports.update(
+        {k: set(v.values()) for k, v in (symbols or {}).items() if k.endswith(".models")}
+    )
+    classes = _classes(tree, imports, "models.Model")
     result: list[dict[str, Any]] = []
     for name, cls in classes.items():
         fields: list[dict[str, Any]] = []
         constants = {}
         ordering = ["id"]
-        table = identifier(app + "_" + name.lower())
+        original_name = next((k for k, v in (identities or {}).items() if v == name), name)
+        table = identifier(app + "_" + original_name.lower())
         for node in cls.body:
             if isinstance(node, ast.ClassDef) and node.name == "Meta":
                 if node.bases or node.decorator_list or node.keywords:
@@ -492,11 +679,23 @@ def _models(tree: ast.Module, app: str, auto: str) -> list[dict[str, Any]]:
             if kind == "ForeignKey":
                 if (
                     len(value.args) != 1
-                    or not isinstance(value.args[0], ast.Name)
+                    or not isinstance(value.args[0], (ast.Name, ast.Constant))
                     or set(options) - {"on_delete", "related_name"}
                 ):
                     raise ValueError("only explicit nonnullable foreign keys are qualified")
-                parent = next((m for m in result if m["name"] == value.args[0].id), None)
+                target = value.args[0]
+                parent_name = target.id if isinstance(target, ast.Name) else None
+                if isinstance(target, ast.Constant) and isinstance(target.value, str):
+                    owner, _, class_name = target.value.rpartition(".")
+                    if not owner:
+                        owner, class_name = app, target.value
+                    candidates = (symbols or {}).get(owner + ".models", {})
+                    parent_name = next(
+                        (v for k, v in candidates.items() if k.lower() == class_name.lower()), None
+                    )
+                parent = next(
+                    (m for m in [*(external or []), *result] if m["name"] == parent_name), None
+                )
                 if (
                     parent is None
                     or ast.unparse(options.get("on_delete", ast.Constant(None))) != "models.CASCADE"
@@ -554,7 +753,7 @@ def _models(tree: ast.Module, app: str, auto: str) -> list[dict[str, Any]]:
                 sql_type, go_type = DJANGO_TYPES[
                     "IntegerField" if kind == "PositiveIntegerField" else kind
                 ]
-                if go_type in {"int32", "int64"}:
+                if engine == "sqlite" and go_type in {"int32", "int64"}:
                     # SQLite integer storage has a signed 64-bit range, including
                     # Django AutoField and IntegerField declarations.
                     sql_type, go_type = "bigint", "int64"
@@ -572,6 +771,9 @@ def _models(tree: ast.Module, app: str, auto: str) -> list[dict[str, Any]]:
                 field.update(
                     blank=blank, required=not (blank or "default" in field or field["auto"])
                 )
+                if engine == "postgresql" and go_type in {"int32", "int64"} and not field["auto"]:
+                    bits = 32 if go_type == "int32" else 64
+                    field.update(minimum=-(2 ** (bits - 1)), maximum=2 ** (bits - 1) - 1)
                 if kind == "PositiveIntegerField":
                     field["minimum"] = 0
                 if choices is not None:
@@ -593,7 +795,8 @@ def _models(tree: ast.Module, app: str, auto: str) -> list[dict[str, Any]]:
         if not any(f["primary_key"] for f in fields):
             kind = auto.rsplit(".", 1)[-1]
             sql_type, go_type = DJANGO_TYPES[kind]
-            sql_type, go_type = "bigint", "int64"
+            if engine == "sqlite":
+                sql_type, go_type = "bigint", "int64"
             fields.insert(
                 0,
                 dict(
@@ -610,7 +813,16 @@ def _models(tree: ast.Module, app: str, auto: str) -> list[dict[str, Any]]:
             or not fields[0]["auto"]
         ):
             raise ValueError("conventional models require auto id primary keys")
-        result.append({"name": name, "table": table, "fields": fields, "ordering": ordering})
+        result.append(
+            {
+                "name": name,
+                "table": table,
+                "fields": fields,
+                "ordering": ordering,
+                "source_app": app,
+                "source_name": original_name,
+            }
+        )
     return result
 
 
@@ -676,6 +888,7 @@ def _serializer(
                     raise ValueError("min_value must be integer")
                 field.update(minimum=minimum, required=True, unique=False, blank=False)
                 field.pop("default", None)
+                field.pop("maximum", None)
             selected.append(field)
         else:
             if (
@@ -770,7 +983,16 @@ def _serializer(
     return result
 
 
-def _migration(tree: ast.Module, models: list[dict[str, Any]], app: str, auto: str) -> None:
+def _migration(
+    tree: ast.Module,
+    models: list[dict[str, Any]],
+    app: str,
+    auto: str,
+    external: list[dict[str, Any]] | None = None,
+    identities: dict[str, str] | None = None,
+    dependencies: set[str] | None = None,
+    engine: str = "sqlite",
+) -> None:
     """Reconstruct the baseline through the same static model parser."""
     if (
         len(tree.body) != 3
@@ -792,12 +1014,14 @@ def _migration(tree: ast.Module, models: list[dict[str, Any]], app: str, auto: s
     if (
         set(attrs) != {"initial", "dependencies", "operations"}
         or _literal(attrs["initial"]) is not True
-        or _literal(attrs["dependencies"]) != []
+        or {d[0] for d in _literal(attrs["dependencies"])} != (dependencies or set())
         or not isinstance(attrs["operations"], ast.List)
     ):
         raise ValueError("only an independent initial schema migration is qualified")
     declarations = ["from django.db import models"]
-    known = {m["name"].lower(): m["name"] for m in models}
+    known = {
+        k.lower(): v for k, v in (identities or {m["name"]: m["name"] for m in models}).items()
+    }
     for call in attrs["operations"].elts:
         if (
             not isinstance(call, ast.Call)
@@ -813,9 +1037,9 @@ def _migration(tree: ast.Module, models: list[dict[str, Any]], app: str, auto: s
         ):
             raise ValueError("unsupported CreateModel options")
         name = _literal(options["name"])
-        if not isinstance(name, str) or known.get(name.lower()) != name:
+        if not isinstance(name, str) or name.lower() not in known:
             raise ValueError("migration model is not captured")
-        lines = [f"class {name}(models.Model):"]
+        lines = [f"class {known[name.lower()]}(models.Model):"]
         for pair in options["fields"].elts:
             if (
                 not isinstance(pair, ast.Tuple)
@@ -837,14 +1061,18 @@ def _migration(tree: ast.Module, models: list[dict[str, Any]], app: str, auto: s
                 raise ValueError("unsupported primary key serialization")
             if ast.unparse(field.func) == "models.ForeignKey":
                 target = _literal(keywords.pop("to", None))
+                references = {
+                    m["source_app"] + "." + m["source_name"].lower(): m
+                    for m in (external or models)
+                }
+                parent = references.get(target.lower()) if isinstance(target, str) else None
                 if (
-                    not isinstance(target, str)
-                    or target not in {app + "." + n for n in known}
+                    parent is None
                     or ast.unparse(keywords.pop("on_delete", ast.Constant(None)))
                     != "django.db.models.deletion.CASCADE"
                 ):
                     raise ValueError("unresolved migration foreign key")
-                args.append(known[target.split(".")[1]])
+                args.append(repr(parent["source_app"] + "." + parent["source_name"]))
                 args.append("on_delete=models.CASCADE")
             args += [str(k) + "=" + ast.unparse(v) for k, v in keywords.items()]
             lines.append(f"    {field_name} = {ast.unparse(field.func)}({', '.join(args)})")
@@ -856,7 +1084,20 @@ def _migration(tree: ast.Module, models: list[dict[str, Any]], app: str, auto: s
         if not meta:
             raise ValueError("explicit model ordering is required")
         declarations.append("\n".join(lines))
-    baseline = _models(ast.parse("\n".join(declarations)), app, auto)
+    migration_symbols: dict[str, dict[str, str]] = {}
+    for model in external or models:
+        migration_symbols.setdefault(model["source_app"] + ".models", {})[model["source_name"]] = (
+            model["name"]
+        )
+    baseline = _models(
+        ast.parse("\n".join(declarations)),
+        app,
+        auto,
+        external,
+        migration_symbols,
+        identities,
+        engine,
+    )
 
     def normalized(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [dict(m, fields=sorted(m["fields"], key=lambda f: f["name"])) for m in items]
