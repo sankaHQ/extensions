@@ -153,7 +153,7 @@ type drfQuery struct {
     Pagination bool `json:"pagination"`
     PageSize int64 `json:"page_size"`
 }
-type drfView struct { Path string `json:"path"`; Serializer drfSerializer `json:"serializer"`; Query drfQuery `json:"query"` }
+type drfView struct { Path string `json:"path"`; Serializer drfSerializer `json:"serializer"`; Query drfQuery `json:"query"`; ReadOnly bool `json:"read_only"` }
 type drfContract struct {
     Models []drfModel `json:"models"`
     Project struct { Views []drfView `json:"views"`; Database struct { Engine string `json:"engine"` } `json:"database"` } `json:"drf_project"`
@@ -455,7 +455,8 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
     }
     if view==nil { return 404,map[string]string{"detail":"Not found."} }
     actualMethod:=method;if method=="HEAD" { actualMethod="GET" }
-    if actualMethod!="GET" && !(actualMethod=="POST" && !detail) && !(detail && (actualMethod=="PUT" || actualMethod=="PATCH" || actualMethod=="DELETE")) { return 405,map[string]string{"detail":fmt.Sprintf(`Method "%s" not allowed.`,method)} }
+    allowed:=actualMethod=="GET" || !view.ReadOnly && (actualMethod=="POST" && !detail || detail && (actualMethod=="PUT" || actualMethod=="PATCH" || actualMethod=="DELETE"))
+    if !allowed { return 405,map[string]string{"detail":fmt.Sprintf(`Method "%s" not allowed.`,method)} }
     tx,err:=pool.Begin(ctx);if err!=nil { return 500,map[string]string{"detail":"Database unavailable."} };defer tx.Rollback(ctx)
     schema:=view.Serializer;model:=drfModelFor(schema.Model)
     where,args:=drfWhere(view.Query)

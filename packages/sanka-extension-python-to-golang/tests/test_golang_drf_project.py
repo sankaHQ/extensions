@@ -41,6 +41,82 @@ def multiapp_project(tmp_path):
     return config
 
 
+def readonly_project(tmp_path):
+    config = project(tmp_path)
+    views = tmp_path / "orders/views.py"
+    views.write_text(
+        views.read_text().replace(
+            "from rest_framework.viewsets import ModelViewSet",
+            "from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet",
+        )
+        + "\nclass OrderReadOnlyViewSet(ReadOnlyModelViewSet):\n"
+        "    queryset = Order.objects.all()\n"
+        "    serializer_class = OrderSerializer\n"
+    )
+    urls = tmp_path / "shop_config/urls.py"
+    urls.write_text(
+        urls.read_text()
+        .replace("import OrderViewSet\n", "import OrderViewSet, OrderReadOnlyViewSet\n")
+        .replace(
+            'router.register("orders", OrderViewSet, basename="order")',
+            'router.register("orders", OrderViewSet, basename="order")\n'
+            'router.register("readonly-orders", OrderReadOnlyViewSet, basename="readonly-order")',
+        )
+    )
+    document = tmp_path / "sanka-verify.json"
+    payload = json.loads(document.read_text())
+    seeded = payload["scenarios"][0]["setup"]
+    payload["scenarios"] += [
+        {
+            "id": "readonly-list",
+            "method": "GET",
+            "path": "/api/readonly-orders/",
+            "expected_status": 200,
+            "setup": seeded,
+        },
+        {
+            "id": "readonly-detail",
+            "method": "GET",
+            "path": "/api/readonly-orders/1/",
+            "expected_status": 200,
+            "setup": seeded,
+        },
+        {
+            "id": "readonly-head",
+            "method": "HEAD",
+            "path": "/api/readonly-orders/",
+            "expected_status": 200,
+        },
+        {
+            "id": "readonly-post-denied",
+            "method": "POST",
+            "path": "/api/readonly-orders/",
+            "body": payload["scenarios"][2]["body"],
+            "expected_status": 405,
+        },
+        {
+            "id": "readonly-delete-denied",
+            "method": "DELETE",
+            "path": "/api/readonly-orders/1/",
+            "expected_status": 405,
+            "setup": seeded,
+        },
+        *[
+            {
+                "id": "readonly-" + method.lower() + "-denied",
+                "method": method,
+                "path": "/api/readonly-orders/1/",
+                "body": payload["scenarios"][2]["body"],
+                "expected_status": 405,
+                "setup": seeded,
+            }
+            for method in ("PUT", "PATCH")
+        ],
+    ]
+    document.write_text(json.dumps(payload))
+    return config
+
+
 def test_multiapp_drf_duplicate_model_names_and_nested_urls(tmp_path):
     config = multiapp_project(tmp_path)
     result = capture(tmp_path, config)
@@ -292,7 +368,9 @@ def test_postgres_conventional_capture_preserves_native_sequences(tmp_path):
 
 
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
-@pytest.mark.parametrize("factory", [multiapp_project, crossapp_project, postgres_project])
+@pytest.mark.parametrize(
+    "factory", [multiapp_project, crossapp_project, postgres_project, readonly_project]
+)
 def test_general_project_native_replay(tmp_path, monkeypatch, target, factory):
     dsn = os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN")
     if os.getenv("SANKA_GO_TESTS") != "1" or not dsn:
@@ -371,6 +449,21 @@ def test_conventional_drf_capture(tmp_path, target):
     assert view["path"] == "/api/orders/"
     assert view["serializer"]["nested"]["aggregate"]["limit"] == 100
     assert view["serializer"]["nested"]["update"] == "ignore"
+
+
+def test_readonly_viewset_capture_restricts_methods(tmp_path):
+    result = capture(tmp_path, readonly_project(tmp_path))
+    assert result["gaps"] == []
+    views = result["drf_project"]["views"]
+    assert [v["read_only"] for v in views] == [False, True]
+    assert {
+        (route["path"], route["method"])
+        for route in result["routes"]
+        if "readonly-orders" in route["path"]
+    } == {
+        ("/api/readonly-orders/", "GET"),
+        ("/api/readonly-orders/:id/", "GET"),
+    }
 
 
 @pytest.mark.parametrize(
