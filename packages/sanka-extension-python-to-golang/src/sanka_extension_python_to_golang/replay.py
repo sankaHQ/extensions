@@ -10,10 +10,11 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from textwrap import indent
 from typing import Any
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from .capture import canonical, capture, digest
 from .render import render
@@ -174,7 +175,12 @@ def _source_python() -> str:
 
 
 def _run_original_pytest_tests(
-    root: Path, source: Path, workspace: Path, captured: dict[str, Any], source_python: str
+    root: Path,
+    source: Path,
+    workspace: Path,
+    captured: dict[str, Any],
+    source_python: str,
+    database_url: str = "",
 ) -> dict[str, Any]:
     inventory = captured["source_inventory"]["module_roles"]["tests"]
     tests = [
@@ -195,8 +201,37 @@ def _run_original_pytest_tests(
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONHASHSEED": "0",
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
-    }
+    } | security_environment(captured)
+    test_database = ""
+    if captured["configuration"]["database_layer"] != "none":
+        if not database_url:
+            raise ValueError("original database tests require an explicit source fixture URL")
+        test_database = "sanka_verify_" + uuid.uuid4().hex
+        parsed = urlsplit(database_url)
+        admin_url = parsed._replace(scheme="postgresql").geturl()
+        test_url = parsed._replace(
+            path="/" + test_database,
+            query=urlencode(
+                [(key, value) for key, value in parse_qsl(parsed.query) if key != "options"]
+            ),
+        ).geturl()
+        database_script = (
+            "import os, sys, psycopg\n"
+            "from psycopg import sql\n"
+            "statement = ('CREATE DATABASE {}' if sys.argv[2] == 'create' "
+            "else 'DROP DATABASE IF EXISTS {} WITH (FORCE)')\n"
+            "with psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as db:\n"
+            "    db.execute(sql.SQL(statement).format(sql.Identifier(sys.argv[1])))\n"
+        )
+        environment["DATABASE_URL"] = test_url
     try:
+        if test_database:
+            _run(
+                [source_python, "-I", "-c", database_script, test_database, "create"],
+                workspace,
+                timeout=30,
+                environment={"DATABASE_URL": admin_url},
+            )
         process = subprocess.run(
             [
                 source_python,
@@ -215,6 +250,17 @@ def _run_original_pytest_tests(
         )
     except (OSError, subprocess.TimeoutExpired):
         return {"runner": "pytest", "files": tests, "tests_run": 0, "ok": False}
+    finally:
+        if test_database:
+            try:
+                _run(
+                    [source_python, "-I", "-c", database_script, test_database, "drop"],
+                    workspace,
+                    timeout=30,
+                    environment={"DATABASE_URL": admin_url},
+                )
+            except ValueError as error:
+                raise ValueError("could not remove isolated source test database") from error
     output = process.stdout + process.stderr
     tests_run = sum(int(count) for count in re.findall(r"(\d+) (?:passed|failed|error)s?", output))
     result = {
@@ -379,15 +425,6 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
     original_tests_opt_in = os.environ.get("SANKA_GO_RUN_ORIGINAL_TESTS", "")
     if original_tests_opt_in not in {"", "1"}:
         raise ValueError("SANKA_GO_RUN_ORIGINAL_TESTS must be 1 when set")
-    if (
-        command == "verify"
-        and original_tests_opt_in == "1"
-        and not captured.get("drf_project")
-        and captured["configuration"]["database_layer"] != "none"
-    ):
-        raise ValueError(
-            "Flask/FastAPI original source tests currently require database_layer=none"
-        )
     if captured.get("drf_project"):
         from .drf_replay import replay_project
 
@@ -586,7 +623,12 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             )
             if original_tests_opt_in == "1":
                 result["original_tests"] = _run_original_pytest_tests(
-                    root, source_directory, workspace, captured, source_python
+                    root,
+                    source_directory,
+                    workspace,
+                    captured,
+                    source_python,
+                    source_url if database else "",
                 )
                 result["ok"] = result["ok"] and result["original_tests"]["ok"]
         if captured.get("security"):
@@ -600,7 +642,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
         if database:
             result["database_scope"] = (
                 "read-only GET responses against explicitly supplied fixtures; "
-                "no schema or data writes"
+                "no schema or data writes to those fixtures"
             )
         if capture(root, config) != captured:
             raise ValueError("source changed during replay; discard observations")

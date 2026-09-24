@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from sanka_extension_python_to_golang.adapter import handle
 from sanka_extension_python_to_golang.capture import SOURCES, TARGETS, capture, configuration
+from sanka_extension_python_to_golang.replay import _run_original_pytest_tests
 from test_golang_project import packaged_source
 from test_python_to_golang import PAYLOAD, request, source
 
@@ -109,6 +110,56 @@ def test_packaged_original_tests_are_opt_in_qualification(
     assert report["original_tests"]["ok"] is (test_result == "pass")
     assert report["ok"] is (test_result == "pass")
     assert (verified.outcome == "success") is (test_result == "pass")
+
+
+@pytest.mark.skipif(
+    not os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN"),
+    reason="requires explicit PostgreSQL fixture DSN",
+)
+@pytest.mark.parametrize("framework", ["flask", "fastapi"])
+@pytest.mark.parametrize("test_result", ["pass", "fail"])
+def test_original_database_tests_are_isolated(
+    tmp_path: Path, framework: str, test_result: str
+) -> None:
+    import psycopg
+    from test_golang_schema import schema_dsn
+
+    root = tmp_path / "project"
+    source_copy = tmp_path / "source"
+    root.mkdir()
+    source_copy.mkdir()
+    (root / "tests").mkdir()
+    (root / "tests/test_database.py").write_text(
+        "import os\n"
+        "from sqlalchemy import create_engine, text\n"
+        "def test_source_database():\n"
+        "    url = os.environ['DATABASE_URL']\n"
+        "    assert '/sanka_verify_' in url and 'options=' not in url\n"
+        "    with create_engine(url).begin() as db:\n"
+        "        assert db.execute(text(\"SELECT to_regclass('source_test_marker')\"))"
+        ".scalar() is None\n"
+        "        db.execute(text('CREATE TABLE source_test_marker (id integer)'))\n"
+        + ("    assert False\n" if test_result == "fail" else "")
+    )
+    captured = {
+        "configuration": {"database_layer": "pgx", "source_framework": framework},
+        "source_inventory": {"module_roles": {"tests": ["tests/test_database.py"]}},
+    }
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    source_url = schema_dsn(dsn, "fixture_schema_not_in_test_database").replace(
+        "postgresql://", "postgresql+psycopg://", 1
+    )
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        before = set(admin.execute("SELECT datname FROM pg_database").fetchall())
+        result = _run_original_pytest_tests(
+            root, source_copy, tmp_path, captured, sys.executable, source_url
+        )
+        after = set(admin.execute("SELECT datname FROM pg_database").fetchall())
+    assert after == before
+    assert result["tests_run"] == 1
+    assert result["ok"] is (test_result == "pass")
+    if test_result == "fail":
+        assert result["failures"] == ["tests/test_database.py::test_source_database"]
 
 
 @pytest.mark.parametrize("change", ["initializer", "missing_init", "shadow", "import_test"])
@@ -211,9 +262,21 @@ def test_src_database_project_review_and_replay(
         app = injected_source("class")
     (package / "main.py").write_text(app.replace("from models import", "from .models import"))
     (tmp_path / "tests").mkdir()
-    (tmp_path / "tests/test_database.py").write_text(
-        "raise RuntimeError('original tests must not run')"
+    original_test = (
+        "import os\n"
+        "from sqlalchemy import create_engine, text\n"
+        "from backend.main import app\n"
+        "def test_database_is_disposable():\n"
+        "    assert app is not None\n"
+        "    url = os.environ['DATABASE_URL']\n"
+        "    assert '/sanka_verify_' in url and 'options=' not in url\n"
+        "    with create_engine(url).begin() as db:\n"
+        "        assert db.execute(text(\"SELECT to_regclass('widgets')\")).scalar() is None\n"
+        "        db.execute(text('CREATE TABLE source_test_marker (id integer)'))\n"
+        if framework in {"flask", "fastapi"} and target == "fiber"
+        else "raise RuntimeError('original tests must not run')"
     )
+    (tmp_path / "tests/test_database.py").write_text(original_test)
     body = {"name": "first", "count": 1, "enabled": True}
     scenarios = [
         {
@@ -318,6 +381,18 @@ def test_src_database_project_review_and_replay(
             assert not verified.data["qualification"]["original_tests_executed"]
             assert any(row["status"] == 201 for row in verified.data["candidate"])
             assert all("tables" in row and "sequences" in row for row in verified.data["candidate"])
+            if framework in {"flask", "fastapi"} and target == "fiber":
+                monkeypatch.setenv("SANKA_GO_RUN_ORIGINAL_TESTS", "1")
+                qualified = handle(dataclasses.replace(req, command="verify"))
+                assert qualified.outcome == "success", qualified.error
+                assert qualified.data["original_tests"]["tests_run"] == 1
+                assert qualified.data["qualification"]["original_tests_executed"]
+                with psycopg.connect(
+                    source_url.replace("postgresql+psycopg://", "postgresql://", 1)
+                ) as source_db:
+                    assert source_db.execute(
+                        "SELECT to_regclass('source_test_marker')"
+                    ).fetchone() == (None,)
         finally:
             for name in schemas:
                 admin.execute(

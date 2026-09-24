@@ -29,6 +29,7 @@ from .replay import (
     SOURCE_PROBE,
     _client_lifecycle,
     _run,
+    _run_original_pytest_tests,
     _snapshot,
     _source_python,
     _write_source_files,
@@ -507,6 +508,12 @@ def replay_writes(
                 "version": _run([str(source_python), "-I", "--version"], workspace).strip(),
             }
         result.update(compare(scenarios, actual, source_observed))
+        if command == "verify" and os.environ.get("SANKA_GO_RUN_ORIGINAL_TESTS") == "1":
+            assert source_python is not None
+            result["original_tests"] = _run_original_pytest_tests(
+                root, source, workspace, captured, source_python, source_url
+            )
+            result["ok"] = result["ok"] and result["original_tests"]["ok"]
         if any(route.get("write", {}).get("integrity_conflict") for route in captured["routes"]):
             statuses = (
                 (404, 409)

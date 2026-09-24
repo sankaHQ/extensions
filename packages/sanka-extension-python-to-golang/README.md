@@ -1237,10 +1237,15 @@ or `app/tests/test_*.py` modules, set `SANKA_GO_RUN_ORIGINAL_TESTS=1` and forwar
 `sanka verify --extension-env SANKA_GO_RUN_ORIGINAL_TESTS`. Verify runs those
 modules in a disposable copy after HTTP replay. The report records the module
 names, test count and result; a failing or undiscovered test fails Verify.
-For Flask and FastAPI projects without a database layer, the same opt-in runs
-captured `test_*.py` files with pytest in the disposable source copy.
-This is opt-in code execution, not a security sandbox. PostgreSQL source tests
-and database-backed Flask/FastAPI source tests remain unqualified.
+For Flask and FastAPI projects, the same opt-in runs captured `test_*.py` files
+with pytest in the disposable source copy. With a PostgreSQL database layer,
+Verify creates a separate, empty database on the explicitly supplied source
+fixture server, passes its URL as `DATABASE_URL`, and removes it after the tests.
+The fixture user needs `CREATE DATABASE` and `DROP DATABASE` privileges. Source
+fixture schema options are not carried into the new database; tests must set up
+their own schema and data. A failed test or failed cleanup fails Verify. This
+is opt-in execution of trusted source code, not a security sandbox or cutover
+qualification.
 Forward the fixture DSN and source interpreter through the CLI using
 `--extension-env SANKA_GO_TARGET_TEST_DATABASE_URL` and
 `--extension-env SANKA_GO_SOURCE_PYTHON` for test/verify.
