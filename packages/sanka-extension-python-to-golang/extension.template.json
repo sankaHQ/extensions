@@ -2,11 +2,11 @@
   "schema_version": "sanka-extension-manifest/v2",
   "kind": "migration",
   "id": "sanka/python-to-golang",
-  "version": "0.1.0a4",
+  "version": "0.1.0a5",
   "protocol_version": "sanka-extension/v1",
   "distribution": {
     "name": "sanka-extension-python-to-golang",
-    "version": "0.1.0a4",
+    "version": "0.1.0a5",
     "executable": "sanka-extension-python-to-golang"
   },
   "commands": [

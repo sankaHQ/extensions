@@ -1,6 +1,6 @@
 [project]
 name = "sanka-extension-python-to-golang"
-version = "0.1.0a4"
+version = "0.1.0a5"
 description = "Deterministic Python to Golang migration extension (experimental)"
 readme = "README.md"
 requires-python = ">=3.12"

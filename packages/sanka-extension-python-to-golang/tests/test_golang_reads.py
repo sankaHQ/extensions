@@ -344,6 +344,18 @@ def test_database_read_lifecycle(
     import psycopg
     from psycopg import sql
 
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_database.py").write_text(
+        "import os\n"
+        "from sqlalchemy import create_engine, text\n"
+        "def test_disposable_database():\n"
+        "    url = os.environ['DATABASE_URL']\n"
+        "    assert '/sanka_verify_' in url and 'options=' not in url\n"
+        "    with create_engine(url).begin() as db:\n"
+        "        assert db.execute(text(\"SELECT to_regclass('widgets')\")).scalar() is None\n"
+        if framework == "fastapi" and target == "fiber"
+        else "raise RuntimeError('original tests must not run')"
+    )
     output = generate(tmp_path, framework, target, app_source=read_source(framework))
     dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
     schemas = ["go_read_" + uuid.uuid4().hex for _ in range(2)]
@@ -415,6 +427,13 @@ def test_database_read_lifecycle(
             ]
             assert populated.data["candidate"][0]["body"] == expected
             assert populated.data["source"][0]["body"] == expected
+            if framework == "fastapi" and target == "fiber":
+                monkeypatch.setenv("SANKA_GO_RUN_ORIGINAL_TESTS", "1")
+                qualified = handle(req)
+                assert qualified.outcome == "success", qualified.error
+                assert qualified.data["original_tests"]["tests_run"] == 1
+                assert qualified.data["qualification"]["original_tests_executed"]
+                monkeypatch.delenv("SANKA_GO_RUN_ORIGINAL_TESTS")
             assert handle(dataclasses.replace(req, command="test")).outcome == "success"
             # A changed fixture must cause public verify to fail, not reuse passing evidence.
             with psycopg.connect(target_url, autocommit=True) as connection:
