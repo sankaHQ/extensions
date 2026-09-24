@@ -212,9 +212,20 @@ def replay_project(
             raise ValueError("original source tests currently require a SQLite source fixture")
         tests = captured["source_inventory"]["module_roles"]["tests"]
         if not tests or any(
-            len(Path(name).parts) != 2 or not name.endswith("/tests.py") for name in tests
+            not (
+                (len(parts := Path(name).parts) == 2 and parts[-1] == "tests.py")
+                or (
+                    len(parts) == 3
+                    and parts[1] == "tests"
+                    and parts[-1].startswith("test_")
+                    and parts[-1].endswith(".py")
+                )
+            )
+            for name in tests
         ):
-            raise ValueError("original source tests require app/tests.py modules")
+            raise ValueError(
+                "original source tests require app/tests.py or app/tests/test_*.py modules"
+            )
     source_dsn = os.environ.get("SANKA_GO_SOURCE_TEST_DATABASE_URL", "")
     if postgres and command == "verify":
         parsed = urlsplit(source_dsn)

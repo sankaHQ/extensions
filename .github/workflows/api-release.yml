@@ -21,7 +21,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a2
+          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a3
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
@@ -89,6 +89,8 @@ jobs:
           path: release/examples
           persist-credentials: false
       - name: Verify public CLI lifecycle, compilation and actual HTTP parity
+        env:
+          SANKA_API_RELEASE_CLI_VERSION: "0.3.0"
         run: >-
           uv run --no-project --python 3.12 python scripts/qualify_api_release.py
           --examples release/examples --release release/api-converters
@@ -101,7 +103,13 @@ jobs:
         env:
           SANKA_GO_CLI_TESTS: "1"
           SANKA_MIGRATE_TEST_POSTGRES_DSN: postgresql://sanka:sanka@localhost:5432/sanka_go_cli_test
-        run: uv run python -m pytest packages/sanka-extension-python-to-golang/tests/test_golang_cli.py -q
+        run: >-
+          uv run python -m pytest
+          packages/sanka-extension-python-to-golang/tests/test_golang_cli.py
+          packages/sanka-extension-python-to-golang/tests/test_golang_project_readiness.py::test_packaged_original_tests_are_opt_in_qualification
+          packages/sanka-extension-python-to-golang/tests/test_golang_drf_project.py::test_gadget_original_tests_are_opt_in_qualification
+          packages/sanka-extension-python-to-golang/tests/test_golang_drf_project.py::test_copy_existing_from_django_postgres_schema
+          -q
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -131,7 +139,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "Go and Rust API converters 0.1.0a2" \
-            --notes "Experimental Sanka Code converters. Published CLI 0.2.12 qualification covers packaged DRF, Flask and sync/async FastAPI PostgreSQL CRUD across Fiber, chi, mux and Gin, plus the bounded Flask/Fiber and Express/axum literal public JSON GET examples: scan, plan, reviewed apply, test, verify, source preservation, native builds and actual HTTP comparison. Includes exact wheel manifests and acceptance receipts. No arbitrary-application or production-cutover claim. React Native/Compose and Jev are not published by this release."
+            --title "Python-to-Go converter 0.1.0a3" \
+            --notes "Experimental Python-to-Go 0.1.0a3 qualified with published Sanka CLI 0.3.0. Includes the unchanged Rust 0.1.0a2 converter and helper wheels for the scoped release bundle. Acceptance covers pinned examples, native builds, source-to-target HTTP comparison, captured source tests and PostgreSQL fixtures. No arbitrary-application or production-cutover claim."
         env:
           GH_TOKEN: ${{ github.token }}

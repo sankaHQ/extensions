@@ -20,16 +20,18 @@ if __package__ in {None, ""}:
 from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel  # noqa: E402
 from scripts.check_release_artifacts import _entry_points, _wheel_metadata  # noqa: E402
 
-VERSION = "0.1.0a2"
+VERSION = "0.1.0a3"
 TAG = f"api-converters-v{VERSION}"
 PREFIX = f"https://github.com/sankaHQ/extensions/releases/download/{TAG}/"
+RUST_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a2/"
 PACKAGES = (
     "sanka-extension-python-to-golang",
     "sanka-extension-typescript-to-rust",
     "sanka-ts-capture",
     "sanka-http-replay",
 )
-VERSIONS = dict.fromkeys(PACKAGES, VERSION)
+VERSIONS = dict.fromkeys(PACKAGES, "0.1.0a2")
+VERSIONS[PACKAGES[0]] = VERSION
 VERSIONS["sanka-ts-capture"] = "0.1.0a1"
 SDK = tuple(
     w
@@ -80,11 +82,12 @@ def manifest(package: str, root: Path = ROOT) -> dict[str, Any]:
     if [w.get("name") for w in entries] != closure(package):
         raise ValueError(f"{package}: incomplete wheel closure")
     sdk_hashes = {w.name: w.sha256 for w in SDK}
+    prefix = PREFIX if package == PACKAGES[0] else RUST_PREFIX
     for wheel in entries:
         sha = wheel.get("sha256", "")
         if (
             set(wheel) != {"name", "url", "sha256"}
-            or wheel["url"] != PREFIX + wheel["name"]
+            or wheel["url"] != prefix + wheel["name"]
             or len(sha) != 64
             or any(c not in "0123456789abcdef" for c in sha)
             or (wheel["name"] in sdk_hashes and sha != sdk_hashes[wheel["name"]])
@@ -183,7 +186,7 @@ def build(output: Path, *, write_manifests: bool = False) -> None:
     for wheel in SDK:
         download_locked_wheel(output, wheel)
     for package in PACKAGES[:2]:
-        if write_manifests:
+        if write_manifests and package == PACKAGES[0]:
             directory = ROOT / "packages" / package
             data = json.loads((directory / "extension.template.json").read_text())
             data["wheels"] = [

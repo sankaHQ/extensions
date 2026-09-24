@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -172,6 +173,61 @@ def _source_python() -> str:
     return str(executable)
 
 
+def _run_original_pytest_tests(
+    root: Path, source: Path, workspace: Path, captured: dict[str, Any], source_python: str
+) -> dict[str, Any]:
+    inventory = captured["source_inventory"]["module_roles"]["tests"]
+    tests = [
+        name for name in inventory if Path(name).name.startswith("test_") and name.endswith(".py")
+    ]
+    if not tests:
+        raise ValueError("original source tests require captured test_*.py modules")
+    _write_source_files(source, {name: (root / name).read_bytes() for name in inventory})
+    runner = (
+        "import sys, pytest; "
+        "sys.path[:0] = sys.argv[1:3]; "
+        "raise SystemExit(pytest.main(['-q', '-o', 'addopts=', *sys.argv[3:]]))"
+    )
+    environment = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": str(workspace),
+        "TMPDIR": str(workspace),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    }
+    try:
+        process = subprocess.run(
+            [
+                source_python,
+                "-I",
+                "-c",
+                runner,
+                str(source),
+                str(source / "src"),
+                *(str(source / name) for name in tests),
+            ],
+            cwd=source,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"runner": "pytest", "files": tests, "tests_run": 0, "ok": False}
+    output = process.stdout + process.stderr
+    tests_run = sum(int(count) for count in re.findall(r"(\d+) (?:passed|failed|error)s?", output))
+    result = {
+        "runner": "pytest",
+        "files": tests,
+        "tests_run": tests_run,
+        "ok": process.returncode == 0 and tests_run > 0,
+    }
+    if not result["ok"]:
+        result["failures"] = re.findall(r"^FAILED ([^\s]+)", output, re.MULTILINE)
+    return result
+
+
 def _probe(
     target: str,
     paths: list[str],
@@ -320,6 +376,18 @@ def request_paths(route: dict[str, Any]) -> list[str]:
 def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> dict[str, Any]:
     if captured["gaps"]:
         raise ValueError("cannot replay unsupported source behavior")
+    original_tests_opt_in = os.environ.get("SANKA_GO_RUN_ORIGINAL_TESTS", "")
+    if original_tests_opt_in not in {"", "1"}:
+        raise ValueError("SANKA_GO_RUN_ORIGINAL_TESTS must be 1 when set")
+    if (
+        command == "verify"
+        and original_tests_opt_in == "1"
+        and not captured.get("drf_project")
+        and captured["configuration"]["database_layer"] != "none"
+    ):
+        raise ValueError(
+            "Flask/FastAPI original source tests currently require database_layer=none"
+        )
     if captured.get("drf_project"):
         from .drf_replay import replay_project
 
@@ -476,6 +544,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
         }
         source_headers = None
         if command == "verify":
+            assert source_python is not None
             # Execute the exact captured source snapshot, not an import through PYTHONPATH.
             source_directory = workspace / "source"
             source_directory.mkdir()
@@ -515,6 +584,11 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             result.update(
                 source=expected, ok=result["ok"] and canonical(actual) == canonical(expected)
             )
+            if original_tests_opt_in == "1":
+                result["original_tests"] = _run_original_pytest_tests(
+                    root, source_directory, workspace, captured, source_python
+                )
+                result["ok"] = result["ok"] and result["original_tests"]["ok"]
         if captured.get("security"):
             result["security_headers"] = compare_headers(
                 json.loads((candidate / "sanka-observed.headers.json").read_text()),
