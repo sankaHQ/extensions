@@ -45,6 +45,8 @@ def _settings(root: Path) -> tuple[str, dict[str, Any], set[str]]:
     from .drf_modules import startup
 
     manage = startup(ast.parse((root / "manage.py").read_text()))
+    if manage.body and _same(manage.body[0], "from __future__ import annotations"):
+        manage.body.pop(0)
     calls = [
         n
         for n in ast.walk(manage)
@@ -557,7 +559,15 @@ def summary(self, request):
                 continue
             tree = ast.parse((root / relative).read_text())
             path = Path(relative)
-            if path.name == "__init__.py" and not tree.body:
+            if path.name == "__init__.py" and (
+                not tree.body
+                or (
+                    len(tree.body) == 1
+                    and isinstance(tree.body[0], ast.Expr)
+                    and isinstance(tree.body[0].value, ast.Constant)
+                    and isinstance(tree.body[0].value.value, str)
+                )
+            ):
                 consumed.add(relative)
             elif relative in {a + "/apps.py" for a in apps}:
                 app = path.parts[0]
@@ -844,7 +854,7 @@ def _models(
                     raise ValueError("unsupported model Meta setting")
                 if "ordering" in meta:
                     ordering = _literal(meta["ordering"])
-                    if ordering != ["id"]:
+                    if ordering not in (["id"], ("id",)):
                         raise ValueError("only primary-key ordering is qualified")
                 if "db_table" in meta:
                     table = identifier(_literal(meta["db_table"]))
@@ -1036,10 +1046,10 @@ def _serializer(
     names = _literal(declarations["fields"])
     readonly = _literal(declarations["read_only_fields"])
     if (
-        not isinstance(names, list)
+        not isinstance(names, (list, tuple))
         or len(names) != len(set(names))
         or "id" not in names
-        or not isinstance(readonly, list)
+        or not isinstance(readonly, (list, tuple))
         or len(readonly) != len(set(readonly))
         or "id" not in readonly
         or not set(readonly) <= set(names)
@@ -1218,10 +1228,10 @@ def _serializer(
 
 def _fold_schema_history(files: list[Path], app: str) -> ast.Module:
     """Fold a linear, schema-only Django history into its final static baseline."""
-    baseline = ast.parse(files[0].read_text())
+    baseline = _migration_annotations(ast.parse(files[0].read_text()))
     if len(files) == 1:
         return baseline
-    if len(baseline.body) != 3 or not isinstance(baseline.body[-1], ast.ClassDef):
+    if len(baseline.body) not in (2, 3) or not isinstance(baseline.body[-1], ast.ClassDef):
         raise ValueError("initial migration must be a static schema baseline")
     initial = _assignments(baseline.body[-1].body)
     operations = initial.get("operations")
@@ -1242,7 +1252,7 @@ def _fold_schema_history(files: list[Path], app: str) -> ast.Module:
         creates[name.lower()] = fields
     previous = files[0].stem
     for path in files[1:]:
-        tree = ast.parse(path.read_text())
+        tree = _migration_annotations(ast.parse(path.read_text()))
         if (
             len(tree.body) != 2
             or not isinstance(tree.body[-1], ast.ClassDef)
@@ -1303,6 +1313,40 @@ def _fold_schema_history(files: list[Path], app: str) -> ast.Module:
     return baseline
 
 
+def _migration_annotations(tree: ast.Module) -> ast.Module:
+    """Discard qualified type annotations without changing migration operations."""
+    typing_imports = [
+        node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "typing"
+    ]
+    if typing_imports:
+        if (
+            len(typing_imports) != 1
+            or ast.unparse(typing_imports[0]) != "from typing import ClassVar"
+        ):
+            raise ValueError("unsupported migration typing import")
+        tree.body.remove(typing_imports[0])
+    migration = next((node for node in tree.body if isinstance(node, ast.ClassDef)), None)
+    if migration is None:
+        raise ValueError("migration class required")
+    annotations = {
+        "dependencies": (
+            "ClassVar[list[tuple[str, str]]]" if typing_imports else "list[tuple[str, str]]"
+        ),
+        "operations": "ClassVar[list[object]]" if typing_imports else None,
+    }
+    for index, node in enumerate(migration.body):
+        if not isinstance(node, ast.AnnAssign):
+            continue
+        if (
+            not isinstance(node.target, ast.Name)
+            or ast.unparse(node.annotation) != annotations.get(node.target.id)
+            or node.value is None
+        ):
+            raise ValueError("unsupported migration declaration annotation")
+        migration.body[index] = ast.Assign(targets=[node.target], value=node.value)
+    return tree
+
+
 def _migration(
     tree: ast.Module,
     models: list[dict[str, Any]],
@@ -1314,13 +1358,13 @@ def _migration(
     engine: str = "sqlite",
 ) -> list[dict[str, Any]]:
     """Reconstruct the baseline through the same static model parser."""
-    if (
-        len(tree.body) != 3
-        or not _same(tree.body[0], "import django.db.models.deletion")
-        or not _same(tree.body[1], "from django.db import migrations, models")
+    imports = [ast.unparse(node) for node in tree.body[:-1]]
+    if imports not in (
+        ["from django.db import migrations, models"],
+        ["import django.db.models.deletion", "from django.db import migrations, models"],
     ):
         raise ValueError("unqualified schema migration imports or execution")
-    cls = tree.body[2]
+    cls = tree.body[-1]
     if (
         not isinstance(cls, ast.ClassDef)
         or cls.name != "Migration"
@@ -1373,13 +1417,15 @@ def _migration(
             if len(keywords) != len(field.keywords) or None in keywords or field.args:
                 raise ValueError("expanded migration fields are unsupported")
             args = []
-            if (
-                ast.unparse(field.func) in {"models.AutoField", "models.BigAutoField"}
-                and "serialize" in keywords
-                and _literal(keywords.pop("serialize")) is not False
-            ):
-                raise ValueError("unsupported primary key serialization")
+            if ast.unparse(field.func) in {"models.AutoField", "models.BigAutoField"}:
+                for key, expected in (("auto_created", True), ("verbose_name", "ID")):
+                    if key in keywords and _literal(keywords.pop(key)) != expected:
+                        raise ValueError("unsupported primary key metadata")
+                if "serialize" in keywords and _literal(keywords.pop("serialize")) is not False:
+                    raise ValueError("unsupported primary key serialization")
             if ast.unparse(field.func) == "models.ForeignKey":
+                if "import django.db.models.deletion" not in imports:
+                    raise ValueError("foreign key deletion import is required")
                 target = _literal(keywords.pop("to", None))
                 references = {
                     m["source_app"] + "." + m["source_name"].lower(): m

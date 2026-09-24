@@ -246,7 +246,8 @@ BEGIN
         JOIN pg_class c ON c.oid = con.conrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = current_schema() AND c.relname <> 'goose_db_version'
-          AND con.contype NOT IN ('p','u','f','c')
+          AND (con.contype NOT IN ('p','u','f','c','n')
+               OR (con.contype = 'n' AND NOT con.convalidated))
     ) THEN
         RAISE EXCEPTION 'schema adoption failed: unsupported constraints';
     END IF;

@@ -1170,6 +1170,12 @@ and read-only ViewSets together. The exact collection-level `summary` action tha
 returns `{"count": self.get_queryset().count()}` is qualified. Other custom
 actions and method overrides block generation.
 
+The static parser also accepts the standard annotated `main() -> None` wrapper,
+literal tuple model ordering and serializer fields, typed migration declarations,
+generated primary-key metadata, and docstring-only package initializers. A
+gadget-inventory project replay covers these forms on all four Go routers;
+widget-inventory also passes static capture.
+
 ViewSets also accept literal, exact scalar `queryset.filter(...)` predicates,
 stock `OrderingFilter` with explicit scalar `ordering_fields`, and stock
 `LimitOffsetPagination` with an optional static `PAGE_SIZE` (1–1000). Filters apply
@@ -1249,22 +1255,29 @@ environment. The default invocation is a read-only dry run:
 export SANKA_GO_SOURCE_DATABASE_URL='postgresql://.../source'
 export DATABASE_URL='postgresql://.../target'
 python tools/transfer_existing.py
-python tools/transfer_existing.py --execute
+python tools/transfer_existing.py --execute --acknowledge-excluded-tables
+python tools/transfer_existing.py --verify
 ```
 
 The command compares captured columns, constraints and required indexes, rejects
 row security, triggers, same-schema connections and nonempty targets, then copies
-rows in model dependency order. `--execute` locks source and target tables,
-compares row digests, and carries over each captured ID sequence state. A second
-copy refuses to run. Use a source write freeze and an isolated clone first; this
-command does not synchronize writes made after its source snapshot. It ignores
-tables outside the captured contract, including Django's built-in auth and
-migration tables. Those tables and application-specific jobs must be handled in
-a separate cutover plan. SQLite source databases do not have this transfer recipe.
+rows in model dependency order. The dry run lists excluded source tables;
+`--execute` requires `--acknowledge-excluded-tables` when that list is nonempty.
+Foreign keys crossing from captured to excluded tables are refused. Execution
+locks source and target tables, compares row digests, and carries over each
+captured ID sequence state. `--verify` is read-only reconciliation of captured
+rows and sequences after the copy; it fails if either side drifts. A second copy
+refuses to run. Use a source write freeze and an isolated clone first; this
+command does not synchronize writes made after its source snapshot. Excluded
+tables, including Django's built-in auth and migration tables, and
+application-specific jobs still need a separate cutover plan. SQLite source
+databases do not have this transfer recipe.
 
 `adopt-existing` is a validation-only Goose baseline for a PostgreSQL schema
 containing exactly the captured tables. It refuses extra tables, changed columns,
-constraints, sequences, indexes, triggers or row security. A standard Django
+constraints, sequences, indexes, triggers or row security. PostgreSQL 18's
+validated `NOT NULL` catalog constraints are accepted as column nullability;
+unvalidated ones are refused. A standard Django
 database also contains built-in tables, so direct in-place adoption is not the
 qualified cutover path.
 

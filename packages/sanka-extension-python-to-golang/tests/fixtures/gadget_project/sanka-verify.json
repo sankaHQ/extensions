@@ -1,0 +1,12 @@
+{
+  "scenarios": [
+    {"id": "empty", "method": "GET", "path": "/api/gadgets/", "expected_status": 200},
+    {"id": "create", "method": "POST", "path": "/api/gadgets/", "body": {"name": "Desk lamp", "quantity": 0}, "expected_status": 201},
+    {"id": "detail", "method": "GET", "path": "/api/gadgets/1/", "expected_status": 200},
+    {"id": "invalid-quantity", "method": "PATCH", "path": "/api/gadgets/1/", "body": {"quantity": -1}, "expected_status": 400},
+    {"id": "update", "method": "PATCH", "path": "/api/gadgets/1/", "body": {"quantity": 3}, "expected_status": 200},
+    {"id": "list", "method": "GET", "path": "/api/gadgets/", "expected_status": 200},
+    {"id": "delete", "method": "DELETE", "path": "/api/gadgets/1/", "expected_status": 204},
+    {"id": "missing", "method": "GET", "path": "/api/gadgets/1/", "expected_status": 404}
+  ]
+}

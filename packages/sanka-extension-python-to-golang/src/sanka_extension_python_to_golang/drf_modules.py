@@ -116,7 +116,7 @@ def startup(tree: ast.Module) -> ast.Module:
             len(functions) != 1
             or function.name != "main"
             or function.decorator_list
-            or function.returns
+            or (function.returns is not None and ast.unparse(function.returns) != "None")
             or function.type_params
             or ast.dump(function.args) != ast.dump(signature.args)
             or not isinstance(tree.body[-1], ast.If)
