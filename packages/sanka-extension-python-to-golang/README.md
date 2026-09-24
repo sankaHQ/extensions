@@ -1064,8 +1064,9 @@ Python files. Unimported `tests/` files, `conftest.py`, `test_*.py` and `*_test.
 are inventoried as source tests. Imported helpers remain application code even
 when their filenames look like tests. Migration directories are never excluded by
 these test conventions. Every source test remains in the source fingerprint, so
-changing it invalidates the reviewed plan. Source assertions are not translated
-or executed; generated contract tests and source/target replay provide the stated
+changing it invalidates the reviewed plan. Source assertions are not translated;
+the conventional DRF opt-in below can execute selected tests during Verify.
+Generated contract tests and source/target replay provide the default
 qualification. Unclassified runtime behavior still blocks generation.
 
 A ready scan means the captured project can be generated, not that it is ready
@@ -1230,7 +1231,14 @@ and compares JSON responses, captured rows
 and logical identity state with an explicitly resettable PostgreSQL fixture.
 Hosted-style `sanka-verify.json` cases with `setup` retain independent resets;
 setup requests are observed too. Ordinary shared scenarios run in order. Original
-source tests are fingerprinted, but are not automatically executed or translated.
+source tests are fingerprinted, but are not translated or run by default.
+For a trusted conventional DRF project with a SQLite source and `app/tests.py`
+modules, set `SANKA_GO_RUN_ORIGINAL_TESTS=1` and forward it with
+`sanka verify --extension-env SANKA_GO_RUN_ORIGINAL_TESTS`. Verify runs those
+modules in a disposable copy after HTTP replay. The report records the module
+names, test count and result; a failing or undiscovered test fails Verify.
+This is opt-in code execution, not a security sandbox. PostgreSQL source tests
+and other test layouts remain unqualified.
 Forward the fixture DSN and source interpreter through the CLI using
 `--extension-env SANKA_GO_TARGET_TEST_DATABASE_URL` and
 `--extension-env SANKA_GO_SOURCE_PYTHON` for test/verify.
