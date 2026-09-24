@@ -341,7 +341,11 @@ def plan_fastapi(
     sql_engine: str | None = None,
     generation_mode: str = "minimal",
     package_manager: str | None = None,
+    swagger_ui: bool | None = None,
 ) -> FrameworkPlan:
+    if swagger_ui is not None and not isinstance(swagger_ui, bool):
+        raise FrameworkMigrationError("swagger_ui must be a boolean")
+    selected_swagger_ui = True if swagger_ui is None else swagger_ui
     if strategy not in (NATIVE_STRATEGY, COMPATIBILITY_STRATEGY):
         raise FrameworkMigrationError(f"unknown plan strategy: {strategy}")
     if generation_mode not in GENERATION_MODES:
@@ -410,6 +414,10 @@ def plan_fastapi(
     layout = generation_mode
     if generation_mode == "update":
         manifest = _read_json(output_path / GENERATED_MANIFEST, label="generated target manifest")
+        if swagger_ui is None:
+            selected_swagger_ui = manifest.get("swagger_ui", True)
+            if not isinstance(selected_swagger_ui, bool):
+                raise FrameworkMigrationError("generated target swagger_ui must be a boolean")
         target_strategy = str(manifest.get("mode") or "")
         if target_strategy and target_strategy != strategy:
             raise FrameworkMigrationError(
@@ -514,6 +522,7 @@ def plan_fastapi(
         generation_mode=generation_mode,
         target_generation_mode=target_generation_mode,
         package_manager=selected_package_manager,
+        swagger_ui=selected_swagger_ui,
         database_required=database_required,
         target_fingerprint=target_fingerprint,
         file_operations=file_operations,
@@ -1106,6 +1115,7 @@ def _render_bridge_output(
         "entrypoint": entrypoint,
         "generation_mode": layout,
         "package_manager": plan.package_manager,
+        "swagger_ui": plan.swagger_ui,
         "database_required": False,
         "generated_files": [entrypoint, compat_path],
         "routes": [
@@ -1251,6 +1261,7 @@ def _render_native_output(
         "sql_engine": sql_engine,
         "generation_mode": layout,
         "package_manager": plan.package_manager,
+        "swagger_ui": plan.swagger_ui,
         "database_required": plan.database_required,
         "database": {
             "vendor": scan.database.vendor,
@@ -2023,6 +2034,7 @@ def _unique_ident(base: str, used: set[str]) -> str:
 
 def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> str:
     """Emit decorator-style async FastAPI routes that call the shared native helpers."""
+    docs_option = ", docs_url=None" if manifest.get("swagger_ui") is False else ""
     native_import = (
         f"from {module_prefix} import sanka_native as native"
         if module_prefix
@@ -2105,6 +2117,7 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
             '    title="Sanka native FastAPI application",',
             "    lifespan=lifespan,",
             "    redirect_slashes=False,",
+            *(["    docs_url=None,"] if docs_option else []),
             ")",
             "",
         ]
@@ -2112,7 +2125,8 @@ def _render_native_app(manifest: dict[str, Any], *, module_prefix: str = "") -> 
         lines[10:10] = [
             "",
             "",
-            'app = FastAPI(title="Sanka native FastAPI application", redirect_slashes=False)',
+            'app = FastAPI(title="Sanka native FastAPI application", '
+            f"redirect_slashes=False{docs_option})",
             "",
         ]
     used_vars: set[str] = set()
@@ -2493,6 +2507,12 @@ def _render_native_readme(
         if plan.database_required
         else ""
     )
+    docs = (
+        "Swagger UI is enabled at `/docs`. Use a hostname permitted by the source "
+        "Django `ALLOWED_HOSTS` (for example, `localhost` may work when `127.0.0.1` does not)."
+        if plan.swagger_ui
+        else "Swagger UI at `/docs` is disabled by the reviewed plan."
+    )
     return f"""# Generated native FastAPI application
 
 Sanka generated this application from plan `{plan.plan_hash}`.
@@ -2508,6 +2528,8 @@ use an isolated copy of the database.
 
 Format-suffix alias routes from the source router are dropped as a disclosed
 contract change; clients negotiate content types with headers instead.
+
+{docs} OpenAPI remains at `/openapi.json`; ReDoc remains at `/redoc`.
 
 ```bash
 {setup}
@@ -2603,7 +2625,10 @@ async def _dispatch(request: Request, method: str) -> Response:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Sanka DRF to FastAPI compatibility application")
+    app = FastAPI(
+        title="Sanka DRF to FastAPI compatibility application",
+        docs_url="/docs" if MANIFEST.get("swagger_ui", True) else None,
+    )
     for index, route in enumerate(MANIFEST["routes"]):
         method = route["method"]
 
@@ -2638,6 +2663,7 @@ def _render_generated_readme(plan: FrameworkPlan, *, entrypoint: str = "app.py")
             f".venv/bin/python -m uvicorn {module}:app --reload"
         )
     )
+    docs = "enabled at `/docs`" if plan.swagger_ui else "disabled at `/docs`"
     return f"""# Generated FastAPI compatibility application
 
 Sanka generated this application from plan `{plan.plan_hash}`.
@@ -2647,6 +2673,8 @@ already been removed. FastAPI owns the generated route graph and forwards each
 request into the existing Django application in-process so observable behavior
 stays stable. Replace bridge routes with native FastAPI handlers incrementally,
 keeping `sanka verify` green after each replacement.
+
+Swagger UI is {docs}. OpenAPI remains at `/openapi.json`; ReDoc remains at `/redoc`.
 
 Run locally from the generated project root:
 

@@ -39,6 +39,10 @@ def _request(arguments: list[str], cwd: Path) -> ExtensionRequest:
         }
         if orm := _value(arguments, "--orm"):
             configuration["orm"] = orm
+        if "--no-swagger-ui" in arguments:
+            configuration["swagger_ui"] = False
+        elif "--swagger-ui" in arguments:
+            configuration["swagger_ui"] = True
     elif command == "apply":
         plan_hash = _value(arguments, "--plan-hash")
         if plan_hash is not None:

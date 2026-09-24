@@ -84,6 +84,7 @@ class FrameworkPlan:
     generation_mode: str = "minimal"
     target_generation_mode: str = ""
     package_manager: str = "uv"
+    swagger_ui: bool = True
     database_required: bool = True
     target_fingerprint: str = ""
     file_operations: tuple[FileOperation, ...] = ()
@@ -137,6 +138,8 @@ class FrameworkPlan:
     def hash_payload(self) -> dict[str, Any]:
         payload = asdict(self)
         payload.pop("plan_hash", None)
+        if self.swagger_ui:
+            payload.pop("swagger_ui")  # Keep hashes of existing default-on plans valid.
         if self.schema_version < 2:
             for route in payload["routes"]:
                 route.pop("adaptation_reasons", None)
@@ -173,6 +176,9 @@ class FrameworkPlan:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> FrameworkPlan:
+        swagger_ui = payload.get("swagger_ui", True)
+        if not isinstance(swagger_ui, bool):
+            raise ValueError("swagger_ui must be a boolean")
         return cls(
             schema_version=int(payload["schema_version"]),
             source_framework=str(payload["source_framework"]),
@@ -188,6 +194,7 @@ class FrameworkPlan:
             generation_mode=str(payload.get("generation_mode") or "minimal"),
             target_generation_mode=str(payload.get("target_generation_mode") or ""),
             package_manager=str(payload.get("package_manager") or "uv"),
+            swagger_ui=swagger_ui,
             database_required=bool(payload.get("database_required", True)),
             target_fingerprint=str(payload.get("target_fingerprint") or ""),
             file_operations=tuple(

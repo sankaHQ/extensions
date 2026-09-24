@@ -143,6 +143,9 @@ def _handle_plan(request: ExtensionRequest) -> ExtensionResponse:
             message="DRF-to-FastAPI plan configuration is incomplete",
             details={"inputs": missing},
         )
+    swagger_ui = request.configuration.get("swagger_ui")
+    if swagger_ui is not None and not isinstance(swagger_ui, bool):
+        raise ValueError("configuration.swagger_ui must be a boolean")
     plan = plan_fastapi(
         request.project_root,
         artifact_dir=request.artifact_root,
@@ -151,6 +154,7 @@ def _handle_plan(request: ExtensionRequest) -> ExtensionResponse:
         sql_engine=_optional_string(request.configuration, "orm"),
         generation_mode=_string(request.configuration, "generation"),
         package_manager=_string(request.configuration, "package_manager"),
+        swagger_ui=swagger_ui,
     )
     return success_response(
         request,
