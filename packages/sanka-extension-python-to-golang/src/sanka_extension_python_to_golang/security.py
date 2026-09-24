@@ -389,8 +389,9 @@ func accessBody(status int) []byte {{
     if policy["kind"] == "jwt-hs256-roles":
         from .jwt_security import GO_ACCESS
 
-        start, end = common.index("func accessStatus("), common.index("func accessHeaders(")
-        common = common[:start] + GO_ACCESS.replace("SCOPE_CHECK", scope_check) + common[end:]
+        if not policy.get("native"):
+            start, end = common.index("func accessStatus("), common.index("func accessHeaders(")
+            common = common[:start] + GO_ACCESS.replace("SCOPE_CHECK", scope_check) + common[end:]
         common = common.replace(
             '"crypto/subtle";',
             '\n"encoding/json"; "encoding/base64"; "unicode/utf8"; "strconv"; "time"; "github.com/golang-jwt/jwt/v5";',

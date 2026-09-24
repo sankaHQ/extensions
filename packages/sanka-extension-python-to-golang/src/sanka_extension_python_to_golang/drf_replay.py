@@ -102,7 +102,13 @@ def _authenticated_groups(
         views: list[dict[str, Any]] = captured["drf_project"]["views"]
         for view in views:
             collection = view["path"]
-            if path == collection or re.fullmatch(re.escape(collection) + r"[0-9]+/", path):
+            if (
+                path == collection
+                or re.fullmatch(re.escape(collection) + r"[0-9]+/", path)
+                or any(
+                    path == collection + action["name"] + "/" for action in view.get("actions", [])
+                )
+            ):
                 return view
         return None
 
@@ -137,7 +143,11 @@ def _authenticated_groups(
             assert view is not None
             if view.get("scope") and case["expected_status"] in (200, 201, 204):
                 roles = tuple(role for role in roles if role[0] != "other-identity")
-                detail = urlsplit(case["path"]).path != view["path"]
+                requested = urlsplit(case["path"]).path
+                detail = requested != view["path"] and not any(
+                    requested == view["path"] + action["name"] + "/"
+                    for action in view.get("actions", [])
+                )
                 for claim in sorted(set(view["scope"].values())):
                     claims = {
                         "iss": REPLAY_JWT_ENV["AUTH_JWT_ISSUER"],

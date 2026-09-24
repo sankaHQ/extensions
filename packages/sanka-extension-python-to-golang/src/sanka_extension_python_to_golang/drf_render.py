@@ -28,6 +28,11 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
         **_runtime(target, True, True),
     }
     sqlite = captured["drf_project"]["database"]["engine"] == "sqlite"
+    if not sqlite:
+        from .drf_transfer import TRANSFER_SCRIPT
+
+        result["tools/transfer_existing.py"] = TRANSFER_SCRIPT
+    adopting = captured["configuration"]["schema_mode"] == "adopt-existing"
     authenticated = captured["drf_project"].get("authentication") == "jwt-hs256-roles"
     if authenticated:
         jwt_lock = files("sanka_extension_python_to_golang").joinpath("locks", "jwt")
@@ -51,7 +56,7 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
         if sqlite:
             counters += f"INSERT INTO migration_identity VALUES ('{model['table']}', 0);\n"
         for field in model["fields"]:
-            if field.get("kind") == "PositiveIntegerField":
+            if field.get("kind") == "PositiveIntegerField" and not adopting:
                 counters += f'ALTER TABLE "{model["table"]}" ADD CHECK ("{field["name"]}" >= 0);\n'
     result["migrations/00001_initial.sql"] = migration.replace(
         "-- +goose Down",
@@ -126,7 +131,7 @@ import ({http_import} "{MODULES[target]}"; "github.com/jackc/pgx/v5/pgxpool")
         code = code.replace(
             "AUTHORIZATION_GUARD",
             'if authorization!="" || strings.Contains(cookie,"sessionid=") { return 501,map[string]string{"detail":"Authentication requires a separately qualified migration profile."} }',
-        ).replace("AUTHORIZATION_CHECK", "")
+        ).replace("AUTHORIZATION_CHECK", "principal:=map[string]string{}")
     if not sqlite:
         code = code.replace(
             '"UPDATE migration_identity SET value=value+1 WHERE table_name=$1 RETURNING value"',
@@ -175,6 +180,8 @@ type drfField struct {
     Minimum *int64 `json:"minimum"`
     Maximum *int64 `json:"maximum"`
     Choices []string `json:"choices"`
+    Forbidden *string `json:"forbidden"`
+    ForbiddenError string `json:"forbidden_error"`
 }
 type drfModel struct {
     SourceName string `json:"source_name"`
@@ -200,7 +207,7 @@ type drfQuery struct {
     Pagination bool `json:"pagination"`
     PageSize int64 `json:"page_size"`
 }
-type drfView struct { Path string `json:"path"`; Serializer drfSerializer `json:"serializer"`; Query drfQuery `json:"query"`; ReadOnly bool `json:"read_only"`; Authentication string `json:"authentication"`; Scope map[string]string `json:"scope"` }
+type drfView struct { Path string `json:"path"`; Serializer drfSerializer `json:"serializer"`; Query drfQuery `json:"query"`; ReadOnly bool `json:"read_only"`; Authentication string `json:"authentication"`; Scope map[string]string `json:"scope"`; Actions []struct { Name string `json:"name"`; Kind string `json:"kind"` } `json:"actions"` }
 type drfContract struct {
     Models []drfModel `json:"models"`
     Project struct { Views []drfView `json:"views"`; Database struct { Engine string `json:"engine"` } `json:"database"` } `json:"drf_project"`
@@ -308,6 +315,7 @@ func drfValidate(raw []byte, schema drfSerializer, partial bool) (map[string]any
                     found:=false; for _, choice:=range field.Choices { if choice==text { found=true } }
                     if !found { message=fmt.Sprintf(`"%s" is not a valid choice.`,text) }
                 }
+                if message=="" && field.Forbidden!=nil && text==*field.Forbidden { message=field.ForbiddenError }
                 value=text
             }
         case "int32", "int64":
@@ -491,10 +499,12 @@ func drfList(ctx context.Context, tx pgx.Tx, view drfView, address, where string
 func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []byte,accept,contentType,authorization,cookie string, requestURL ...string) (int,any) {
     if accept!="" && accept!="*/*" && !strings.Contains(accept,"application/json") { return 406,map[string]string{"detail":"Could not satisfy the request Accept header."} }
     AUTHORIZATION_GUARD
-    var view *drfView;id:=int64(0);detail:=false
+    var view *drfView;id:=int64(0);detail:=false;action:=""
     for i:=range drfSchema.Project.Views {
         candidate:=&drfSchema.Project.Views[i]
         if path==candidate.Path { view=candidate;break }
+        for _,item:=range candidate.Actions { if path==candidate.Path+item.Name+"/" { view=candidate;action=item.Kind;break } }
+        if view!=nil { break }
         if strings.HasPrefix(path,candidate.Path) && strings.HasSuffix(path,"/") {
             part:=strings.TrimSuffix(strings.TrimPrefix(path,candidate.Path),"/")
             parsed,err:=strconv.ParseInt(part,10,64);if err==nil && parsed>=0 && !strings.ContainsAny(part,"+-/") { view=candidate;id=parsed;detail=true;break }
@@ -503,11 +513,12 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
     if view==nil { return 404,map[string]string{"detail":"Not found."} }
     AUTHORIZATION_CHECK
     actualMethod:=method;if method=="HEAD" { actualMethod="GET" }
-    allowed:=actualMethod=="GET" || !view.ReadOnly && (actualMethod=="POST" && !detail || detail && (actualMethod=="PUT" || actualMethod=="PATCH" || actualMethod=="DELETE"))
+    allowed:=action!="" && actualMethod=="GET" || action=="" && (actualMethod=="GET" || !view.ReadOnly && (actualMethod=="POST" && !detail || detail && (actualMethod=="PUT" || actualMethod=="PATCH" || actualMethod=="DELETE")))
     if !allowed { return 405,map[string]string{"detail":fmt.Sprintf(`Method "%s" not allowed.`,method)} }
     tx,err:=pool.Begin(ctx);if err!=nil { return 500,map[string]string{"detail":"Database unavailable."} };defer tx.Rollback(ctx)
     schema:=view.Serializer;model:=drfModelFor(schema.Model)
     where,args:=drfWhere(view.Query,view.Scope,principal)
+    if action=="count" { var count int64;if err=tx.QueryRow(ctx,"SELECT COUNT(*) FROM "+quoted(model.Table)+where,args...).Scan(&count);err!=nil { return 500,map[string]string{"detail":"Database read failed."} };return 200,map[string]any{"count":count} }
     existing:=[]map[string]any{}
     if detail {
         if where=="" { where=" WHERE " } else { where+=" AND " };args=append(args,id)
