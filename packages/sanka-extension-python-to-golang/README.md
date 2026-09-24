@@ -1185,7 +1185,8 @@ when it lives in one installed app's `auth.py`. Every captured ViewSet must decl
 `authentication_classes = [JWTAuthentication]` and
 `permission_classes = [IsAuthenticated]`. The verifier reads `AUTH_JWT_SECRET`,
 `AUTH_JWT_ISSUER`, and `AUTH_JWT_AUDIENCE` at runtime; captured contracts and
-generated defaults contain no credential values. Verified reader tokens can read;
+generated defaults contain no credential values. An environment-backed Django
+`SECRET_KEY` must use a different variable. Verified reader tokens can read;
 writer tokens can read and write. Missing or invalid tokens return 401 with the
 Bearer challenge, reader writes return 403, and invalid runtime credentials fail
 closed with 503. Authentication precedes a protected ViewSet's method denial.

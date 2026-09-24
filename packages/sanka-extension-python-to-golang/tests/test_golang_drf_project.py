@@ -552,6 +552,11 @@ def test_conventional_drf_signed_project_capture_and_render(tmp_path, target):
             "authentication_classes = [JWTAuthentication]",
             "authentication_classes = []",
         ),
+        (
+            "shop_config/settings.py",
+            'SECRET_KEY = "sanka-bench-synthetic-fixture-003-only"',
+            'SECRET_KEY = os.environ["AUTH_JWT_SECRET"]',
+        ),
     ],
 )
 def test_conventional_drf_auth_changes_fail_closed(tmp_path, filename, old, new):

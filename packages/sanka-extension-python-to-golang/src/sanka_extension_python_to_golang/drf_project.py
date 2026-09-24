@@ -284,6 +284,12 @@ def capture_project(
 
         apps = settings["apps"]
         auth_module, auth_files = _project_auth(root, apps)
+        if auth_module and settings["secret_environment"] in {
+            "AUTH_JWT_SECRET",
+            "AUTH_JWT_ISSUER",
+            "AUTH_JWT_AUDIENCE",
+        }:
+            raise ValueError("Django secret and JWT credentials need independent environments")
         consumed.update(auth_files)
         qualified = len(apps) > 1
         trees: dict[str, ast.Module] = {}
