@@ -28,6 +28,25 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
         **_runtime(target, True, True),
     }
     sqlite = captured["drf_project"]["database"]["engine"] == "sqlite"
+    if not sqlite:
+        from .drf_transfer import TRANSFER_SCRIPT
+
+        result["tools/transfer_existing.py"] = TRANSFER_SCRIPT
+    adopting = captured["configuration"]["schema_mode"] == "adopt-existing"
+    authenticated = captured["drf_project"].get("authentication") == "jwt-hs256-roles"
+    if authenticated:
+        jwt_lock = files("sanka_extension_python_to_golang").joinpath("locks", "jwt")
+        result["go.mod"] += "\n" + jwt_lock.joinpath("go.mod").read_text()
+        result["go.sum"] = (
+            "\n".join(
+                sorted(
+                    set(result["go.sum"].splitlines())
+                    | set(jwt_lock.joinpath("go.sum").read_text().splitlines())
+                )
+            )
+            + "\n"
+        )
+        result[".env.example"] += "AUTH_JWT_SECRET=\nAUTH_JWT_ISSUER=\nAUTH_JWT_AUDIENCE=\n"
     migration = result["migrations/00001_initial.sql"]
     counters = ""
     if sqlite:
@@ -37,7 +56,7 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
         if sqlite:
             counters += f"INSERT INTO migration_identity VALUES ('{model['table']}', 0);\n"
         for field in model["fields"]:
-            if field.get("kind") == "PositiveIntegerField":
+            if field.get("kind") == "PositiveIntegerField" and not adopting:
                 counters += f'ALTER TABLE "{model["table"]}" ADD CHECK ("{field["name"]}" >= 0);\n'
     result["migrations/00001_initial.sql"] = migration.replace(
         "-- +goose Down",
@@ -49,6 +68,7 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
     app := fiber.New(fiber.Config{BodyLimit: 1048576, DisableHeadAutoRegister: true, ReadTimeout: 15*time.Second, WriteTimeout: 30*time.Second, IdleTimeout: 60*time.Second})
     app.Use(func(c fiber.Ctx) error {
         status, body := drfRequest(c.Context(), pool, c.Method(), c.Path(), c.Body(), c.Get("Accept"), c.Get("Content-Type"), c.Get("Authorization"), c.Get("Cookie"), c.BaseURL()+c.OriginalURL())
+        if status == 401 { c.Set("WWW-Authenticate", "Bearer") }
         if status == 204 { return c.SendStatus(status) }
         return c.Status(status).JSON(body)
     })
@@ -67,6 +87,7 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
         if err != nil {{ w.WriteHeader(413); return }}
         scheme := "http"; if r.TLS != nil {{ scheme = "https" }}
         status, body := drfRequest(r.Context(), pool, r.Method, r.URL.Path, raw, r.Header.Get("Accept"), r.Header.Get("Content-Type"), r.Header.Get("Authorization"), r.Header.Get("Cookie"), scheme+"://"+r.Host+r.URL.RequestURI())
+        if status == 401 {{ w.Header().Set("WWW-Authenticate", "Bearer") }}
         if status == 204 {{ w.WriteHeader(status); return }}
         w.Header().Set("Content-Type", "application/json"); w.WriteHeader(status)
         if r.Method != "HEAD" {{ _ = json.NewEncoder(w).Encode(body) }}
@@ -74,13 +95,43 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
     {setup}
     return app
 }}"""
+    if authenticated:
+        adapter = adapter.replace(
+            'c.Get("Authorization")',
+            'strings.Join(c.GetReqHeaders()["Authorization"], ", ")',
+        ).replace(
+            'r.Header.Get("Authorization")',
+            'strings.Join(r.Header.Values("Authorization"), ", ")',
+        )
     http_import = '"net/http"; "io"; "encoding/json";' if target != "fiber" else '"time";'
+    if authenticated:
+        http_import += ' "strings";'
     result["app.go"] = f'''// SPDX-License-Identifier: Apache-2.0
 package backend
 import ({http_import} "{MODULES[target]}"; "github.com/jackc/pgx/v5/pgxpool")
 {adapter}
 '''
     code = GO_DRF
+    if authenticated:
+        from .jwt_security import go_access_principal
+
+        code = code.replace(
+            '    "encoding/json"',
+            '    "encoding/json"\n    "encoding/base64"\n    "os"\n    "regexp"\n    "time"\n    "github.com/golang-jwt/jwt/v5"',
+        )
+        code = code.replace("AUTHORIZATION_GUARD", "")
+        code = code.replace(
+            "AUTHORIZATION_CHECK",
+            'principal:=map[string]string{}\n    if view.Authentication != "" { var status int; principal,status=accessPrincipal(authorization,method,path);if status!=0 {\n'
+            '        message:=map[int]string{401:"not authenticated",403:"permission denied",503:"authentication unavailable"}[status]\n'
+            '        return status,map[string]string{"detail":message}\n    } }',
+        )
+        code += go_access_principal("")
+    else:
+        code = code.replace(
+            "AUTHORIZATION_GUARD",
+            'if authorization!="" || strings.Contains(cookie,"sessionid=") { return 501,map[string]string{"detail":"Authentication requires a separately qualified migration profile."} }',
+        ).replace("AUTHORIZATION_CHECK", "principal:=map[string]string{}")
     if not sqlite:
         code = code.replace(
             '"UPDATE migration_identity SET value=value+1 WHERE table_name=$1 RETURNING value"',
@@ -121,6 +172,7 @@ type drfField struct {
     GoType string `json:"go_type"`
     SQLType string `json:"sql_type"`
     Primary bool `json:"primary_key"`
+    ReadOnly bool `json:"read_only"`
     Unique bool `json:"unique"`
     Blank bool `json:"blank"`
     Required bool `json:"required"`
@@ -128,6 +180,8 @@ type drfField struct {
     Minimum *int64 `json:"minimum"`
     Maximum *int64 `json:"maximum"`
     Choices []string `json:"choices"`
+    Forbidden *string `json:"forbidden"`
+    ForbiddenError string `json:"forbidden_error"`
 }
 type drfModel struct {
     SourceName string `json:"source_name"`
@@ -153,7 +207,7 @@ type drfQuery struct {
     Pagination bool `json:"pagination"`
     PageSize int64 `json:"page_size"`
 }
-type drfView struct { Path string `json:"path"`; Serializer drfSerializer `json:"serializer"`; Query drfQuery `json:"query"` }
+type drfView struct { Path string `json:"path"`; Serializer drfSerializer `json:"serializer"`; Query drfQuery `json:"query"`; ReadOnly bool `json:"read_only"`; Authentication string `json:"authentication"`; Scope map[string]string `json:"scope"`; Actions []struct { Name string `json:"name"`; Kind string `json:"kind"` } `json:"actions"` }
 type drfContract struct {
     Models []drfModel `json:"models"`
     Project struct { Views []drfView `json:"views"`; Database struct { Engine string `json:"engine"` } `json:"database"` } `json:"drf_project"`
@@ -236,7 +290,7 @@ func drfValidate(raw []byte, schema drfSerializer, partial bool) (map[string]any
     }
     values := map[string]any{}
     for _, field := range schema.Fields {
-        if field.Primary { continue }
+        if field.Primary || field.ReadOnly { continue }
         input, present := data[field.Name]
         if !present {
             if partial { continue }
@@ -261,6 +315,7 @@ func drfValidate(raw []byte, schema drfSerializer, partial bool) (map[string]any
                     found:=false; for _, choice:=range field.Choices { if choice==text { found=true } }
                     if !found { message=fmt.Sprintf(`"%s" is not a valid choice.`,text) }
                 }
+                if message=="" && field.Forbidden!=nil && text==*field.Forbidden { message=field.ForbiddenError }
                 value=text
             }
         case "int32", "int64":
@@ -372,10 +427,12 @@ func drfInsert(ctx context.Context, tx pgx.Tx, model drfModel, values map[string
     return id,err
 }
 
-func drfWhere(query drfQuery) (string,[]any) {
+func drfWhere(query drfQuery, scope map[string]string, principal map[string]string) (string,[]any) {
     names:=[]string{};for name:=range query.Filters { names=append(names,name) };sort.Strings(names)
     terms,args:=[]string{},[]any{}
     for _,name:=range names { args=append(args,query.Filters[name]);terms=append(terms,quoted(name)+fmt.Sprintf("=$%d",len(args))) }
+    names=names[:0];for name:=range scope { names=append(names,name) };sort.Strings(names)
+    for _,name:=range names { args=append(args,principal[scope[name]]);terms=append(terms,quoted(name)+fmt.Sprintf("=$%d",len(args))) }
     if len(terms)==0 { return "",args };return " WHERE "+strings.Join(terms," AND "),args
 }
 func drfParams(raw string) url.Values {
@@ -441,28 +498,32 @@ func drfList(ctx context.Context, tx pgx.Tx, view drfView, address, where string
 
 func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []byte,accept,contentType,authorization,cookie string, requestURL ...string) (int,any) {
     if accept!="" && accept!="*/*" && !strings.Contains(accept,"application/json") { return 406,map[string]string{"detail":"Could not satisfy the request Accept header."} }
-    // This captured profile has public permissions. Authentication identity is
-    // outside its qualified contract; never silently treat credentials as anonymous.
-    if authorization!="" || strings.Contains(cookie,"sessionid=") { return 501,map[string]string{"detail":"Authentication requires a separately qualified migration profile."} }
-    var view *drfView;id:=int64(0);detail:=false
+    AUTHORIZATION_GUARD
+    var view *drfView;id:=int64(0);detail:=false;action:=""
     for i:=range drfSchema.Project.Views {
         candidate:=&drfSchema.Project.Views[i]
         if path==candidate.Path { view=candidate;break }
+        for _,item:=range candidate.Actions { if path==candidate.Path+item.Name+"/" { view=candidate;action=item.Kind;break } }
+        if view!=nil { break }
         if strings.HasPrefix(path,candidate.Path) && strings.HasSuffix(path,"/") {
             part:=strings.TrimSuffix(strings.TrimPrefix(path,candidate.Path),"/")
             parsed,err:=strconv.ParseInt(part,10,64);if err==nil && parsed>=0 && !strings.ContainsAny(part,"+-/") { view=candidate;id=parsed;detail=true;break }
         }
     }
     if view==nil { return 404,map[string]string{"detail":"Not found."} }
+    AUTHORIZATION_CHECK
     actualMethod:=method;if method=="HEAD" { actualMethod="GET" }
-    if actualMethod!="GET" && !(actualMethod=="POST" && !detail) && !(detail && (actualMethod=="PUT" || actualMethod=="PATCH" || actualMethod=="DELETE")) { return 405,map[string]string{"detail":fmt.Sprintf(`Method "%s" not allowed.`,method)} }
+    allowed:=action!="" && actualMethod=="GET" || action=="" && (actualMethod=="GET" || !view.ReadOnly && (actualMethod=="POST" && !detail || detail && (actualMethod=="PUT" || actualMethod=="PATCH" || actualMethod=="DELETE")))
+    if !allowed { return 405,map[string]string{"detail":fmt.Sprintf(`Method "%s" not allowed.`,method)} }
     tx,err:=pool.Begin(ctx);if err!=nil { return 500,map[string]string{"detail":"Database unavailable."} };defer tx.Rollback(ctx)
     schema:=view.Serializer;model:=drfModelFor(schema.Model)
-    where,args:=drfWhere(view.Query)
+    where,args:=drfWhere(view.Query,view.Scope,principal)
+    if action=="count" { var count int64;if err=tx.QueryRow(ctx,"SELECT COUNT(*) FROM "+quoted(model.Table)+where,args...).Scan(&count);err!=nil { return 500,map[string]string{"detail":"Database read failed."} };return 200,map[string]any{"count":count} }
     existing:=[]map[string]any{}
     if detail {
         if where=="" { where=" WHERE " } else { where+=" AND " };args=append(args,id)
-        existing,err=drfRows(ctx,tx,schema,where+fmt.Sprintf("id=$%d",len(args)),args...)
+        where+=fmt.Sprintf("id=$%d",len(args))
+        existing,err=drfRows(ctx,tx,schema,where,args...)
         if err!=nil { return 500,map[string]string{"detail":"Database read failed."} }
         if len(existing)==0 { return 404,map[string]string{"detail":"No "+model.SourceName+" matches the given query."} }
     }
@@ -472,7 +533,7 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
         items,err:=drfList(ctx,tx,*view,address,where,args);if err!=nil { return 500,map[string]string{"detail":"Database read failed."} };return 200,items
     }
     if actualMethod=="DELETE" {
-        if _,err=tx.Exec(ctx,"DELETE FROM "+quoted(model.Table)+" WHERE id=$1",id);err!=nil { return 500,map[string]string{"detail":"Database write failed."} }
+        if _,err=tx.Exec(ctx,"DELETE FROM "+quoted(model.Table)+where,args...);err!=nil { return 500,map[string]string{"detail":"Database write failed."} }
         if err=tx.Commit(ctx);err!=nil { return 500,map[string]string{"detail":"Database write failed."} };return 204,nil
     }
     if len(raw)>0 && !strings.HasPrefix(contentType,"application/json") { return 415,map[string]string{"detail":fmt.Sprintf(`Unsupported media type "%s" in request.`,contentType)} }
@@ -481,6 +542,7 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
     unique,err:=drfUnique(ctx,tx,schema,values,id);if err!=nil { return 500,map[string]string{"detail":"Database read failed."} }
     for key,value:=range unique { invalid[key]=value };if len(invalid)>0 { return 400,invalid }
     if !detail {
+        for field,claim:=range view.Scope { values[field]=principal[claim] }
         id,err=drfInsert(ctx,tx,model,values)
         if err==nil && schema.Nested!=nil {
             nested:=schema.Nested;total:=int64(0)
@@ -493,12 +555,12 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
             if err==nil && total>nested.Aggregate.Limit { return 400,nested.Aggregate.Error }
         }
     } else {
-        sets,args:=[]string{},[]any{}
+        sets,updateArgs:=[]string{},append([]any{},args...)
         for _,field:=range schema.Fields {
-            if field.Primary { continue };value,present:=values[field.Name];if !present { continue }
-            args=append(args,value);sets=append(sets,quoted(field.Name)+fmt.Sprintf("=$%d",len(args)))
+            if field.Primary || field.ReadOnly { continue };value,present:=values[field.Name];if !present { continue }
+            updateArgs=append(updateArgs,value);sets=append(sets,quoted(field.Name)+fmt.Sprintf("=$%d",len(updateArgs)))
         }
-        if len(sets)>0 { args=append(args,id);_,err=tx.Exec(ctx,"UPDATE "+quoted(model.Table)+" SET "+strings.Join(sets,",")+fmt.Sprintf(" WHERE id=$%d",len(args)),args...) }
+        if len(sets)>0 { _,err=tx.Exec(ctx,"UPDATE "+quoted(model.Table)+" SET "+strings.Join(sets,",")+where,updateArgs...) }
     }
     if err!=nil { return 500,map[string]string{"detail":"Database write failed."} }
     saved,err:=drfRows(ctx,tx,schema," WHERE id=$1",id);if err!=nil || len(saved)!=1 { return 500,map[string]string{"detail":"Database read failed."} }

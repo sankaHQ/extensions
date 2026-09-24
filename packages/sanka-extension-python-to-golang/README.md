@@ -8,8 +8,10 @@ runnable `cmd/api`. Choose `database_layer: "none"` for literal JSON endpoints o
 This is an experimental converter. It handles the source patterns documented below,
 including conventional DRF projects, flat CRUD, and explicit auth and transaction
 recipes. It does not promise to convert an arbitrary Python application, move
-existing data, or make a generated service ready for production cutover. A ready
+all existing data, or make a generated service ready for production cutover. A ready
 scan means the captured code can be generated; it is not a cutover verdict.
+The conventional PostgreSQL DRF profile includes an opt-in transfer of captured
+tables between isolated schemas, but does not move the rest of an application.
 
 The main contracts are [routing and package imports](#project-routing),
 [database models and migration setup](#postgresql-schema-profile),
@@ -1133,22 +1135,25 @@ behavior, not parity of framework-specific unhandled-500 response bodies.
 
 ## Conventional Django project profile
 
-A bounded DRF 3.18 project can use `manage.py`, static settings, multiple installed apps,
-`DefaultRouter`, `ModelViewSet`, and `ModelSerializer`. Configure the actual URL
-and model modules:
+A bounded DRF 3.18 project can use `manage.py`, static settings, multiple installed
+apps, `DefaultRouter`, `ModelViewSet` or `ReadOnlyModelViewSet`, and
+`ModelSerializer`. Configure the actual URL and model modules:
 
 ```json
 {"source_framework":"drf","target_framework":"fiber","source_file":"shop_config/urls.py","models_file":"orders/models.py","database_layer":"pgx"}
 ```
 
 This profile accepts a SQLite or PostgreSQL source and an empty PostgreSQL destination, using
-pgx and Goose on all four routers. It captures string choices/defaults, integer,
+pgx and Goose on all four routers. PostgreSQL sources may also validate an existing
+schema with `schema_mode: "adopt-existing"`; the adoption migration changes no
+application table. It captures string choices/defaults, integer,
 boolean and decimal fields, unique fields, cascade foreign keys, and one explicit
 nested serializer. Nested writes require the captured atomic parent/children
 create and aggregate-limit rollback recipe; updates preserve the captured nested
 ignore behavior. Unknown settings, hooks, queryset behavior and schema drift
-remain blockers. Each app needs one initial schema migration that matches its
-models.
+remain blockers. Each app needs an initial schema migration; a linear sequence of
+static `AddField` and `AlterField` revisions is folded into the final model schema.
+Data operations, branching histories and unknown schema operations block generation.
 
 Explicit cross-app dependencies and CASCADE foreign keys are checked against
 the model declarations. Module-qualified
@@ -1159,6 +1164,18 @@ aliases are supported without executing source code during scan or plan.
 
 ### ViewSet queries
 
+`ReadOnlyModelViewSet` generates list and detail reads only. POST, PUT, PATCH,
+and DELETE return 405 without touching the database; a project may use writable
+and read-only ViewSets together. The exact collection-level `summary` action that
+returns `{"count": self.get_queryset().count()}` is qualified. Other custom
+actions and method overrides block generation.
+
+The static parser also accepts the standard annotated `main() -> None` wrapper,
+literal tuple model ordering and serializer fields, typed migration declarations,
+generated primary-key metadata, and docstring-only package initializers. A
+gadget-inventory project replay covers these forms on all four Go routers;
+widget-inventory also passes static capture.
+
 ViewSets also accept literal, exact scalar `queryset.filter(...)` predicates,
 stock `OrderingFilter` with explicit scalar `ordering_fields`, and stock
 `LimitOffsetPagination` with an optional static `PAGE_SIZE` (1–1000). Filters apply
@@ -1168,9 +1185,35 @@ invalid-parameter defaults. It adds no service layer. Custom filter/pagination
 classes, relationship traversal, search/regex backends and random ordering remain
 blockers. Database-overflow pagination errors remain outside JSON error-body parity.
 
-The executable contract is in `tests/test_golang_drf_project.py`. Executable
-annotations, writable identity overrides, nested uniqueness validators, and
-optional aggregate fields are blocked rather than silently changed.
+The executable contract is in `tests/test_golang_drf_project.py`. A scalar
+`validate_<field>` method may reject one literal string with a literal error.
+Executable annotations, writable identity overrides, other custom validators,
+nested uniqueness validators, and optional aggregate fields are blocked rather
+than silently changed.
+
+### Signed project authentication
+
+The conventional project profile accepts the same statically matched DRF
+`JWTAuthentication(BaseAuthentication)` recipe used by the native identity profile
+when it lives in one installed app's `auth.py`. Each ViewSet must explicitly declare
+either `[JWTAuthentication]` with `[IsAuthenticated]`, or empty authentication and
+permission lists for a public route. The verifier reads `AUTH_JWT_SECRET`,
+`AUTH_JWT_ISSUER`, and `AUTH_JWT_AUDIENCE` at runtime; captured contracts and
+generated defaults contain no credential values. An environment-backed Django
+`SECRET_KEY` must use a different variable. Verified reader tokens can read;
+writer tokens can read and write. Missing or invalid tokens return 401 with the
+Bearer challenge, reader writes return 403, and invalid runtime credentials fail
+closed with 503. Authentication precedes a protected ViewSet's method denial.
+Duplicate Authorization headers are rejected.
+
+Isolated source-to-Go replay supplies synthetic tokens, exercises malformed claims
+and denied writes, and compares responses, rows, and identity sequences after each
+request across Fiber, chi, mux, and Gin. A protected ViewSet may bind read-only
+string owner/tenant fields to `request.user.pk` and `request.auth['tenant']` in
+`get_queryset` and `perform_create`; generated reads and writes bind those claims
+in SQL. Replay checks cross-identity reads and writes. Session authentication,
+custom permission classes, other JWT policies, and other identity-dependent
+querysets remain blockers. Anonymous projects retain their prior behavior.
 
 For SQLite sources, generated writes use transactional identity counters because SQLite rolls back
 AUTOINCREMENT allocation with failed writes. IDs are allocated by the generated
@@ -1199,15 +1242,49 @@ Only variable names enter the contract. Verify also requires
 `--extension-env SANKA_GO_SOURCE_TEST_DATABASE_URL`, pointing at an explicitly
 owned PostgreSQL fixture where the source probe can create and remove its own
 schema. Connection values come from that fixture URL, never the application's
-database environment. This does not adopt or transfer existing application data.
+database environment. This does not touch an application database during verification.
+
+### Existing PostgreSQL rows
+
+For a captured PostgreSQL source, the generated `tools/transfer_existing.py`
+copies only the contract's application tables to a separately migrated, empty
+PostgreSQL target schema. It requires `psycopg` 3 in the invoking Python
+environment. The default invocation is a read-only dry run:
+
+```bash
+export SANKA_GO_SOURCE_DATABASE_URL='postgresql://.../source'
+export DATABASE_URL='postgresql://.../target'
+python tools/transfer_existing.py
+python tools/transfer_existing.py --execute --acknowledge-excluded-tables
+python tools/transfer_existing.py --verify
+```
+
+The command compares captured columns, constraints and required indexes, rejects
+row security, triggers, same-schema connections and nonempty targets, then copies
+rows in model dependency order. The dry run lists excluded source tables;
+`--execute` requires `--acknowledge-excluded-tables` when that list is nonempty.
+Foreign keys crossing from captured to excluded tables are refused. Execution
+locks source and target tables, compares row digests, and carries over each
+captured ID sequence state. `--verify` is read-only reconciliation of captured
+rows and sequences after the copy; it fails if either side drifts. A second copy
+refuses to run. Use a source write freeze and an isolated clone first; this
+command does not synchronize writes made after its source snapshot. Excluded
+tables, including Django's built-in auth and migration tables, and
+application-specific jobs still need a separate cutover plan. SQLite source
+databases do not have this transfer recipe.
+
+`adopt-existing` is a validation-only Goose baseline for a PostgreSQL schema
+containing exactly the captured tables. It refuses extra tables, changed columns,
+constraints, sequences, indexes, triggers or row security. PostgreSQL 18's
+validated `NOT NULL` catalog constraints are accepted as column nullability;
+unvalidated ones are refused. A standard Django
+database also contains built-in tables, so direct in-place adoption is not the
+qualified cutover path.
 
 ### What this profile leaves out
 
-This conventional `ModelViewSet` profile is anonymous JSON CRUD. It does not
-use the separate signed-auth recipe above. Credential-bearing requests fail
-closed with 501; Django authentication/session
-identity is not migrated. Browsable HTML, form parsers, router root/OPTIONS/format
-suffixes, framework-specific malformed-JSON and unhandled-error bodies, host
-validation, arbitrary middleware, custom validators, and existing-data cutover
-remain outside this profile. Passing fixture replay does not qualify those paths
-or production deployment. The capture and reports retain `complete_backend=false`.
+This profile retains `complete_backend=false`. Browsable HTML, form parsers,
+router root/OPTIONS/format suffixes, framework-specific malformed-JSON and
+unhandled-error bodies, host validation, arbitrary middleware, unrecognized
+validators and full application cutover remain outside it. Passing fixture replay
+does not qualify those paths or production deployment.

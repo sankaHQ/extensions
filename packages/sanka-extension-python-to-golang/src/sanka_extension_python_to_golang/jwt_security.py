@@ -4,6 +4,23 @@
 
 from typing import Any
 
+
+def go_access_principal(scope_check: str) -> str:
+    """Expose verified claims to handlers using the existing signed-token policy."""
+    import re
+
+    authenticate = (
+        GO_ACCESS.replace("SCOPE_CHECK", scope_check)
+        .replace("func accessStatus(", "func accessPrincipal(")
+        .replace("path string) int {", "path string) (map[string]string, int) {")
+    )
+    authenticate = re.sub(r"return (\d+)", r"return nil, \1", authenticate)
+    return authenticate.replace(
+        "return nil, 0",
+        'return map[string]string{"sub":claims["sub"].(string), "tenant":claims["tenant"].(string), "role":claims["role"].(string)}, 0',
+    )
+
+
 ACCESS_BODY = r"""token = request.headers.get("Authorization", "").strip(" \t")
 secret = environ.get("AUTH_JWT_SECRET", "")
 issuer = environ.get("AUTH_JWT_ISSUER", "")

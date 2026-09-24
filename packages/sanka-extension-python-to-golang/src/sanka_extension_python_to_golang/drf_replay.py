@@ -35,8 +35,14 @@ def scenario_groups(root: Path, captured: dict[str, Any]) -> list[list[dict[str,
     cases = payload.get("scenarios")
     if not isinstance(cases, list) or not cases:
         raise ValueError("explicit HTTP scenarios are required")
-    if not any(isinstance(case, dict) and "setup" in case for case in cases):
-        return [validate_scenarios(payload)]
+    independent = any(isinstance(case, dict) and "setup" in case for case in cases)
+    if not independent:
+        groups = [validate_scenarios(payload)]
+        return (
+            _authenticated_groups(groups, captured, independent=False)
+            if captured["drf_project"].get("authentication")
+            else groups
+        )
     if set(payload) != {"scenarios"}:
         raise ValueError("unsupported independent scenario document options")
     groups = []
@@ -77,7 +83,103 @@ def scenario_groups(root: Path, captured: dict[str, Any]) -> list[list[dict[str,
         groups.append(validate_scenarios({"scenarios": [*before, normalized]}))
     if sum(map(len, groups)) > MAX_SCENARIOS:
         raise ValueError("expanded scenarios exceed the shared replay limit")
-    return groups
+    return (
+        _authenticated_groups(groups, captured, independent=True)
+        if captured["drf_project"].get("authentication")
+        else groups
+    )
+
+
+def _authenticated_groups(
+    groups: list[list[dict[str, Any]]], captured: dict[str, Any], *, independent: bool
+) -> list[list[dict[str, Any]]]:
+    import re
+
+    from .jwt_security import REPLAY_JWT_ENV, replay_roles, replay_token
+
+    def matched_view(case: dict[str, Any]) -> dict[str, Any] | None:
+        path = urlsplit(case["path"]).path
+        views: list[dict[str, Any]] = captured["drf_project"]["views"]
+        for view in views:
+            collection = view["path"]
+            if (
+                path == collection
+                or re.fullmatch(re.escape(collection) + r"[0-9]+/", path)
+                or any(
+                    path == collection + action["name"] + "/" for action in view.get("actions", [])
+                )
+            ):
+                return view
+        return None
+
+    def protected(case: dict[str, Any]) -> bool:
+        view = matched_view(case)
+        return bool(view and view.get("authentication") == "jwt-hs256-roles")
+
+    first = True
+    expanded = []
+    for group in groups:
+        setup, cases = (group[:-1], group[-1:]) if independent else ([], group)
+        secured = []
+        for case in [*setup, *cases]:
+            if protected(case) and any(
+                key.lower() == "authorization" for key in case.get("headers", {})
+            ):
+                raise ValueError("authenticated replay supplies synthetic Authorization headers")
+        for case in setup:
+            if protected(case):
+                token = replay_roles(case, first=False)[0][1]
+                secured.append(
+                    case | {"headers": case.get("headers", {}) | {"Authorization": token}}
+                )
+            else:
+                secured.append(case)
+        for case in cases:
+            if not protected(case):
+                secured.append(case)
+                continue
+            roles = replay_roles(case, first=first)
+            view = matched_view(case)
+            assert view is not None
+            if view.get("scope") and case["expected_status"] in (200, 201, 204):
+                roles = tuple(role for role in roles if role[0] != "other-identity")
+                requested = urlsplit(case["path"]).path
+                detail = requested != view["path"] and not any(
+                    requested == view["path"] + action["name"] + "/"
+                    for action in view.get("actions", [])
+                )
+                for claim in sorted(set(view["scope"].values())):
+                    claims = {
+                        "iss": REPLAY_JWT_ENV["AUTH_JWT_ISSUER"],
+                        "aud": REPLAY_JWT_ENV["AUTH_JWT_AUDIENCE"],
+                        "sub": "fixture-user",
+                        "tenant": "fixture-tenant",
+                        "role": "writer",
+                        "exp": 4102444800,
+                    }
+                    claims[claim] = "other-user" if claim == "sub" else "other-tenant"
+                    roles += (
+                        (
+                            "cross-" + claim,
+                            replay_token(claims),
+                            404 if detail else case["expected_status"],
+                        ),
+                    )
+            for role, token, status in roles:
+                secured.append(
+                    case
+                    | {
+                        "id": case["id"] + ":" + role,
+                        "expected_status": status,
+                        "headers": case.get("headers", {})
+                        | ({"Authorization": token} if token else {}),
+                    }
+                )
+            first = False
+        expanded.append(validate_scenarios({"scenarios": secured}))
+    if sum(map(len, expanded)) > MAX_SCENARIOS:
+        raise ValueError("authenticated scenarios exceed the shared replay limit")
+    return expanded
 
 
 def replay_project(
@@ -125,6 +227,11 @@ def replay_project(
     if capture(root, captured["configuration"]) != captured:
         raise ValueError("source changed before replay")
     source_python = _source_python() if command == "verify" else None
+    auth_env: dict[str, str] = {}
+    if captured["drf_project"].get("authentication"):
+        from .jwt_security import REPLAY_JWT_ENV
+
+        auth_env = REPLAY_JWT_ENV
     go, toolchain = ensure_go(root)
     # Preserve independent-case reset semantics; setup requests remain observed.
     source_groups, target_groups = [], []
@@ -148,7 +255,7 @@ def replay_project(
             [go, "test", "-mod=readonly", "-p=2", "./..."],
             candidate,
             timeout=900,
-            environment=toolchain | {"DATABASE_URL": dsn},
+            environment=toolchain | {"DATABASE_URL": dsn} | auth_env,
         )
         target_groups = _observations(candidate / "sanka_groups_observed.json")
         if source_python:
@@ -165,12 +272,13 @@ def replay_project(
                 ],
                 workspace,
                 timeout=180,
-                environment={"SANKA_GO_SOURCE_TEST_DATABASE_URL": source_dsn}
+                environment={"SANKA_GO_SOURCE_TEST_DATABASE_URL": source_dsn} | auth_env
                 if postgres
                 else {
                     captured["drf_project"]["database"]["environment"]: str(
                         workspace / "source.sqlite3"
-                    )
+                    ),
+                    **auth_env,
                 },
             )
             source_groups = _observations(workspace / "source_observed.json")

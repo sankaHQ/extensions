@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from textwrap import indent
 
 import pytest
 from sanka_extension_python_to_golang.capture import capture, configuration
@@ -15,6 +16,328 @@ from sanka_extension_python_to_golang.drf_replay import replay_project, scenario
 from sanka_extension_python_to_golang.render import render
 
 FIXTURE = Path(__file__).parent / "fixtures/drf_project"
+GADGET_FIXTURE = Path(__file__).parent / "fixtures/gadget_project"
+
+
+def gadget_project(tmp_path):
+    shutil.copytree(GADGET_FIXTURE, tmp_path, dirs_exist_ok=True)
+    return configuration(
+        {
+            "source_framework": "drf",
+            "source_file": "crud_config/urls.py",
+            "models_file": "inventory/models.py",
+            "database_layer": "pgx",
+        }
+    )
+
+
+def authenticated_project(tmp_path):
+    from test_golang_jwt import JWT_BODY
+
+    config = readonly_project(tmp_path)
+    (tmp_path / "orders/auth.py").write_text(
+        "from os import environ\n"
+        "from jwt import decode, get_unverified_header, InvalidTokenError\n"
+        "from re import fullmatch\n"
+        "from time import time\n"
+        "from rest_framework.authentication import BaseAuthentication\n"
+        "from rest_framework.exceptions import APIException, AuthenticationFailed, PermissionDenied\n"
+        "from types import SimpleNamespace\n"
+        "class AuthenticationUnavailable(APIException):\n"
+        "    status_code = 503\n"
+        '    default_detail = "authentication unavailable"\n'
+        "class JWTAuthentication(BaseAuthentication):\n"
+        "    def authenticate(self, request):\n"
+        + indent(
+            JWT_BODY.replace("UNAVAILABLE", "raise AuthenticationUnavailable()")
+            .replace("UNAUTHENTICATED", 'raise AuthenticationFailed("not authenticated")')
+            .replace("FORBIDDEN", 'raise PermissionDenied("permission denied")')
+            + 'return SimpleNamespace(is_authenticated=True, pk=claims["sub"]), claims\n',
+            "        ",
+        )
+        + '    def authenticate_header(self, request):\n        return "Bearer"\n'
+    )
+    views = tmp_path / "orders/views.py"
+    source = views.read_text()
+    source = (
+        "from orders.auth import JWTAuthentication\n"
+        "from rest_framework.permissions import IsAuthenticated\n" + source
+    )
+    source = source.replace(
+        "    serializer_class = OrderSerializer",
+        "    serializer_class = OrderSerializer\n"
+        "    authentication_classes = [JWTAuthentication]\n"
+        "    permission_classes = [IsAuthenticated]",
+    )
+    views.write_text(source)
+    scenarios = tmp_path / "sanka-verify.json"
+    document = json.loads(scenarios.read_text())
+    document["scenarios"].append(
+        {
+            "id": "signed-token-with-irrelevant-session-cookie",
+            "method": "GET",
+            "path": "/api/orders/",
+            "headers": {"Cookie": "sessionid=legacy"},
+            "expected_status": 200,
+        }
+    )
+    scenarios.write_text(json.dumps(document))
+    return config
+
+
+def mixed_auth_project(tmp_path):
+    config = authenticated_project(tmp_path)
+    views = tmp_path / "orders/views.py"
+    protected, public = views.read_text().split("class OrderReadOnlyViewSet", 1)
+    public = public.replace(
+        "authentication_classes = [JWTAuthentication]",
+        "authentication_classes = []",
+    ).replace("permission_classes = [IsAuthenticated]", "permission_classes = []")
+    views.write_text(protected + "class OrderReadOnlyViewSet" + public)
+    document = tmp_path / "sanka-verify.json"
+    payload = json.loads(document.read_text())
+    payload["scenarios"].append(
+        {
+            "id": "public-invalid-bearer",
+            "method": "GET",
+            "path": "/api/readonly-orders/",
+            "headers": {"Authorization": "Bearer invalid-replay-token"},
+            "expected_status": 200,
+        }
+    )
+    document.write_text(json.dumps(payload))
+    return config
+
+
+def scoped_project(tmp_path):
+    config = mixed_auth_project(tmp_path)
+    models = tmp_path / "orders/models.py"
+    models.write_text(
+        models.read_text() + "\nclass Note(models.Model):\n"
+        "    owner = models.CharField(max_length=128)\n"
+        "    tenant = models.CharField(max_length=128)\n"
+        "    content = models.CharField(max_length=100)\n"
+        "    class Meta:\n        ordering = ['id']\n"
+    )
+    migration = tmp_path / "orders/migrations/0001_initial.py"
+    source = migration.read_text()
+    assert source.endswith("    ]\n")
+    migration.write_text(
+        source[:-6] + "        migrations.CreateModel(\n"
+        "            name='Note',\n"
+        "            fields=[\n"
+        "                ('id', models.AutoField(primary_key=True, serialize=False)),\n"
+        "                ('owner', models.CharField(max_length=128)),\n"
+        "                ('tenant', models.CharField(max_length=128)),\n"
+        "                ('content', models.CharField(max_length=100)),\n"
+        "            ],\n"
+        "            options={'ordering': ['id']},\n"
+        "        ),\n    ]\n"
+    )
+    serializers = tmp_path / "orders/serializers.py"
+    serializers.write_text(
+        serializers.read_text() + "\nclass NoteSerializer(serializers.ModelSerializer):\n"
+        "    class Meta:\n"
+        "        model = Note\n"
+        "        fields = ['id', 'owner', 'tenant', 'content']\n"
+        "        read_only_fields = ['id', 'owner', 'tenant']\n"
+    )
+    serializers.write_text(
+        serializers.read_text().replace(
+            "from orders.models import Order, OrderItem",
+            "from orders.models import Order, OrderItem, Note",
+        )
+    )
+    views = tmp_path / "orders/views.py"
+    views.write_text(
+        views.read_text()
+        .replace("from orders.models import Order", "from orders.models import Order, Note")
+        .replace(
+            "from orders.serializers import OrderSerializer",
+            "from orders.serializers import OrderSerializer, NoteSerializer",
+        )
+        + "\nclass NoteViewSet(ModelViewSet):\n"
+        "    serializer_class = NoteSerializer\n"
+        "    authentication_classes = [JWTAuthentication]\n"
+        "    permission_classes = [IsAuthenticated]\n"
+        "    def get_queryset(self):\n"
+        "        return Note.objects.filter(owner=self.request.user.pk, tenant=self.request.auth['tenant'])\n"
+        "    def perform_create(self, serializer):\n"
+        "        serializer.save(owner=self.request.user.pk, tenant=self.request.auth['tenant'])\n"
+    )
+    urls = tmp_path / "shop_config/urls.py"
+    urls.write_text(
+        urls.read_text()
+        .replace(
+            "import OrderViewSet, OrderReadOnlyViewSet",
+            "import OrderViewSet, OrderReadOnlyViewSet, NoteViewSet",
+        )
+        .replace(
+            'router.register("readonly-orders", OrderReadOnlyViewSet, basename="readonly-order")',
+            'router.register("readonly-orders", OrderReadOnlyViewSet, basename="readonly-order")\n'
+            'router.register("notes", NoteViewSet, basename="note")',
+        )
+    )
+    document = tmp_path / "sanka-verify.json"
+    payload = json.loads(document.read_text())
+    create = {"method": "POST", "path": "/api/notes/", "body": {"content": "one"}}
+    payload["scenarios"] += [
+        {"id": "note-create", **create, "expected_status": 201},
+        {
+            "id": "note-list",
+            "setup": [create],
+            "method": "GET",
+            "path": "/api/notes/",
+            "expected_status": 200,
+        },
+        {
+            "id": "note-detail",
+            "setup": [create],
+            "method": "GET",
+            "path": "/api/notes/1/",
+            "expected_status": 200,
+        },
+        {
+            "id": "note-patch",
+            "setup": [create],
+            "method": "PATCH",
+            "path": "/api/notes/1/",
+            "body": {"content": "two"},
+            "expected_status": 200,
+        },
+        {
+            "id": "note-delete",
+            "setup": [create],
+            "method": "DELETE",
+            "path": "/api/notes/1/",
+            "expected_status": 204,
+        },
+    ]
+    document.write_text(json.dumps(payload))
+    return config
+
+
+def composed_project(tmp_path):
+    config = scoped_project(tmp_path)
+    tests = tmp_path / "orders/tests.py"
+    tests.write_text(
+        "from os import environ\nfrom time import time\nimport jwt\n"
+        + tests.read_text()
+        .replace(
+            "from orders.models import Order, OrderItem",
+            "from orders.models import Order, OrderItem, Note",
+        )
+        .replace(
+            "        self.client = APIClient()",
+            "        self.client = APIClient()\n"
+            "        token = jwt.encode({'iss': environ['AUTH_JWT_ISSUER'], "
+            "'aud': environ['AUTH_JWT_AUDIENCE'], 'sub': 'fixture-user', "
+            "'tenant': 'fixture-tenant', 'role': 'writer', 'exp': int(time()) + 3600}, "
+            "environ['AUTH_JWT_SECRET'], algorithm='HS256', headers={'typ': 'JWT'})\n"
+            "        self.client.credentials(HTTP_AUTHORIZATION='Bearer ' + token)",
+        )
+        + "\nclass NoteApiTests(OrderApiTests):\n"
+        "    def test_summary_and_validator(self) -> None:\n"
+        "        self.assertEqual(self.client.post('/api/notes/', {'content': 'one'}, format='json').status_code, 201)\n"
+        "        self.assertEqual(self.client.get('/api/notes/summary/').json(), {'count': 1})\n"
+        "        self.assertEqual(self.client.post('/api/notes/', {'content': 'reserved'}, format='json').status_code, 400)\n"
+        "        self.assertEqual(Note.objects.count(), 1)\n"
+    )
+    serializers = tmp_path / "orders/serializers.py"
+    serializers.write_text(serializers.read_text() + "\n")
+    serializers.write_text(
+        serializers.read_text().replace(
+            "    class Meta:\n        model = Note",
+            "    def validate_content(self, value):\n"
+            "        if value == 'reserved':\n"
+            "            raise serializers.ValidationError('This content is reserved.')\n"
+            "        return value\n"
+            "    class Meta:\n        model = Note",
+        )
+    )
+    views = tmp_path / "orders/views.py"
+    views.write_text(
+        "from rest_framework.decorators import action\n"
+        "from rest_framework.response import Response\n"
+        "from rest_framework.filters import OrderingFilter\n"
+        "from rest_framework.pagination import LimitOffsetPagination\n"
+        + views.read_text().replace(
+            "    serializer_class = NoteSerializer\n",
+            "    serializer_class = NoteSerializer\n"
+            "    filter_backends = [OrderingFilter]\n"
+            "    ordering_fields = ['id', 'content']\n"
+            "    ordering = ['id']\n"
+            "    pagination_class = LimitOffsetPagination\n",
+        )
+        + "    @action(detail=False, methods=['get'])\n"
+        "    def summary(self, request):\n"
+        "        return Response({'count': self.get_queryset().count()})\n"
+    )
+    scenario = tmp_path / "sanka-verify.json"
+    document = json.loads(scenario.read_text())
+    create = {"method": "POST", "path": "/api/notes/", "body": {"content": "one"}}
+    document["scenarios"] += [
+        {
+            "id": "note-custom-validation",
+            "method": "POST",
+            "path": "/api/notes/",
+            "body": {"content": "reserved"},
+            "expected_status": 400,
+        },
+        {
+            "id": "note-summary",
+            "setup": [create],
+            "method": "GET",
+            "path": "/api/notes/summary/",
+            "expected_status": 200,
+        },
+        {
+            "id": "note-paged-ordering",
+            "setup": [create, create],
+            "method": "GET",
+            "path": "/api/notes/?ordering=-id&limit=1",
+            "expected_status": 200,
+        },
+    ]
+    scenario.write_text(json.dumps(document))
+    return config
+
+
+def test_composed_project_capture_and_determinism(tmp_path):
+    config = composed_project(tmp_path)
+    captured = capture(tmp_path, config)
+    assert captured["gaps"] == []
+    assert captured == capture(tmp_path, config)
+    assert any(r["path"] == "/api/notes/summary/" for r in captured["routes"])
+
+
+def test_composed_project_original_source_tests(tmp_path):
+    from sanka_extension_python_to_golang.jwt_security import REPLAY_JWT_ENV
+
+    composed_project(tmp_path)
+    source = subprocess.run(
+        [os.sys.executable, "manage.py", "test", "orders", "--verbosity=0"],
+        cwd=tmp_path,
+        env=os.environ | REPLAY_JWT_ENV | {"DJANGO_SETTINGS_MODULE": "shop_config.settings"},
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+    assert source.returncode == 0, source.stderr
+
+
+def test_custom_validator_with_side_effects_is_rejected(tmp_path):
+    config = composed_project(tmp_path)
+    serializers = tmp_path / "orders/serializers.py"
+    serializers.write_text(
+        serializers.read_text().replace(
+            "        return value\n    class Meta:\n        model = Note",
+            "        open('side-effect', 'w').write(value)\n"
+            "        return value\n    class Meta:\n        model = Note",
+        )
+    )
+    assert capture(tmp_path, config)["gaps"]
+    assert not (tmp_path / "side-effect").exists()
 
 
 def multiapp_project(tmp_path):
@@ -38,6 +361,82 @@ def multiapp_project(tmp_path):
         "urlpatterns = [path('shop/', include('orders.urls')), "
         "path('sales/', include('sales.urls'))]\n"
     )
+    return config
+
+
+def readonly_project(tmp_path):
+    config = project(tmp_path)
+    views = tmp_path / "orders/views.py"
+    views.write_text(
+        views.read_text().replace(
+            "from rest_framework.viewsets import ModelViewSet",
+            "from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet",
+        )
+        + "\nclass OrderReadOnlyViewSet(ReadOnlyModelViewSet):\n"
+        "    queryset = Order.objects.all()\n"
+        "    serializer_class = OrderSerializer\n"
+    )
+    urls = tmp_path / "shop_config/urls.py"
+    urls.write_text(
+        urls.read_text()
+        .replace("import OrderViewSet\n", "import OrderViewSet, OrderReadOnlyViewSet\n")
+        .replace(
+            'router.register("orders", OrderViewSet, basename="order")',
+            'router.register("orders", OrderViewSet, basename="order")\n'
+            'router.register("readonly-orders", OrderReadOnlyViewSet, basename="readonly-order")',
+        )
+    )
+    document = tmp_path / "sanka-verify.json"
+    payload = json.loads(document.read_text())
+    seeded = payload["scenarios"][0]["setup"]
+    payload["scenarios"] += [
+        {
+            "id": "readonly-list",
+            "method": "GET",
+            "path": "/api/readonly-orders/",
+            "expected_status": 200,
+            "setup": seeded,
+        },
+        {
+            "id": "readonly-detail",
+            "method": "GET",
+            "path": "/api/readonly-orders/1/",
+            "expected_status": 200,
+            "setup": seeded,
+        },
+        {
+            "id": "readonly-head",
+            "method": "HEAD",
+            "path": "/api/readonly-orders/",
+            "expected_status": 200,
+        },
+        {
+            "id": "readonly-post-denied",
+            "method": "POST",
+            "path": "/api/readonly-orders/",
+            "body": payload["scenarios"][2]["body"],
+            "expected_status": 405,
+        },
+        {
+            "id": "readonly-delete-denied",
+            "method": "DELETE",
+            "path": "/api/readonly-orders/1/",
+            "expected_status": 405,
+            "setup": seeded,
+        },
+        *[
+            {
+                "id": "readonly-" + method.lower() + "-denied",
+                "method": method,
+                "path": "/api/readonly-orders/1/",
+                "body": payload["scenarios"][2]["body"],
+                "expected_status": 405,
+                "setup": seeded,
+            }
+            for method in ("PUT", "PATCH")
+        ],
+    ]
+    document.write_text(json.dumps(payload))
     return config
 
 
@@ -142,11 +541,12 @@ urlpatterns = [path('', include(router.urls))]
     assert capture(tmp_path, config)["gaps"]
 
 
-def test_multiapp_generation_is_location_and_hashseed_independent(tmp_path):
+@pytest.mark.parametrize("factory", [multiapp_project, composed_project])
+def test_project_generation_is_location_and_hashseed_independent(tmp_path, factory):
     roots = [tmp_path / "a", tmp_path / "b"]
     results = []
     for seed, root in enumerate(roots):
-        config = multiapp_project(root)
+        config = factory(root)
         completed = subprocess.run(
             [
                 os.sys.executable,
@@ -291,8 +691,428 @@ def test_postgres_conventional_capture_preserves_native_sequences(tmp_path):
     assert "nextval" in generated["drf.go"]
 
 
+def test_postgres_conventional_adopt_existing_is_validation_only(tmp_path):
+    config = postgres_project(tmp_path) | {"schema_mode": "adopt-existing"}
+    captured = capture(tmp_path, config)
+    assert captured["gaps"] == []
+    assert captured == capture(tmp_path, config)
+    migration = render(captured)["migrations/00001_initial.sql"]
+    assert "schema adoption failed" in migration
+    assert 'CREATE TABLE "orders_order"' not in migration
+    assert 'DROP TABLE "orders_order"' not in migration
+    assert 'ALTER TABLE "orders_order"' not in migration
+
+
+def test_postgres_conventional_adoption_preserves_rows_and_checks_drift(tmp_path):
+    if os.getenv("SANKA_GO_TESTS") != "1" or not os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN"):
+        pytest.skip("requires native Go and isolated PostgreSQL fixture")
+    import uuid
+
+    import psycopg
+    from psycopg import sql
+    from test_golang_schema import schema_dsn
+
+    config = postgres_project(tmp_path)
+    binaries = []
+    for mode in ("empty", "adopt-existing"):
+        generated = tmp_path / ".sanka" / mode
+        captured = capture(tmp_path, config | {"schema_mode": mode})
+        assert captured["gaps"] == []
+        for name, contents in render(captured).items():
+            path = generated / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(contents)
+        binary = tmp_path / ("migrate-" + mode)
+        built = subprocess.run(
+            ["go", "build", "-mod=readonly", "-p=2", "-o", str(binary), "./cmd/migrate"],
+            cwd=generated,
+            env=os.environ | {"GOWORK": "off", "GOTOOLCHAIN": "local", "GOMAXPROCS": "2"},
+            capture_output=True,
+            timeout=180,
+        )
+        assert built.returncode == 0, built.stderr.decode()
+        binaries.append(binary)
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    name = "drf_adopt_" + uuid.uuid4().hex
+    target_name = "drf_copy_" + uuid.uuid4().hex
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(name)))
+        admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(target_name)))
+        try:
+            local_dsn = schema_dsn(dsn, name)
+            target_dsn = schema_dsn(dsn, target_name)
+
+            def migrate(binary, direction, *, success=True):
+                result = subprocess.run(
+                    [str(binary), direction],
+                    env=os.environ | {"DATABASE_URL": local_dsn},
+                    text=True,
+                    capture_output=True,
+                    timeout=60,
+                )
+                assert (result.returncode == 0) is success, result.stderr
+
+            migrate(binaries[0], "up")
+            with psycopg.connect(local_dsn, autocommit=True) as connection:
+                connection.execute(
+                    "INSERT INTO orders_order (reference,status,memo) VALUES ('kept','new','row')"
+                )
+                connection.execute("DROP TABLE goose_db_version")
+            migrate(binaries[1], "up")
+            migrate(binaries[1], "down")
+            with psycopg.connect(local_dsn, autocommit=True) as connection:
+                assert connection.execute(
+                    "SELECT reference,status,memo FROM orders_order"
+                ).fetchall() == [("kept", "new", "row")]
+            seed = subprocess.run(
+                [str(binaries[0]), "up"],
+                env=os.environ | {"DATABASE_URL": target_dsn},
+                capture_output=True,
+                timeout=60,
+            )
+            assert seed.returncode == 0, seed.stderr.decode()
+            transfer = tmp_path / ".sanka/adopt-existing/tools/transfer_existing.py"
+            environment = os.environ | {
+                "SANKA_GO_SOURCE_DATABASE_URL": local_dsn,
+                "DATABASE_URL": target_dsn,
+            }
+            dry = subprocess.run(
+                [os.sys.executable, str(transfer)],
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert dry.returncode == 0, dry.stderr
+            assert '"mode": "dry-run"' in dry.stdout
+            with psycopg.connect(target_dsn) as connection:
+                assert connection.execute("SELECT count(*) FROM orders_order").fetchone()[0] == 0
+            copied = subprocess.run(
+                [os.sys.executable, str(transfer), "--execute", "--acknowledge-excluded-tables"],
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert copied.returncode == 0, copied.stderr
+            with psycopg.connect(target_dsn) as connection:
+                assert connection.execute(
+                    "SELECT reference,status,memo FROM orders_order"
+                ).fetchall() == [("kept", "new", "row")]
+                assert connection.execute(
+                    "SELECT last_value,is_called FROM orders_order_id_seq"
+                ).fetchone() == (1, True)
+            again = subprocess.run(
+                [os.sys.executable, str(transfer), "--execute"],
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert again.returncode != 0
+            assert "nonempty" in again.stderr
+            with psycopg.connect(local_dsn, autocommit=True) as connection:
+                connection.execute("ALTER TABLE orders_order ADD COLUMN unexpected text")
+            migrate(binaries[1], "up", success=False)
+        finally:
+            admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
+            admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(target_name)))
+
+
+def test_copy_existing_from_django_postgres_schema(tmp_path):
+    if os.getenv("SANKA_GO_TESTS") != "1" or not os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN"):
+        pytest.skip("requires native Go and isolated PostgreSQL fixture")
+    import uuid
+    from urllib.parse import unquote, urlsplit
+
+    import psycopg
+    from psycopg import sql
+    from test_golang_schema import schema_dsn
+
+    config = postgres_project(tmp_path)
+    captured = capture(tmp_path, config)
+    assert captured["gaps"] == []
+    generated = tmp_path / ".sanka/candidate"
+    for name, content in render(captured).items():
+        path = generated / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    binary = tmp_path / "migrate-copy"
+    result = subprocess.run(
+        ["go", "build", "-mod=readonly", "-p=2", "-o", str(binary), "./cmd/migrate"],
+        cwd=generated,
+        env=os.environ | {"GOWORK": "off", "GOTOOLCHAIN": "local", "GOMAXPROCS": "2"},
+        capture_output=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr.decode()
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    parsed = urlsplit(dsn)
+    source_schema, target_schema = ["drf_live_" + uuid.uuid4().hex for _ in range(2)]
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        for schema in (source_schema, target_schema):
+            admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+        try:
+            source_dsn, target_dsn = [schema_dsn(dsn, s) for s in (source_schema, target_schema)]
+            environment = os.environ | {
+                "PYTHONPATH": str(tmp_path),
+                "DJANGO_SETTINGS_MODULE": "shop_config.settings",
+                "PGOPTIONS": "-c search_path=" + source_schema,
+                "FIXTURE_PG_NAME": unquote(parsed.path.lstrip("/")),
+                "FIXTURE_PG_USER": unquote(parsed.username or ""),
+                "FIXTURE_PG_PASSWORD": unquote(parsed.password or ""),
+                "FIXTURE_PG_HOST": parsed.hostname or "",
+                "FIXTURE_PG_PORT": str(parsed.port or 5432),
+            }
+            migrated = subprocess.run(
+                [
+                    os.sys.executable,
+                    "-c",
+                    "import django; django.setup(); "
+                    "from django.core.management import call_command; "
+                    "call_command('migrate', interactive=False, verbosity=0)",
+                ],
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert migrated.returncode == 0, migrated.stderr
+            with psycopg.connect(source_dsn, autocommit=True) as connection:
+                connection.execute(
+                    "INSERT INTO orders_order(reference,status,memo) VALUES ('source','new','retained')"
+                )
+            initialized = subprocess.run(
+                [str(binary), "up"],
+                env=os.environ | {"DATABASE_URL": target_dsn},
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert initialized.returncode == 0, initialized.stderr
+            same_schema = subprocess.run(
+                [os.sys.executable, str(generated / "tools/transfer_existing.py"), "--execute"],
+                env=os.environ
+                | {"SANKA_GO_SOURCE_DATABASE_URL": source_dsn, "DATABASE_URL": source_dsn},
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert same_schema.returncode != 0 and "same database schema" in same_schema.stderr
+            transfer_environment = os.environ | {
+                "SANKA_GO_SOURCE_DATABASE_URL": source_dsn,
+                "DATABASE_URL": target_dsn,
+            }
+            transfer_command = [os.sys.executable, str(generated / "tools/transfer_existing.py")]
+            dry = subprocess.run(
+                transfer_command,
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert dry.returncode == 0, dry.stderr
+            assert "django_migrations" in json.loads(dry.stdout)["excluded_tables"]
+            unacknowledged = subprocess.run(
+                [*transfer_command, "--execute"],
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert unacknowledged.returncode != 0
+            assert "acknowledge-excluded-tables" in unacknowledged.stderr
+            copied = subprocess.run(
+                [*transfer_command, "--execute", "--acknowledge-excluded-tables"],
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert copied.returncode == 0, copied.stderr
+            verified = subprocess.run(
+                [*transfer_command, "--verify"],
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert verified.returncode == 0, verified.stderr
+            assert json.loads(verified.stdout)["mode"] == "verified"
+            with psycopg.connect(target_dsn) as connection:
+                assert connection.execute(
+                    "SELECT reference,status,memo FROM orders_order"
+                ).fetchall() == [("source", "new", "retained")]
+            with psycopg.connect(source_dsn, autocommit=True) as connection:
+                connection.execute(
+                    "UPDATE orders_order SET memo='drifted' WHERE reference='source'"
+                )
+            divergent = subprocess.run(
+                [*transfer_command, "--verify"],
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert divergent.returncode != 0 and "row snapshot differs" in divergent.stderr
+            with psycopg.connect(source_dsn, autocommit=True) as connection:
+                connection.execute(
+                    "UPDATE orders_order SET memo='retained' WHERE reference='source'"
+                )
+                connection.execute("SELECT setval('orders_order_id_seq', 20, true)")
+            sequence_drift = subprocess.run(
+                [*transfer_command, "--verify"],
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert sequence_drift.returncode != 0 and "sequence differs" in sequence_drift.stderr
+            with psycopg.connect(source_dsn, autocommit=True) as connection:
+                connection.execute("SELECT setval('orders_order_id_seq', 1, true)")
+                connection.execute(
+                    "CREATE TABLE audit_order (id integer PRIMARY KEY, "
+                    "order_id integer REFERENCES orders_order(id))"
+                )
+            excluded_relation = subprocess.run(
+                [*transfer_command, "--verify"],
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert excluded_relation.returncode != 0
+            assert "external foreign key" in excluded_relation.stderr
+            with psycopg.connect(source_dsn, autocommit=True) as connection:
+                connection.execute("DROP TABLE audit_order")
+            drift_schema = "drf_drift_" + uuid.uuid4().hex
+            admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(drift_schema)))
+            try:
+                drift_dsn = schema_dsn(dsn, drift_schema)
+                initialized = subprocess.run(
+                    [str(binary), "up"],
+                    env=os.environ | {"DATABASE_URL": drift_dsn},
+                    text=True,
+                    capture_output=True,
+                    timeout=60,
+                )
+                assert initialized.returncode == 0, initialized.stderr
+                with psycopg.connect(source_dsn, autocommit=True) as connection:
+                    connection.execute("ALTER TABLE orders_order ADD COLUMN unexpected text")
+                refused = subprocess.run(
+                    [os.sys.executable, str(generated / "tools/transfer_existing.py"), "--execute"],
+                    env=os.environ
+                    | {
+                        "SANKA_GO_SOURCE_DATABASE_URL": source_dsn,
+                        "DATABASE_URL": drift_dsn,
+                    },
+                    text=True,
+                    capture_output=True,
+                    timeout=60,
+                )
+                assert refused.returncode != 0 and "columns differ" in refused.stderr
+                with psycopg.connect(drift_dsn) as connection:
+                    assert (
+                        connection.execute("SELECT count(*) FROM orders_order").fetchone()[0] == 0
+                    )
+            finally:
+                admin.execute(
+                    sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(drift_schema))
+                )
+        finally:
+            for schema in (source_schema, target_schema):
+                admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+
+
+def linear_schema_project(tmp_path):
+    config = project(tmp_path)
+    initial = tmp_path / "orders/migrations/0001_initial.py"
+    tree = ast.parse(initial.read_text())
+    operations = next(
+        node.value
+        for node in tree.body[-1].body
+        if isinstance(node, ast.Assign) and node.targets[0].id == "operations"
+    )
+    order = operations.elts[0]
+    fields = next(k.value for k in order.keywords if k.arg == "fields")
+    memo = next(field for field in fields.elts if field.elts[0].value == "memo")
+    fields.elts.remove(memo)
+    initial.write_text(ast.unparse(tree))
+    (tmp_path / "orders/migrations/0002_memo.py").write_text(
+        "from django.db import migrations, models\n"
+        "class Migration(migrations.Migration):\n"
+        "    dependencies = [('orders', '0001_initial')]\n"
+        "    operations = [migrations.AddField(model_name='order', name='memo', "
+        "field=models.CharField(blank=True, default='', max_length=200))]\n"
+    )
+    return config
+
+
+def test_conventional_linear_schema_history_matches_final_models(tmp_path):
+    config = linear_schema_project(tmp_path)
+    result = capture(tmp_path, config)
+    assert result["gaps"] == []
+    assert capture(tmp_path, config) == result
+    assert (
+        "orders/migrations/0002_memo.py" in result["source_inventory"]["module_roles"]["migrations"]
+    )
+
+
+def test_conventional_schema_history_alter_field(tmp_path):
+    config = linear_schema_project(tmp_path)
+    models = tmp_path / "orders/models.py"
+    models.write_text(models.read_text().replace("max_length=200", "max_length=240"))
+    (tmp_path / "orders/migrations/0003_memo_length.py").write_text(
+        "from django.db import migrations, models\n"
+        "class Migration(migrations.Migration):\n"
+        "    dependencies = [('orders', '0002_memo')]\n"
+        "    operations = [migrations.AlterField(model_name='order', name='memo', "
+        "field=models.CharField(blank=True, default='', max_length=240))]\n"
+    )
+    result = capture(tmp_path, config)
+    assert result["gaps"] == []
+    assert '"memo" varchar(240)' in render(result)["migrations/00001_initial.sql"]
+
+
+def test_conventional_schema_history_rejects_branch(tmp_path):
+    config = linear_schema_project(tmp_path)
+    (tmp_path / "orders/migrations/0003_branch.py").write_text(
+        "from django.db import migrations, models\n"
+        "class Migration(migrations.Migration):\n"
+        "    dependencies = [('orders', '0001_initial')]\n"
+        "    operations = [migrations.AddField(model_name='order', name='other', "
+        "field=models.CharField(max_length=20))]\n"
+    )
+    assert capture(tmp_path, config)["gaps"]
+
+
+def test_conventional_schema_history_rejects_data_operation(tmp_path):
+    config = project(tmp_path)
+    (tmp_path / "orders/migrations/0002_data.py").write_text(
+        "from django.db import migrations\n"
+        "class Migration(migrations.Migration):\n"
+        "    dependencies = [('orders', '0001_initial')]\n"
+        "    operations = [migrations.RunPython(lambda apps, schema_editor: None)]\n"
+    )
+    assert capture(tmp_path, config)["gaps"]
+
+
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
-@pytest.mark.parametrize("factory", [multiapp_project, crossapp_project, postgres_project])
+@pytest.mark.parametrize(
+    "factory",
+    [
+        multiapp_project,
+        crossapp_project,
+        postgres_project,
+        linear_schema_project,
+        readonly_project,
+        authenticated_project,
+        mixed_auth_project,
+        scoped_project,
+        composed_project,
+        gadget_project,
+    ],
+)
 def test_general_project_native_replay(tmp_path, monkeypatch, target, factory):
     dsn = os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN")
     if os.getenv("SANKA_GO_TESTS") != "1" or not dsn:
@@ -356,6 +1176,107 @@ def project(tmp_path):
     )
 
 
+def test_conventional_drf_annotated_manage_wrapper(tmp_path):
+    config = project(tmp_path)
+    manage = tmp_path / "manage.py"
+    source = manage.read_text()
+    manage.write_text(
+        "from __future__ import annotations\n"
+        + source.replace(
+            'if __name__ == "__main__":\n',
+            "def main() -> None:\n",
+        )
+        + '\nif __name__ == "__main__":\n    main()\n'
+    )
+    assert capture(tmp_path, config)["gaps"] == []
+    manage.write_text(manage.read_text().replace("def main() -> None:", "def main() -> int:"))
+    assert capture(tmp_path, config)["gaps"]
+
+
+def test_conventional_drf_literal_tuple_fields_and_ordering(tmp_path):
+    config = project(tmp_path)
+    for relative in (
+        "orders/models.py",
+        "orders/serializers.py",
+        "orders/migrations/0001_initial.py",
+    ):
+        path = tmp_path / relative
+        source = path.read_text()
+        source = source.replace('ordering = ["id"]', 'ordering = ("id",)')
+        source = source.replace('"ordering": ["id"]', '"ordering": ("id",)')
+        source = source.replace(
+            'fields = ["id", "sku", "quantity", "price"]',
+            'fields = ("id", "sku", "quantity", "price")',
+        )
+        source = source.replace(
+            'fields = ["id", "reference", "status", "memo", "items"]',
+            'fields = ("id", "reference", "status", "memo", "items")',
+        )
+        source = source.replace('read_only_fields = ["id"]', 'read_only_fields = ("id",)')
+        path.write_text(source)
+    assert capture(tmp_path, config)["gaps"] == []
+
+
+def test_conventional_drf_classvar_migration_declarations(tmp_path):
+    config = project(tmp_path)
+    migration = tmp_path / "orders/migrations/0001_initial.py"
+    migration.write_text(
+        migration.read_text()
+        .replace(
+            "from django.db import migrations, models",
+            "from typing import ClassVar\nfrom django.db import migrations, models",
+        )
+        .replace("dependencies = []", "dependencies: ClassVar[list[tuple[str, str]]] = []")
+        .replace("operations = [", "operations: ClassVar[list[object]] = [")
+    )
+    assert capture(tmp_path, config)["gaps"] == []
+    migration.write_text(
+        migration.read_text().replace("ClassVar[list[object]]", "ClassVar[object]")
+    )
+    assert capture(tmp_path, config)["gaps"]
+
+
+def test_conventional_drf_typed_migration_dependencies(tmp_path):
+    config = project(tmp_path)
+    migration = tmp_path / "orders/migrations/0001_initial.py"
+    migration.write_text(
+        migration.read_text().replace(
+            "dependencies = []", "dependencies: list[tuple[str, str]] = []"
+        )
+    )
+    assert capture(tmp_path, config)["gaps"] == []
+
+
+def test_conventional_drf_docstring_only_package_init(tmp_path):
+    config = project(tmp_path)
+    (tmp_path / "shop_config/__init__.py").write_text('"""Project package."""\n')
+    assert capture(tmp_path, config)["gaps"] == []
+
+
+@pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
+def test_gadget_project_static_capture_and_render(tmp_path, target):
+    config = gadget_project(tmp_path) | {"target_framework": target}
+    captured = capture(tmp_path, config)
+    assert captured["gaps"] == []
+    assert captured == capture(tmp_path, config)
+    assert [(route["path"], route["method"]) for route in captured["routes"]] == [
+        ("/api/gadgets/", "GET"),
+        ("/api/gadgets/", "POST"),
+        ("/api/gadgets/:id/", "GET"),
+        ("/api/gadgets/:id/", "PUT"),
+        ("/api/gadgets/:id/", "PATCH"),
+        ("/api/gadgets/:id/", "DELETE"),
+    ]
+    assert "drf.go" in render(captured)
+
+
+def test_gadget_project_rejects_changed_primary_key_metadata(tmp_path):
+    config = gadget_project(tmp_path)
+    migration = tmp_path / "inventory/migrations/0001_initial.py"
+    migration.write_text(migration.read_text().replace("auto_created=True", "auto_created=False"))
+    assert capture(tmp_path, config)["gaps"]
+
+
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
 def test_conventional_drf_capture(tmp_path, target):
     config = project(tmp_path) | {"target_framework": target}
@@ -371,6 +1292,109 @@ def test_conventional_drf_capture(tmp_path, target):
     assert view["path"] == "/api/orders/"
     assert view["serializer"]["nested"]["aggregate"]["limit"] == 100
     assert view["serializer"]["nested"]["update"] == "ignore"
+
+
+def test_readonly_viewset_capture_restricts_methods(tmp_path):
+    result = capture(tmp_path, readonly_project(tmp_path))
+    assert result["gaps"] == []
+    views = result["drf_project"]["views"]
+    assert [v["read_only"] for v in views] == [False, True]
+    assert {
+        (route["path"], route["method"])
+        for route in result["routes"]
+        if "readonly-orders" in route["path"]
+    } == {
+        ("/api/readonly-orders/", "GET"),
+        ("/api/readonly-orders/:id/", "GET"),
+    }
+
+
+@pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
+def test_conventional_drf_signed_project_capture_and_render(tmp_path, target):
+    config = authenticated_project(tmp_path) | {"target_framework": target}
+    captured = capture(tmp_path, config)
+    assert captured["gaps"] == []
+    assert captured == capture(tmp_path, config)
+    assert captured["drf_project"]["authentication"] == "jwt-hs256-roles"
+    assert all(
+        view["authentication"] == "jwt-hs256-roles" for view in captured["drf_project"]["views"]
+    )
+    generated = render(captured)
+    assert "github.com/golang-jwt/jwt/v5" in generated["go.mod"]
+    assert "AUTH_JWT_SECRET=\n" in generated[".env.example"]
+    assert "accessPrincipal(authorization,method,path)" in generated["drf.go"]
+
+
+@pytest.mark.parametrize(
+    "filename,old,new",
+    [
+        (
+            "orders/auth.py",
+            'default_detail = "authentication unavailable"',
+            'default_detail = "okay"',
+        ),
+        ("orders/views.py", "permission_classes = [IsAuthenticated]", "permission_classes = []"),
+        (
+            "orders/views.py",
+            "authentication_classes = [JWTAuthentication]",
+            "authentication_classes = []",
+        ),
+        (
+            "shop_config/settings.py",
+            'SECRET_KEY = "sanka-bench-synthetic-fixture-003-only"',
+            'SECRET_KEY = os.environ["AUTH_JWT_SECRET"]',
+        ),
+    ],
+)
+def test_conventional_drf_auth_changes_fail_closed(tmp_path, filename, old, new):
+    config = authenticated_project(tmp_path)
+    path = tmp_path / filename
+    path.write_text(path.read_text().replace(old, new, 1))
+    assert capture(tmp_path, config)["gaps"]
+
+
+def test_conventional_drf_auth_replay_covers_writer_and_denied_state(tmp_path):
+    from sanka_extension_python_to_golang.jwt_security import REPLAY_JWT_ENV
+
+    captured = capture(tmp_path, authenticated_project(tmp_path))
+    groups = scenario_groups(tmp_path, captured)
+    first = groups[0]
+    assert first[0]["headers"]["authorization"].startswith("Bearer ")
+    assert {case["id"].split(":")[-1] for case in first[1:]} >= {
+        "writer",
+        "missing",
+        "invalid",
+        "reader",
+    }
+    assert [case["expected_status"] for case in first[1:5]] == [200, 401, 401, 200]
+    assert REPLAY_JWT_ENV["AUTH_JWT_SECRET"] not in str(captured)
+
+
+def test_conventional_drf_mixed_public_and_protected_viewsets(tmp_path):
+    captured = capture(tmp_path, mixed_auth_project(tmp_path))
+    assert captured["gaps"] == []
+    assert captured == capture(tmp_path, captured["configuration"])
+    views = captured["drf_project"]["views"]
+    assert views[0]["authentication"] == "jwt-hs256-roles"
+    assert "authentication" not in views[1]
+    groups = scenario_groups(tmp_path, captured)
+    public = [group for group in groups if group[-1]["id"] == "public-invalid-bearer"]
+    assert len(public) == 1
+    assert public[0][-1]["headers"]["authorization"] == "Bearer invalid-replay-token"
+    assert any(case["id"].endswith(":missing") for group in groups for case in group)
+
+
+def test_conventional_drf_captures_claim_scoped_viewset(tmp_path):
+    captured = capture(tmp_path, scoped_project(tmp_path))
+    assert captured["gaps"] == []
+    assert captured == capture(tmp_path, captured["configuration"])
+    note = captured["drf_project"]["views"][-1]
+    assert note["scope"] == {"owner": "sub", "tenant": "tenant"}
+    assert {field["name"] for field in note["serializer"]["fields"] if field["read_only"]} == {
+        "id",
+        "owner",
+        "tenant",
+    }
 
 
 @pytest.mark.parametrize(
@@ -442,10 +1466,13 @@ def test_conventional_drf_renders_backend(tmp_path, target):
 
 
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
-def test_conventional_drf_native_validation(tmp_path, target):
+@pytest.mark.parametrize(
+    "factory", [project, authenticated_project, mixed_auth_project, scoped_project]
+)
+def test_conventional_drf_native_validation(tmp_path, target, factory):
     if os.getenv("SANKA_GO_TESTS") != "1":
         pytest.skip("requires native Go")
-    result = capture(tmp_path, project(tmp_path) | {"target_framework": target})
+    result = capture(tmp_path, factory(tmp_path) | {"target_framework": target})
     output = tmp_path / ".sanka/candidate"
     for name, contents in render(result).items():
         path = output / name
@@ -463,6 +1490,45 @@ func TestDRFValidation(t *testing.T) {
     if len(invalid)>0 || len(values)>0 { t.Fatalf("partial defaults: %#v %#v",values,invalid) }
 }
 """)
+    if factory is authenticated_project:
+        from sanka_extension_python_to_golang.jwt_security import REPLAY_JWT_ENV, replay_token
+
+        response = (
+            'reply,err:=app.Test(request);if err!=nil { t.Fatal(err) };defer reply.Body.Close();status:=reply.StatusCode;challenge:=reply.Header.Get("WWW-Authenticate")'
+            if target == "fiber"
+            else 'reply:=httptest.NewRecorder();app.ServeHTTP(reply,request);status:=reply.Code;challenge:=reply.Header().Get("WWW-Authenticate")'
+        )
+        duplicate = (
+            "reply2,err:=app.Test(request2);if err!=nil { t.Fatal(err) };defer reply2.Body.Close();status2:=reply2.StatusCode"
+            if target == "fiber"
+            else "reply2:=httptest.NewRecorder();app.ServeHTTP(reply2,request2);status2:=reply2.Code"
+        )
+        token = replay_token(
+            {
+                "iss": REPLAY_JWT_ENV["AUTH_JWT_ISSUER"],
+                "aud": REPLAY_JWT_ENV["AUTH_JWT_AUDIENCE"],
+                "sub": "fixture-user",
+                "tenant": "fixture-tenant",
+                "role": "writer",
+                "exp": 4102444800,
+            }
+        )
+        (output / "drf_auth_test.go").write_text(
+            "package backend\n"
+            'import ("net/http/httptest"; "testing"; "github.com/jackc/pgx/v5/pgxpool")\n'
+            "func TestDRFAuthChallenge(t *testing.T) {\n"
+            ' t.Setenv("AUTH_JWT_SECRET", "sanka-isolated-replay-signing-key-32-bytes")\n'
+            ' t.Setenv("AUTH_JWT_ISSUER", "sanka-replay")\n'
+            ' t.Setenv("AUTH_JWT_AUDIENCE", "sanka-replay-backend")\n'
+            ' app:=NewApp(&pgxpool.Pool{});request:=httptest.NewRequest("GET","http://testserver/api/orders/",nil)\n'
+            + response
+            + '\n if status!=401 || challenge!="Bearer" { t.Fatalf("status=%d challenge=%q",status,challenge) }\n'
+            + ' request2:=httptest.NewRequest("POST","http://testserver/api/readonly-orders/",nil)\n'
+            + f' request2.Header.Add("Authorization",{json.dumps(token)})\n'
+            + ' request2.Header.Add("Authorization","Bearer invalid")\n'
+            + duplicate
+            + '\n if status2!=401 { t.Fatalf("duplicate Authorization status=%d",status2) }\n}\n'
+        )
     completed = subprocess.run(
         ["go", "test", "-mod=readonly", "-p=2", "./..."],
         cwd=output,

@@ -389,8 +389,9 @@ func accessBody(status int) []byte {{
     if policy["kind"] == "jwt-hs256-roles":
         from .jwt_security import GO_ACCESS
 
-        start, end = common.index("func accessStatus("), common.index("func accessHeaders(")
-        common = common[:start] + GO_ACCESS.replace("SCOPE_CHECK", scope_check) + common[end:]
+        if not policy.get("native"):
+            start, end = common.index("func accessStatus("), common.index("func accessHeaders(")
+            common = common[:start] + GO_ACCESS.replace("SCOPE_CHECK", scope_check) + common[end:]
         common = common.replace(
             '"crypto/subtle";',
             '\n"encoding/json"; "encoding/base64"; "unicode/utf8"; "strconv"; "time"; "github.com/golang-jwt/jwt/v5";',
@@ -400,16 +401,9 @@ func accessBody(status int) []byte {{
     if policy.get("native"):
         common = common.replace('"encoding/json";', '"encoding/json"; "context";')
         start, end = common.index("func accessStatus("), common.index("func accessHeaders(")
-        authenticate = (
-            common[start:end]
-            .replace("func accessStatus(", "func accessPrincipal(")
-            .replace("path string) int {", "path string) (map[string]string, int) {")
-        )
-        authenticate = re.sub(r"return (\d+)", r"return nil, \1", authenticate)
-        authenticate = authenticate.replace(
-            "return nil, 0",
-            'return map[string]string{"sub":claims["sub"].(string), "tenant":claims["tenant"].(string), "role":claims["role"].(string)}, 0',
-        )
+        from .jwt_security import go_access_principal
+
+        authenticate = go_access_principal(scope_check)
         common = common[:start] + authenticate + common[end:]
         common += """
 type principalContextKey struct{}
