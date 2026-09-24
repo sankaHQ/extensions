@@ -24,6 +24,8 @@ PROJECT_SOURCES = (
     "drf-multiapp",
     "drf-crossapp",
     "drf-postgresql",
+    "drf-linear",
+    "drf-composed",
     "drf-queries",
     "drf-complete",
     "flask-complete",
@@ -99,9 +101,18 @@ def cli_project(root, framework, target):
         from test_golang_drf_queries import query_project
 
         return query_project(root) | {"target_framework": target}
-    if framework in {"drf-project", "drf-multiapp", "drf-crossapp", "drf-postgresql"}:
+    if framework in {
+        "drf-project",
+        "drf-multiapp",
+        "drf-crossapp",
+        "drf-postgresql",
+        "drf-linear",
+        "drf-composed",
+    }:
         from test_golang_drf_project import (
+            composed_project,
             crossapp_project,
+            linear_schema_project,
             multiapp_project,
             postgres_project,
             project,
@@ -112,6 +123,8 @@ def cli_project(root, framework, target):
             "drf-multiapp": multiapp_project,
             "drf-crossapp": crossapp_project,
             "drf-postgresql": postgres_project,
+            "drf-linear": linear_schema_project,
+            "drf-composed": composed_project,
         }[framework]
         config = factory(root) | {"target_framework": target}
         scenario = root / "sanka-verify.json"

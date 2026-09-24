@@ -277,9 +277,14 @@ def capture_project(
         },
     }
     try:
-        if config["database_layer"] != "pgx" or config["schema_mode"] != "empty":
-            raise ValueError("conventional DRF migration requires pgx and an empty target schema")
+        if config["database_layer"] != "pgx":
+            raise ValueError("conventional DRF migration requires pgx")
         settings_name, settings, consumed = _settings(root)
+        if (
+            config["schema_mode"] == "adopt-existing"
+            and settings["database"]["engine"] != "postgresql"
+        ):
+            raise ValueError("schema adoption requires a PostgreSQL source")
         from .drf_modules import check_imports, normalize, urls
 
         apps = settings["apps"]
@@ -302,6 +307,8 @@ def capture_project(
             },
             "rest_framework.filters": {"OrderingFilter": "OrderingFilter"},
             "rest_framework.pagination": {"LimitOffsetPagination": "LimitOffsetPagination"},
+            "rest_framework.decorators": {"action": "action"},
+            "rest_framework.response": {"Response": "Response"},
             "rest_framework.permissions": {"IsAuthenticated": "IsAuthenticated"},
         }
         if auth_module:
@@ -326,15 +333,17 @@ def capture_project(
         models: list[dict[str, Any]] = []
         # Resolve initial migration dependencies before parsing foreign keys.
         migration_trees: dict[str, tuple[str, ast.Module]] = {}
+        migration_files: set[str] = set()
         dependencies: dict[str, set[str]] = {}
         for app in apps:
             files = sorted(
                 p for p in (root / app / "migrations").glob("*.py") if p.name != "__init__.py"
             )
-            if len(files) != 1:
-                raise ValueError(app + "/migrations: exactly one initial migration is required")
+            if not files:
+                raise ValueError(app + "/migrations: an initial migration is required")
             relative = files[0].relative_to(root).as_posix()
-            tree = ast.parse(files[0].read_text())
+            tree = _fold_schema_history(files, app)
+            migration_files.update(p.relative_to(root).as_posix() for p in files)
             migration_trees[app] = (relative, tree)
             migration_classes = [n for n in tree.body if isinstance(n, ast.ClassDef)]
             if len(migration_classes) != 1:
@@ -396,7 +405,7 @@ def capture_project(
                     raise ValueError("cross-app foreign key requires initial migration dependency")
                 models.extend(parsed)
                 relative, migration = migration_trees[app]
-                _migration(
+                historical = _migration(
                     migration,
                     parsed,
                     app,
@@ -406,6 +415,10 @@ def capture_project(
                     dependencies[app],
                     settings["database"]["engine"],
                 )
+                by_name = {m["name"]: m for m in parsed}
+                for model in historical:
+                    positions = {f["name"]: i for i, f in enumerate(model["fields"])}
+                    by_name[model["name"]]["fields"].sort(key=lambda f: positions[f["name"]])
             except (ValueError, TypeError, KeyError) as error:
                 raise ValueError(f"{app}/models.py or {app}/migrations: {error}") from error
         if len({m["table"] for m in models}) != len(models):
@@ -450,7 +463,18 @@ def capture_project(
             if view_name in used:
                 raise ValueError("duplicate router view")
             used.add(view_name)
-            attrs = _assignments(views[view_name].body)
+            methods = {
+                node.name: node
+                for node in views[view_name].body
+                if isinstance(node, ast.FunctionDef)
+            }
+            if len(methods) != sum(
+                isinstance(node, ast.FunctionDef) for node in views[view_name].body
+            ):
+                raise ValueError("duplicate ViewSet method")
+            attrs = _assignments(
+                [node for node in views[view_name].body if not isinstance(node, ast.FunctionDef)]
+            )
             if set(attrs) - {
                 "queryset",
                 "serializer_class",
@@ -465,15 +489,18 @@ def capture_project(
             if auth_module:
                 authentication = attrs.get("authentication_classes")
                 permission = attrs.get("permission_classes")
-                if (
-                    authentication is None
-                    or permission is None
-                    or ast.unparse(authentication) != "[JWTAuthentication]"
-                    or ast.unparse(permission) != "[IsAuthenticated]"
-                ):
+                selected = (
+                    ast.unparse(authentication) if authentication is not None else None,
+                    ast.unparse(permission) if permission is not None else None,
+                )
+                if selected not in {
+                    ("[JWTAuthentication]", "[IsAuthenticated]"),
+                    ("[]", "[]"),
+                }:
                     raise ValueError(
-                        "every ViewSet must select the captured authentication and permission"
+                        "every ViewSet must select a captured authentication and permission policy"
                     )
+                protected = selected[0] == "[JWTAuthentication]"
             elif {"authentication_classes", "permission_classes"} & attrs.keys():
                 raise ValueError("viewset authentication requires a captured policy")
             serializer_node = attrs["serializer_class"]
@@ -482,15 +509,31 @@ def capture_project(
             if serializer_name not in serializers:
                 raise ValueError("unresolved serializer")
             contract = _serializer(serializers[serializer_name], model_map, serializers)
-            query = _view_query(attrs, model_map[contract["model"]], settings["page_size"])
+            read_only = ast.unparse(views[view_name].bases[0]) == "ReadOnlyModelViewSet"
+            actions = []
+            if "summary" in methods:
+                action_node = methods.pop("summary")
+                expected = """@action(detail=False, methods=['get'])
+def summary(self, request):
+    return Response({'count': self.get_queryset().count()})
+"""
+                if not _same(action_node, expected):
+                    raise ValueError("summary action contains uncaptured behavior")
+                actions = [{"name": "summary", "kind": "count"}]
+            scope = _view_scope(methods, model_map[contract["model"]], contract, read_only)
+            if scope and "queryset" in attrs:
+                raise ValueError("claim-scoped queryset must not have a static queryset")
+            query = _view_query(attrs, model_map[contract["model"]], settings["page_size"], scope)
             contracts.append(
                 {
                     "path": registration["path"],
                     "basename": registration["basename"],
                     "serializer": contract,
                     "query": query,
-                    "read_only": ast.unparse(views[view_name].bases[0]) == "ReadOnlyModelViewSet",
-                    **({"authentication": "jwt-hs256-roles"} if auth_module else {}),
+                    "read_only": read_only,
+                    **({"actions": actions} if actions else {}),
+                    **({"scope": scope} if scope else {}),
+                    **({"authentication": "jwt-hs256-roles"} if auth_module and protected else {}),
                 }
             )
         if (
@@ -527,7 +570,7 @@ def capture_project(
                 consumed.add(relative)
             elif path.name == "tests.py" or path.name.startswith("test_"):
                 tests.append(relative)
-            elif relative in {v[0] for v in migration_trees.values()}:
+            elif relative in migration_files:
                 migrations.append(relative)
             else:
                 raise ValueError("unclassified project module: " + relative)
@@ -555,20 +598,24 @@ def capture_project(
             "unclassified": [],
         }
         for view in contracts:
-            for method in ["GET"] if view["read_only"] else ["GET", "POST"]:
+            for action in view.get("actions", []):
+                result["routes"].append(
+                    {"path": view["path"] + action["name"] + "/", "method": "GET", "status": 200}
+                )
+            for route_method in ["GET"] if view["read_only"] else ["GET", "POST"]:
                 result["routes"].append(
                     {
                         "path": view["path"],
-                        "method": method,
-                        "status": 201 if method == "POST" else 200,
+                        "method": route_method,
+                        "status": 201 if route_method == "POST" else 200,
                     }
                 )
-            for method in ["GET"] if view["read_only"] else ["GET", "PUT", "PATCH", "DELETE"]:
+            for route_method in ["GET"] if view["read_only"] else ["GET", "PUT", "PATCH", "DELETE"]:
                 result["routes"].append(
                     {
                         "path": view["path"] + ":id/",
-                        "method": method,
-                        "status": 204 if method == "DELETE" else 200,
+                        "method": route_method,
+                        "status": 204 if route_method == "DELETE" else 200,
                     }
                 )
     except (ValueError, TypeError, KeyError, SyntaxError, OSError) as error:
@@ -578,10 +625,15 @@ def capture_project(
 
 
 def _view_query(
-    attrs: dict[str, ast.expr], model: dict[str, Any], page_size: int | None
+    attrs: dict[str, ast.expr],
+    model: dict[str, Any],
+    page_size: int | None,
+    scope: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     fields = {f["name"]: f for f in model["fields"]}
     node = attrs.get("queryset")
+    if scope and node is None:
+        node = ast.parse(model["name"] + ".objects.all()", mode="eval").body
     if not isinstance(node, ast.Call) or node.args:
         raise ValueError("queryset requires all() or exact scalar filter()")
     filters = {}
@@ -636,6 +688,75 @@ def _view_query(
         "pagination": pagination,
         "page_size": page_size,
     }
+
+
+def _view_scope(
+    methods: dict[str, ast.FunctionDef],
+    model: dict[str, Any],
+    serializer: dict[str, Any],
+    read_only: bool,
+) -> dict[str, str]:
+    if not methods:
+        return {}
+    if set(methods) != ({"get_queryset"} if read_only else {"get_queryset", "perform_create"}):
+        raise ValueError("ViewSet method overrides require capture")
+    query = methods["get_queryset"]
+    if (
+        query.decorator_list
+        or query.returns
+        or query.type_params
+        or ast.unparse(query.args) != "self"
+        or len(query.body) != 1
+        or not isinstance(query.body[0], ast.Return)
+        or not isinstance(query.body[0].value, ast.Call)
+    ):
+        raise ValueError("get_queryset requires one explicit claim filter")
+    call = query.body[0].value
+    if (
+        ast.unparse(call.func) != model["name"] + ".objects.filter"
+        or call.args
+        or not call.keywords
+    ):
+        raise ValueError("get_queryset requires one explicit claim filter")
+    fields = {f["name"]: f for f in model["fields"]}
+    readonly = {f["name"] for f in serializer["fields"] if f.get("read_only")}
+    claims = {"self.request.user.pk": "sub", "self.request.auth['tenant']": "tenant"}
+    scope: dict[str, str] = {}
+    for keyword in call.keywords:
+        name = keyword.arg
+        claim = claims.get(ast.unparse(keyword.value))
+        if (
+            name is None
+            or name in scope
+            or name not in readonly
+            or claim is None
+            or name not in fields
+            or fields[name]["go_type"] != "string"
+            or fields[name]["nullable"]
+            or fields[name]["primary_key"]
+        ):
+            raise ValueError("claim filter requires distinct read-only string fields")
+        scope[name] = claim
+    if not read_only:
+        create = methods["perform_create"]
+        if (
+            create.decorator_list
+            or create.returns
+            or create.type_params
+            or ast.unparse(create.args) != "self, serializer"
+            or len(create.body) != 1
+            or not isinstance(create.body[0], ast.Expr)
+            or not isinstance(create.body[0].value, ast.Call)
+            or ast.unparse(create.body[0].value.func) != "serializer.save"
+            or create.body[0].value.args
+            or {
+                keyword.arg: claims.get(ast.unparse(keyword.value))
+                for keyword in create.body[0].value.keywords
+            }
+            != scope
+        ):
+            raise ValueError("perform_create must bind the same verified claims")
+    return dict(sorted(scope.items()))
 
 
 def _literal(node: ast.AST | None) -> Any:
@@ -918,7 +1039,10 @@ def _serializer(
         not isinstance(names, list)
         or len(names) != len(set(names))
         or "id" not in names
-        or readonly != ["id"]
+        or not isinstance(readonly, list)
+        or len(readonly) != len(set(readonly))
+        or "id" not in readonly
+        or not set(readonly) <= set(names)
         or not all(isinstance(n, str) for n in names)
     ):
         raise ValueError("unsupported serializer field selection")
@@ -961,6 +1085,43 @@ def _serializer(
                 field.update(minimum=minimum, required=True, unique=False, blank=False)
                 field.pop("default", None)
                 field.pop("maximum", None)
+            validator = methods.pop("validate_" + name, None)
+            if validator is not None:
+                if (
+                    len(validator.body) != 2
+                    or not isinstance(validator.body[0], ast.If)
+                    or not isinstance(validator.body[0].test, ast.Compare)
+                    or len(validator.body[0].test.comparators) != 1
+                    or len(validator.body[0].body) != 1
+                    or not isinstance(validator.body[0].body[0], ast.Raise)
+                    or not isinstance(validator.body[0].body[0].exc, ast.Call)
+                    or len(validator.body[0].body[0].exc.args) != 1
+                ):
+                    raise ValueError("unsupported field validator")
+                guard = validator.body[0]
+                assert isinstance(guard, ast.If) and isinstance(guard.test, ast.Compare)
+                raised = guard.body[0]
+                assert isinstance(raised, ast.Raise) and isinstance(raised.exc, ast.Call)
+                try:
+                    forbidden = _literal(guard.test.comparators[0])
+                    message = _literal(raised.exc.args[0])
+                except (AttributeError, IndexError, TypeError, ValueError) as exc:
+                    raise ValueError("unsupported field validator") from exc
+                expected = f"""def validate_{name}(self, value):
+    if value == {forbidden!r}:
+        raise serializers.ValidationError({message!r})
+    return value
+"""
+                if (
+                    name in readonly
+                    or field["go_type"] != "string"
+                    or type(forbidden) is not str
+                    or type(message) is not str
+                    or not _same(validator, expected)
+                ):
+                    raise ValueError("field validator must reject one literal string")
+                field.update(forbidden=forbidden, forbidden_error=message)
+            field["read_only"] = name in readonly
             selected.append(field)
         else:
             if (
@@ -1055,6 +1216,93 @@ def _serializer(
     return result
 
 
+def _fold_schema_history(files: list[Path], app: str) -> ast.Module:
+    """Fold a linear, schema-only Django history into its final static baseline."""
+    baseline = ast.parse(files[0].read_text())
+    if len(files) == 1:
+        return baseline
+    if len(baseline.body) != 3 or not isinstance(baseline.body[-1], ast.ClassDef):
+        raise ValueError("initial migration must be a static schema baseline")
+    initial = _assignments(baseline.body[-1].body)
+    operations = initial.get("operations")
+    if not isinstance(operations, ast.List):
+        raise ValueError("initial schema operations must be literal")
+    creates: dict[str, ast.List] = {}
+    for operation in operations.elts:
+        if (
+            not isinstance(operation, ast.Call)
+            or ast.unparse(operation.func) != "migrations.CreateModel"
+        ):
+            raise ValueError("initial migration requires CreateModel operations")
+        options = {k.arg: k.value for k in operation.keywords}
+        name = _literal(options.get("name"))
+        fields = options.get("fields")
+        if not isinstance(name, str) or not isinstance(fields, ast.List) or name.lower() in creates:
+            raise ValueError("initial migration has an invalid model")
+        creates[name.lower()] = fields
+    previous = files[0].stem
+    for path in files[1:]:
+        tree = ast.parse(path.read_text())
+        if (
+            len(tree.body) != 2
+            or not isinstance(tree.body[-1], ast.ClassDef)
+            or tree.body[-1].name != "Migration"
+            or [ast.unparse(base) for base in tree.body[-1].bases] != ["migrations.Migration"]
+            or tree.body[-1].decorator_list
+            or tree.body[-1].keywords
+            or not (
+                _same(tree.body[0], "from django.db import migrations, models")
+                or _same(tree.body[0], "from django.db import migrations")
+            )
+        ):
+            raise ValueError(path.name + ": unqualified migration source")
+        attrs = _assignments(tree.body[-1].body)
+        if (
+            set(attrs)
+            not in ({"dependencies", "operations"}, {"initial", "dependencies", "operations"})
+            or ("initial" in attrs and _literal(attrs["initial"]) is not False)
+            or _literal(attrs["dependencies"]) != [(app, previous)]
+            or not isinstance(attrs["operations"], ast.List)
+        ):
+            raise ValueError(path.name + ": migration must depend on the previous app revision")
+        for operation in attrs["operations"].elts:
+            if not isinstance(operation, ast.Call) or operation.args or operation.keywords == []:
+                raise ValueError(path.name + ": only static schema field changes are qualified")
+            kind = ast.unparse(operation.func)
+            if kind not in {"migrations.AddField", "migrations.AlterField"}:
+                raise ValueError(path.name + ": data or unsupported schema operation")
+            options = {k.arg: k.value for k in operation.keywords}
+            if (
+                len(options) != len(operation.keywords)
+                or set(options) != {"model_name", "name", "field"}
+                or not isinstance(options["field"], ast.Call)
+            ):
+                raise ValueError(path.name + ": unsupported field operation options")
+            model, name = _literal(options["model_name"]), _literal(options["name"])
+            if (
+                not isinstance(model, str)
+                or model.lower() not in creates
+                or not isinstance(name, str)
+            ):
+                raise ValueError(path.name + ": unresolved model or field")
+            identifier(name)
+            model_fields: list[ast.expr] = creates[model.lower()].elts
+            existing = [
+                i
+                for i, entry in enumerate(model_fields)
+                if isinstance(entry, ast.Tuple) and _literal(entry.elts[0]) == name
+            ]
+            if len(existing) != (0 if kind == "migrations.AddField" else 1):
+                raise ValueError(path.name + ": field change does not match prior schema")
+            pair = ast.Tuple(elts=[ast.Constant(name), options["field"]], ctx=ast.Load())
+            if existing:
+                model_fields[existing[0]] = pair
+            else:
+                model_fields.append(pair)
+        previous = path.stem
+    return baseline
+
+
 def _migration(
     tree: ast.Module,
     models: list[dict[str, Any]],
@@ -1064,7 +1312,7 @@ def _migration(
     identities: dict[str, str] | None = None,
     dependencies: set[str] | None = None,
     engine: str = "sqlite",
-) -> None:
+) -> list[dict[str, Any]]:
     """Reconstruct the baseline through the same static model parser."""
     if (
         len(tree.body) != 3
@@ -1176,3 +1424,4 @@ def _migration(
 
     if normalized(baseline) != normalized(models):
         raise ValueError("initial migration differs from the captured model schema")
+    return baseline

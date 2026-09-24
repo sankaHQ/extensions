@@ -39,7 +39,7 @@ def scenario_groups(root: Path, captured: dict[str, Any]) -> list[list[dict[str,
     if not independent:
         groups = [validate_scenarios(payload)]
         return (
-            _authenticated_groups(groups, independent=False)
+            _authenticated_groups(groups, captured, independent=False)
             if captured["drf_project"].get("authentication")
             else groups
         )
@@ -84,16 +84,37 @@ def scenario_groups(root: Path, captured: dict[str, Any]) -> list[list[dict[str,
     if sum(map(len, groups)) > MAX_SCENARIOS:
         raise ValueError("expanded scenarios exceed the shared replay limit")
     return (
-        _authenticated_groups(groups, independent=True)
+        _authenticated_groups(groups, captured, independent=True)
         if captured["drf_project"].get("authentication")
         else groups
     )
 
 
 def _authenticated_groups(
-    groups: list[list[dict[str, Any]]], *, independent: bool
+    groups: list[list[dict[str, Any]]], captured: dict[str, Any], *, independent: bool
 ) -> list[list[dict[str, Any]]]:
-    from .jwt_security import replay_roles
+    import re
+
+    from .jwt_security import REPLAY_JWT_ENV, replay_roles, replay_token
+
+    def matched_view(case: dict[str, Any]) -> dict[str, Any] | None:
+        path = urlsplit(case["path"]).path
+        views: list[dict[str, Any]] = captured["drf_project"]["views"]
+        for view in views:
+            collection = view["path"]
+            if (
+                path == collection
+                or re.fullmatch(re.escape(collection) + r"[0-9]+/", path)
+                or any(
+                    path == collection + action["name"] + "/" for action in view.get("actions", [])
+                )
+            ):
+                return view
+        return None
+
+    def protected(case: dict[str, Any]) -> bool:
+        view = matched_view(case)
+        return bool(view and view.get("authentication") == "jwt-hs256-roles")
 
     first = True
     expanded = []
@@ -101,13 +122,50 @@ def _authenticated_groups(
         setup, cases = (group[:-1], group[-1:]) if independent else ([], group)
         secured = []
         for case in [*setup, *cases]:
-            if any(key.lower() == "authorization" for key in case.get("headers", {})):
+            if protected(case) and any(
+                key.lower() == "authorization" for key in case.get("headers", {})
+            ):
                 raise ValueError("authenticated replay supplies synthetic Authorization headers")
         for case in setup:
-            token = replay_roles(case, first=False)[0][1]
-            secured.append(case | {"headers": case.get("headers", {}) | {"Authorization": token}})
+            if protected(case):
+                token = replay_roles(case, first=False)[0][1]
+                secured.append(
+                    case | {"headers": case.get("headers", {}) | {"Authorization": token}}
+                )
+            else:
+                secured.append(case)
         for case in cases:
-            for role, token, status in replay_roles(case, first=first):
+            if not protected(case):
+                secured.append(case)
+                continue
+            roles = replay_roles(case, first=first)
+            view = matched_view(case)
+            assert view is not None
+            if view.get("scope") and case["expected_status"] in (200, 201, 204):
+                roles = tuple(role for role in roles if role[0] != "other-identity")
+                requested = urlsplit(case["path"]).path
+                detail = requested != view["path"] and not any(
+                    requested == view["path"] + action["name"] + "/"
+                    for action in view.get("actions", [])
+                )
+                for claim in sorted(set(view["scope"].values())):
+                    claims = {
+                        "iss": REPLAY_JWT_ENV["AUTH_JWT_ISSUER"],
+                        "aud": REPLAY_JWT_ENV["AUTH_JWT_AUDIENCE"],
+                        "sub": "fixture-user",
+                        "tenant": "fixture-tenant",
+                        "role": "writer",
+                        "exp": 4102444800,
+                    }
+                    claims[claim] = "other-user" if claim == "sub" else "other-tenant"
+                    roles += (
+                        (
+                            "cross-" + claim,
+                            replay_token(claims),
+                            404 if detail else case["expected_status"],
+                        ),
+                    )
+            for role, token, status in roles:
                 secured.append(
                     case
                     | {

@@ -86,6 +86,7 @@ def _adoption_sql(captured: dict[str, Any]) -> list[str]:
     constraints = []
     foreign_keys = []
     auto_columns = []
+    check_constraints = []
     for model in models:
         primary = []
         for ordinal, field in enumerate(model["fields"], 1):
@@ -137,6 +138,10 @@ def _adoption_sql(captured: dict[str, Any]) -> list[str]:
             )
             if field["auto"]:
                 auto_columns.append([model["table"], field["name"]])
+            if field.get("kind") == "PositiveIntegerField":
+                check_constraints.append(
+                    [model["table"], [field["name"]], f"({field['name']} >= 0)"]
+                )
             if field["primary_key"]:
                 primary.append(field["name"])
             elif field["unique"]:
@@ -148,6 +153,7 @@ def _adoption_sql(captured: dict[str, Any]) -> list[str]:
         )
     constraints.sort(key=lambda item: (item[0], item[1], item[2]))
     foreign_keys.sort(key=lambda item: (item[0], item[1]))
+    check_constraints.sort(key=lambda item: (item[0], item[1]))
     locks = "\n".join(f'LOCK TABLE "{model["table"]}" IN ACCESS SHARE MODE;' for model in models)
     auto_checks = "\n".join(
         f"""    IF pg_get_serial_sequence(
@@ -240,9 +246,24 @@ BEGIN
         JOIN pg_class c ON c.oid = con.conrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = current_schema() AND c.relname <> 'goose_db_version'
-          AND con.contype NOT IN ('p','u','f')
+          AND con.contype NOT IN ('p','u','f','c')
     ) THEN
         RAISE EXCEPTION 'schema adoption failed: unsupported constraints';
+    END IF;
+    SELECT COALESCE(jsonb_agg(jsonb_build_array(table_name, columns, expression)
+             ORDER BY table_name, columns), '[]') INTO actual FROM (
+        SELECT c.relname AS table_name,
+               (SELECT jsonb_agg(a.attname ORDER BY key.ordinality)
+                  FROM unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality)
+                  JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum=key.attnum) AS columns,
+               pg_get_expr(con.conbin, con.conrelid) AS expression
+          FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid
+          JOIN pg_namespace n ON n.oid=c.relnamespace
+         WHERE n.nspname=current_schema() AND c.relname <> 'goose_db_version'
+           AND con.contype='c'
+    ) checks;
+    IF actual <> {_jsonb(check_constraints)} THEN
+        RAISE EXCEPTION 'schema adoption failed: checks differ';
     END IF;
     SELECT COALESCE(jsonb_agg(jsonb_build_array(
         table_name, constraint_type, columns, is_deferrable, is_deferred, nulls_not_distinct
