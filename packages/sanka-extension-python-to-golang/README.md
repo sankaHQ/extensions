@@ -1133,9 +1133,9 @@ behavior, not parity of framework-specific unhandled-500 response bodies.
 
 ## Conventional Django project profile
 
-A bounded DRF 3.18 project can use `manage.py`, static settings, multiple installed apps,
-`DefaultRouter`, `ModelViewSet`, and `ModelSerializer`. Configure the actual URL
-and model modules:
+A bounded DRF 3.18 project can use `manage.py`, static settings, multiple installed
+apps, `DefaultRouter`, `ModelViewSet` or `ReadOnlyModelViewSet`, and
+`ModelSerializer`. Configure the actual URL and model modules:
 
 ```json
 {"source_framework":"drf","target_framework":"fiber","source_file":"shop_config/urls.py","models_file":"orders/models.py","database_layer":"pgx"}
@@ -1158,6 +1158,11 @@ cycles block generation. The standard `main()` startup wrapper and explicit impo
 aliases are supported without executing source code during scan or plan.
 
 ### ViewSet queries
+
+`ReadOnlyModelViewSet` generates list and detail reads only. POST, PUT, PATCH,
+and DELETE return 405 without touching the database; a project may use writable
+and read-only ViewSets together. Custom actions and method overrides still block
+generation.
 
 ViewSets also accept literal, exact scalar `queryset.filter(...)` predicates,
 stock `OrderingFilter` with explicit scalar `ordering_fields`, and stock

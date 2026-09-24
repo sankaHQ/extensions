@@ -255,7 +255,10 @@ def capture_project(
         symbols: dict[str, dict[str, str]] = {
             "django.db": {"models": "models", "transaction": "transaction"},
             "rest_framework": {"serializers": "serializers"},
-            "rest_framework.viewsets": {"ModelViewSet": "ModelViewSet"},
+            "rest_framework.viewsets": {
+                "ModelViewSet": "ModelViewSet",
+                "ReadOnlyModelViewSet": "ReadOnlyModelViewSet",
+            },
             "rest_framework.filters": {"OrderingFilter": "OrderingFilter"},
             "rest_framework.pagination": {"LimitOffsetPagination": "LimitOffsetPagination"},
         }
@@ -376,7 +379,9 @@ def capture_project(
                 classes = _classes(
                     tree,
                     allowed,
-                    "serializers.ModelSerializer" if role == "serializers" else "ModelViewSet",
+                    "serializers.ModelSerializer"
+                    if role == "serializers"
+                    else ("ModelViewSet", "ReadOnlyModelViewSet"),
                 )
                 (serializers if role == "serializers" else views).update(classes)
             except (ValueError, TypeError) as error:
@@ -424,6 +429,7 @@ def capture_project(
                     "basename": registration["basename"],
                     "serializer": contract,
                     "query": query,
+                    "read_only": ast.unparse(views[view_name].bases[0]) == "ReadOnlyModelViewSet",
                 }
             )
         if (
@@ -487,7 +493,7 @@ def capture_project(
             "unclassified": [],
         }
         for view in contracts:
-            for method in ["GET", "POST"]:
+            for method in ["GET"] if view["read_only"] else ["GET", "POST"]:
                 result["routes"].append(
                     {
                         "path": view["path"],
@@ -495,7 +501,7 @@ def capture_project(
                         "status": 201 if method == "POST" else 200,
                     }
                 )
-            for method in ["GET", "PUT", "PATCH", "DELETE"]:
+            for method in ["GET"] if view["read_only"] else ["GET", "PUT", "PATCH", "DELETE"]:
                 result["routes"].append(
                     {
                         "path": view["path"] + ":id/",
@@ -586,7 +592,10 @@ def _module(root: Path, name: str) -> tuple[str, ast.Module]:
     return relative, ast.parse(path.read_text())
 
 
-def _classes(tree: ast.Module, imports: dict[str, set[str]], base: str) -> dict[str, ast.ClassDef]:
+def _classes(
+    tree: ast.Module, imports: dict[str, set[str]], base: str | tuple[str, ...]
+) -> dict[str, ast.ClassDef]:
+    bases = (base,) if isinstance(base, str) else base
     seen: set[str] = set()
     classes: dict[str, ast.ClassDef] = {}
     for node in tree.body:
@@ -601,10 +610,11 @@ def _classes(tree: ast.Module, imports: dict[str, set[str]], base: str) -> dict[
                 or node.decorator_list
                 or node.keywords
                 or node.type_params
-                or [ast.unparse(v) for v in node.bases] != [base]
+                or len(node.bases) != 1
+                or ast.unparse(node.bases[0]) not in bases
             ):
                 raise ValueError("unsupported class inheritance or decorators")
-            if base.split(".")[0] not in seen:
+            if ast.unparse(node.bases[0]).split(".")[0] not in seen:
                 raise ValueError("base must be imported before use")
             external = set().union(*imports.values()) | set(classes)
             referenced = {
