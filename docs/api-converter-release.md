@@ -1,29 +1,25 @@
-# Experimental Go and Rust release
+# Python-to-Go 0.1.0a3 release
 
-`api-converters-v0.1.0a2` is the next scoped GitHub prerelease candidate (not yet published) containing Python-to-Go
-and TypeScript-to-Rust 0.1.0a1, TypeScript capture and HTTP replay helpers, and
-the original published Extension SDK 0.1.0a4 and compatibility SDK 0.1.0a12 wheels.
+`api-converters-v0.1.0a2` is published and immutable. Python-to-Go code
+changed after that release; the previous 0.1.0a2 manifest checksum could not
+be satisfied by the published asset. Version 0.1.0a3 gives those changes
+a new wheel, manifest and release tag. Do not replace the a2 asset.
+
+The a3 bundle keeps TypeScript-to-Rust and HTTP replay at 0.1.0a2, TypeScript
+capture at 0.1.0a1, and the pinned SDK wheels. The Rust manifest continues to
+reference the published a2 release. The a3 tag carries byte-identical copies
+of those unchanged wheels for local qualification and the Go manifest's closure.
 It does not publish React Native, Compose, Jev, or a replacement SDK.
 
-## Qualification
+## Qualification before publication
 
-The dedicated `api-release.yml` workflow builds with exact build dependencies,
-verifies every wheel against checked-in SHA-256 manifests, and runs the previously
-reviewed examples from `sanka-examples` commit
-`e4b9990ccc21ec3d1e775b0955f021f2083fc524`. The examples' source, plan review,
-source-preservation, target compilation and actual HTTP comparison assertions
-remain unchanged. Only their unpublished-candidate installer is replaced with
-the built release wheels. CLI 0.2.12 and published SDK wheels run in isolated
-consumer environments. Setup downloads public dependencies; migration uses local
-synthetic sources and requires no credentials, private services or inference.
-
-Go qualification uses Python 3.12 and Go 1.26.5 with the Flask/Fiber literal-GET
-example. Rust qualification uses Node 22.14.0 and Rust 1.93.1 with the
-Express/axum literal-GET example. Both run all five public CLI stages and require
-explicit success. Broader package CI exercises additional supported framework
-and database fixtures, but that is separate from the released example contract.
-
-Local build and byte verification:
+The `api-release.yml` pull-request jobs build six wheels, check the two
+manifests and scoped catalog, and exercise the pinned `sanka-examples` revision
+`e4b9990ccc21ec3d1e775b0955f021f2083fc524`. They use published CLI
+0.2.12 so this change can be reviewed before CLI 0.3.0 is released. The Go
+job also runs the packaged DRF, Flask and FastAPI fixtures against PostgreSQL
+across Fiber, chi, mux and Gin. Local qualification covers captured source
+tests and an isolated cross-app row transfer; it is not an application cutover.
 
 ```bash
 uv sync --frozen --all-packages
@@ -31,40 +27,28 @@ uv run python scripts/build_api_release.py
 uv run python -m pytest tests/test_api_release.py tests/test_marketplace.py -q
 ```
 
-`--write-manifests` is an intentional development operation after package changes.
-Review the resulting digest changes before committing; CI never rewrites them.
-Never replace artifacts or reuse a published version with different bytes.
+`--write-manifests` intentionally updates the Go manifest after source changes.
+Review its wheel digest before committing. CI only validates checked-in bytes.
 
-## Publication and readback
+## Publication gate
 
-After exact-head approval, green CI and governed landing, create the immutable
-`api-converters-v0.1.0a2` tag at the reviewed merge commit. Dispatch
-`api-release.yml` on that tag. The workflow verifies that the tag is contained in
-main and repeats both consumer qualifications before its publication job runs.
-The release contains six wheels, two manifests, a scoped catalog, and the two
-acceptance reports. Existing marketplace releases are untouched.
+Wait until Sanka CLI 0.3.0 is published. After this change lands, tag its
+reviewed merge commit `api-converters-v0.1.0a3` and dispatch
+`api-release.yml` on that tag. The dispatch job requires the tag to be on
+`main` and installs published CLI 0.3.0 for both pinned example qualifications
+before GitHub publishes any assets. Do not publish from a pull-request build.
 
-After publication, download all assets into a new directory and run
-`scripts/build_api_release.py --check-only --output-dir <download-directory>`
-from the release commit. Then rerun each acceptance against the public Git catalog:
+The release contains six wheels, two manifests, the scoped catalog and two
+acceptance reports. After publication, download the assets into a new
+directory and validate their exact hashes:
 
 ```bash
-uv run python scripts/qualify_api_release.py \
-  --examples release/examples --release release/downloaded-api-converters \
-  --target go --report release/published-go.json \
-  --published-revision <full-release-commit>
-uv run python scripts/qualify_api_release.py \
-  --examples release/examples --release release/downloaded-api-converters \
-  --target rust --report release/published-rust.json \
-  --published-revision <full-release-commit>
+uv run python scripts/build_api_release.py --check-only \
+  --output-dir release/downloaded-api-converters
 ```
 
-The examples directory must be a clean checkout of the pinned commit above.
-Keep downloaded acceptance reports outside the nine-file artifact directory
-when invoking the strict artifact validator. Public readback must pass before
-describing publication as consumer-verified or updating examples to published
-installation commands. The CLI default marketplace pin is intentionally unchanged.
-
-The published `api-converters-v0.1.0a1` assets remain immutable. This candidate
-adds shared Python-to-Go write replay; Go, Rust and HTTP replay advance to a2,
-while the unchanged TypeScript capture wheel remains a1.
+Then run `scripts/qualify_api_release.py` with `--published-revision` pinned to
+the full release commit for both `go` and `rust`. Public readback must pass
+before describing the release as consumer-verified. The CLI marketplace's
+default revision remains unchanged. Passing these fixtures does not qualify
+arbitrary applications or a production data cutover.

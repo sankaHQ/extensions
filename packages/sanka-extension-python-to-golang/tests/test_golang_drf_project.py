@@ -898,6 +898,10 @@ def test_copy_existing_from_django_postgres_schema(tmp_path):
                 connection.execute(
                     "INSERT INTO orders_order(reference,status,memo) VALUES ('source','new','retained')"
                 )
+                connection.execute(
+                    "INSERT INTO shipping_orderitem(order_id,sku,quantity,price) "
+                    "VALUES (1,'sku-1',2,12.50)"
+                )
             initialized = subprocess.run(
                 [str(binary), "up"],
                 env=os.environ | {"DATABASE_URL": target_dsn},
@@ -959,6 +963,12 @@ def test_copy_existing_from_django_postgres_schema(tmp_path):
                 assert connection.execute(
                     "SELECT reference,status,memo FROM orders_order"
                 ).fetchall() == [("source", "new", "retained")]
+                assert connection.execute(
+                    "SELECT order_id,sku,quantity,price FROM shipping_orderitem"
+                ).fetchall() == [(1, "sku-1", 2, 12.50)]
+                assert connection.execute(
+                    "SELECT last_value,is_called FROM shipping_orderitem_id_seq"
+                ).fetchone() == (1, True)
             with psycopg.connect(source_dsn, autocommit=True) as connection:
                 connection.execute(
                     "UPDATE orders_order SET memo='drifted' WHERE reference='source'"
@@ -1181,7 +1191,10 @@ def test_general_project_native_replay(tmp_path, monkeypatch, target, factory):
 
 
 @pytest.mark.parametrize("failing_test", [False, True])
-def test_gadget_original_tests_are_opt_in_qualification(tmp_path, monkeypatch, failing_test):
+@pytest.mark.parametrize("layout", ["module", "package"])
+def test_gadget_original_tests_are_opt_in_qualification(
+    tmp_path, monkeypatch, failing_test, layout
+):
     dsn = os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN")
     if os.getenv("SANKA_GO_TESTS") != "1" or not dsn:
         pytest.skip("requires native Go and isolated PostgreSQL fixture")
@@ -1192,8 +1205,15 @@ def test_gadget_original_tests_are_opt_in_qualification(tmp_path, monkeypatch, f
     from test_golang_schema import schema_dsn
 
     config = gadget_project(tmp_path)
+    tests = tmp_path / "inventory/tests.py"
+    if layout == "package":
+        content = tests.read_text()
+        tests.unlink()
+        (tmp_path / "inventory/tests").mkdir()
+        (tmp_path / "inventory/tests/__init__.py").write_text("")
+        tests = tmp_path / "inventory/tests/test_api.py"
+        tests.write_text(content)
     if failing_test:
-        tests = tmp_path / "inventory/tests.py"
         content = tests.read_text()
         assert "self.assertEqual(response.status_code, 200)" in content
         tests.write_text(
@@ -1220,12 +1240,17 @@ def test_gadget_original_tests_are_opt_in_qualification(tmp_path, monkeypatch, f
             assert report["ok"] is not failing_test
             expected_tests = {
                 "runner": "django",
-                "modules": ["inventory.tests"],
+                "modules": [
+                    "inventory.tests" if layout == "module" else "inventory.tests.test_api"
+                ],
                 "tests_run": 3,
                 "ok": not failing_test,
             }
             if failing_test:
-                expected_tests["failures"] = ["inventory.tests.GadgetApiTests.test_list"]
+                expected_tests["failures"] = [
+                    ("inventory.tests" if layout == "module" else "inventory.tests.test_api")
+                    + ".GadgetApiTests.test_list"
+                ]
             assert report.get("original_tests") == expected_tests
         finally:
             admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))

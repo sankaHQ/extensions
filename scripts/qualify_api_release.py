@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 EXAMPLES_REVISION = "e4b9990ccc21ec3d1e775b0955f021f2083fc524"
-TAG = "api-converters-v0.1.0a2"
+TAG = "api-converters-v0.1.0a3"
 
 
 def load(path: Path, name: str) -> Any:
@@ -71,7 +71,7 @@ def installer(examples: Path, release: Path, revision: str | None, tag: str = TA
                 "install",
                 "--python",
                 str(self.root / "cli/bin/python"),
-                "sanka-cli==0.2.12",
+                "sanka-cli==" + os.environ.get("SANKA_API_RELEASE_CLI_VERSION", "0.2.12"),
             )
             self.report["cli_dependencies"] = self.run(
                 "uv", "pip", "freeze", "--python", str(self.root / "cli/bin/python")

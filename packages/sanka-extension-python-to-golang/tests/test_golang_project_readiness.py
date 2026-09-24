@@ -68,6 +68,49 @@ def test_source_tests_are_inventory_not_runtime_or_migrations(tmp_path: Path, fr
     assert any("worker.py" in gap for gap in result["gaps"])
 
 
+@pytest.mark.parametrize("framework", ["flask", "fastapi"])
+@pytest.mark.parametrize("test_result", ["pass", "fail", "empty"])
+def test_packaged_original_tests_are_opt_in_qualification(
+    tmp_path: Path, monkeypatch, framework: str, test_result: str
+):
+    if os.getenv("SANKA_GO_TESTS") != "1":
+        pytest.skip("requires native Go")
+    entry = project(tmp_path, framework)
+    (tmp_path / "tests").mkdir()
+    expected_app = "None" if test_result == "fail" else "not None"
+    (tmp_path / "tests/test_original.py").write_text(
+        "from service.main import app\n"
+        + (
+            f"def test_source():\n    assert app is {expected_app}\n"
+            if test_result != "empty"
+            else ""
+        )
+    )
+    req = dataclasses.replace(
+        request(tmp_path, framework, "fiber"),
+        configuration={"source_framework": framework, "source_file": entry},
+    )
+    planned = handle(req)
+    assert planned.outcome == "success", planned.error
+    applied = handle(
+        dataclasses.replace(
+            req,
+            command="apply",
+            reviewed_plan_hash="reviewed",
+            configuration=req.configuration | {"extension_plan_hash": planned.data["plan_hash"]},
+        )
+    )
+    assert applied.outcome == "success", applied.error
+    monkeypatch.setenv("SANKA_GO_RUN_ORIGINAL_TESTS", "1")
+    verified = handle(dataclasses.replace(req, command="verify"))
+    report = json.loads((tmp_path / ".sanka/go/verify.json").read_text())
+    assert report["source"] == report["candidate"]
+    assert report["original_tests"]["tests_run"] == (0 if test_result == "empty" else 1)
+    assert report["original_tests"]["ok"] is (test_result == "pass")
+    assert report["ok"] is (test_result == "pass")
+    assert (verified.outcome == "success") is (test_result == "pass")
+
+
 @pytest.mark.parametrize("change", ["initializer", "missing_init", "shadow", "import_test"])
 def test_src_layout_does_not_hide_runtime_gaps(tmp_path: Path, change: str):
     entry = project(tmp_path, "fastapi")
