@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 EXAMPLES_REVISION = "e4b9990ccc21ec3d1e775b0955f021f2083fc524"
-TAG = "api-converters-v0.1.0a4"
+TAG = "api-converters-v0.1.0a5"
 
 
 def load(path: Path, name: str) -> Any:
