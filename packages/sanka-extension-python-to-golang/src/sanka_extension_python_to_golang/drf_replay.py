@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: E501
-"""Isolated SQLite source versus PostgreSQL target replay for Django projects."""
+"""Isolated Django source versus PostgreSQL target replay."""
 
 from __future__ import annotations
 
@@ -10,9 +10,10 @@ import os
 import re
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from sanka_http_replay import (
     MAX_SCENARIOS,
@@ -208,8 +209,6 @@ def replay_project(
     if original_tests_opt_in not in {"", "1"}:
         raise ValueError("SANKA_GO_RUN_ORIGINAL_TESTS must be 1 when set")
     if command == "verify" and original_tests_opt_in == "1":
-        if postgres:
-            raise ValueError("original source tests currently require a SQLite source fixture")
         tests = captured["source_inventory"]["module_roles"]["tests"]
         if not tests or any(
             not (
@@ -361,35 +360,94 @@ def _run_original_tests(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes((root / name).read_bytes())
     project = captured["drf_project"]
+    postgres = project["database"]["engine"] == "postgresql"
+    test_database = "sanka_verify_" + uuid.uuid4().hex if postgres else ""
     environment = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": str(workspace),
         "TMPDIR": str(workspace),
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONHASHSEED": "0",
-        project["database"]["environment"]: str(workspace / "source-tests.sqlite3"),
     } | auth_env
+    if postgres:
+        source_dsn = os.environ["SANKA_GO_SOURCE_TEST_DATABASE_URL"]
+        parsed = urlsplit(source_dsn)
+        values = {
+            "NAME": unquote(parsed.path.lstrip("/")),
+            "USER": unquote(parsed.username or ""),
+            "PASSWORD": unquote(parsed.password or ""),
+            "HOST": parsed.hostname or "",
+            "PORT": str(parsed.port or 5432),
+        }
+        environment.update(
+            {
+                variable: values[field]
+                for field, variable in project["database"]["environments"].items()
+            }
+        )
+    else:
+        environment[project["database"]["environment"]] = str(workspace / "source-tests.sqlite3")
     if project.get("secret_environment"):
         environment[project["secret_environment"]] = "isolated-source-tests-only"
     runner = (
-        "import os, sys; "
-        "sys.path.insert(0, sys.argv[1]); "
-        "os.environ['DJANGO_SETTINGS_MODULE'] = sys.argv[2]; "
-        "import django; django.setup(); "
-        "from django.core.management import call_command; "
-        "call_command('test', *sys.argv[3:], verbosity=1, interactive=False)"
+        "import os, sys\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "os.environ['DJANGO_SETTINGS_MODULE'] = sys.argv[2]\n"
+        "from django.conf import settings\n"
+        "if sys.argv[3]:\n"
+        "    settings.DATABASES['default'].setdefault('TEST', {})['NAME'] = sys.argv[3]\n"
+        "import django; django.setup()\n"
+        "from django.core.management import call_command\n"
+        "call_command('test', *sys.argv[4:], verbosity=1, interactive=False)\n"
     )
     try:
         process = subprocess.run(
-            [source_python, "-I", "-c", runner, str(source), project["settings_module"], *modules],
+            [
+                source_python,
+                "-I",
+                "-c",
+                runner,
+                str(source),
+                project["settings_module"],
+                test_database,
+                *modules,
+            ],
             cwd=source,
             env=environment,
             capture_output=True,
             text=True,
             timeout=300,
         )
-    except subprocess.TimeoutExpired:
+    except (OSError, subprocess.TimeoutExpired):
         return {"runner": "django", "modules": modules, "tests_run": 0, "ok": False}
+    finally:
+        if postgres:
+            try:
+                cleanup = subprocess.run(
+                    [
+                        source_python,
+                        "-I",
+                        "-c",
+                        "import os, sys, psycopg\n"
+                        "from psycopg import sql\n"
+                        "with psycopg.connect(os.environ['SANKA_GO_SOURCE_TEST_DATABASE_URL'], autocommit=True) as db:\n"
+                        "    db.execute(sql.SQL('DROP DATABASE IF EXISTS {} WITH (FORCE)').format(sql.Identifier(sys.argv[1])))\n",
+                        test_database,
+                    ],
+                    cwd=source,
+                    env={
+                        "PATH": environment["PATH"],
+                        "SANKA_GO_SOURCE_TEST_DATABASE_URL": source_dsn,
+                    },
+                    capture_output=True,
+                    timeout=30,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise ValueError(
+                    f"could not remove isolated source test database {test_database}"
+                ) from error
+            if cleanup.returncode:
+                raise ValueError(f"could not remove isolated source test database {test_database}")
     count = re.search(r"Ran (\d+) tests? in ", process.stdout + process.stderr)
     tests_run = int(count.group(1)) if count else 0
     result = {

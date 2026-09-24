@@ -66,7 +66,7 @@ def test_publication_requires_landed_tag_and_both_consumer_jobs() -> None:
     assert "workflow_dispatch" in jobs["publish"]["if"]
     assert "github.ref_type == 'tag'" in jobs["publish"]["if"]
     guard = jobs["build"]["steps"][1]["run"]
-    assert "api-converters-v0.1.0a3" in guard
+    assert "api-converters-v0.1.0a4" in guard
     assert 'git merge-base --is-ancestor "$GITHUB_SHA" origin/main' in guard
     assert jobs["qualify"]["strategy"]["matrix"]["target"] == ["go", "rust"]
     cli_step = next(
@@ -93,9 +93,11 @@ def test_release_gates_packaged_go_database_cli_corpus() -> None:
     )
     assert step["if"] == "matrix.target == 'go'"
     assert step["env"]["SANKA_GO_CLI_TESTS"] == "1"
+    assert step["env"]["SANKA_GO_TESTS"] == "1"
     assert "test_golang_cli.py" in step["run"]
     assert "test_packaged_original_tests_are_opt_in_qualification" in step["run"]
     assert "test_gadget_original_tests_are_opt_in_qualification" in step["run"]
+    assert "test_postgres_original_tests_use_disposable_database" in step["run"]
     assert "test_copy_existing_from_django_postgres_schema" in step["run"]
     assert any(
         "go-project-acceptance.json" in str(step.get("with", {}).get("path", ""))
