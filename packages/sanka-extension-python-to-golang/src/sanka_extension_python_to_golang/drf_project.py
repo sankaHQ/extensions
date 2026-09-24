@@ -450,7 +450,18 @@ def capture_project(
             if view_name in used:
                 raise ValueError("duplicate router view")
             used.add(view_name)
-            attrs = _assignments(views[view_name].body)
+            methods = {
+                node.name: node
+                for node in views[view_name].body
+                if isinstance(node, ast.FunctionDef)
+            }
+            if len(methods) != sum(
+                isinstance(node, ast.FunctionDef) for node in views[view_name].body
+            ):
+                raise ValueError("duplicate ViewSet method")
+            attrs = _assignments(
+                [node for node in views[view_name].body if not isinstance(node, ast.FunctionDef)]
+            )
             if set(attrs) - {
                 "queryset",
                 "serializer_class",
@@ -465,15 +476,18 @@ def capture_project(
             if auth_module:
                 authentication = attrs.get("authentication_classes")
                 permission = attrs.get("permission_classes")
-                if (
-                    authentication is None
-                    or permission is None
-                    or ast.unparse(authentication) != "[JWTAuthentication]"
-                    or ast.unparse(permission) != "[IsAuthenticated]"
-                ):
+                selected = (
+                    ast.unparse(authentication) if authentication is not None else None,
+                    ast.unparse(permission) if permission is not None else None,
+                )
+                if selected not in {
+                    ("[JWTAuthentication]", "[IsAuthenticated]"),
+                    ("[]", "[]"),
+                }:
                     raise ValueError(
-                        "every ViewSet must select the captured authentication and permission"
+                        "every ViewSet must select a captured authentication and permission policy"
                     )
+                protected = selected[0] == "[JWTAuthentication]"
             elif {"authentication_classes", "permission_classes"} & attrs.keys():
                 raise ValueError("viewset authentication requires a captured policy")
             serializer_node = attrs["serializer_class"]
@@ -482,15 +496,20 @@ def capture_project(
             if serializer_name not in serializers:
                 raise ValueError("unresolved serializer")
             contract = _serializer(serializers[serializer_name], model_map, serializers)
-            query = _view_query(attrs, model_map[contract["model"]], settings["page_size"])
+            read_only = ast.unparse(views[view_name].bases[0]) == "ReadOnlyModelViewSet"
+            scope = _view_scope(methods, model_map[contract["model"]], contract, read_only)
+            if scope and "queryset" in attrs:
+                raise ValueError("claim-scoped queryset must not have a static queryset")
+            query = _view_query(attrs, model_map[contract["model"]], settings["page_size"], scope)
             contracts.append(
                 {
                     "path": registration["path"],
                     "basename": registration["basename"],
                     "serializer": contract,
                     "query": query,
-                    "read_only": ast.unparse(views[view_name].bases[0]) == "ReadOnlyModelViewSet",
-                    **({"authentication": "jwt-hs256-roles"} if auth_module else {}),
+                    "read_only": read_only,
+                    **({"scope": scope} if scope else {}),
+                    **({"authentication": "jwt-hs256-roles"} if auth_module and protected else {}),
                 }
             )
         if (
@@ -578,10 +597,15 @@ def capture_project(
 
 
 def _view_query(
-    attrs: dict[str, ast.expr], model: dict[str, Any], page_size: int | None
+    attrs: dict[str, ast.expr],
+    model: dict[str, Any],
+    page_size: int | None,
+    scope: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     fields = {f["name"]: f for f in model["fields"]}
     node = attrs.get("queryset")
+    if scope and node is None:
+        node = ast.parse(model["name"] + ".objects.all()", mode="eval").body
     if not isinstance(node, ast.Call) or node.args:
         raise ValueError("queryset requires all() or exact scalar filter()")
     filters = {}
@@ -636,6 +660,75 @@ def _view_query(
         "pagination": pagination,
         "page_size": page_size,
     }
+
+
+def _view_scope(
+    methods: dict[str, ast.FunctionDef],
+    model: dict[str, Any],
+    serializer: dict[str, Any],
+    read_only: bool,
+) -> dict[str, str]:
+    if not methods:
+        return {}
+    if set(methods) != ({"get_queryset"} if read_only else {"get_queryset", "perform_create"}):
+        raise ValueError("ViewSet method overrides require capture")
+    query = methods["get_queryset"]
+    if (
+        query.decorator_list
+        or query.returns
+        or query.type_params
+        or ast.unparse(query.args) != "self"
+        or len(query.body) != 1
+        or not isinstance(query.body[0], ast.Return)
+        or not isinstance(query.body[0].value, ast.Call)
+    ):
+        raise ValueError("get_queryset requires one explicit claim filter")
+    call = query.body[0].value
+    if (
+        ast.unparse(call.func) != model["name"] + ".objects.filter"
+        or call.args
+        or not call.keywords
+    ):
+        raise ValueError("get_queryset requires one explicit claim filter")
+    fields = {f["name"]: f for f in model["fields"]}
+    readonly = {f["name"] for f in serializer["fields"] if f.get("read_only")}
+    claims = {"self.request.user.pk": "sub", "self.request.auth['tenant']": "tenant"}
+    scope: dict[str, str] = {}
+    for keyword in call.keywords:
+        name = keyword.arg
+        claim = claims.get(ast.unparse(keyword.value))
+        if (
+            name is None
+            or name in scope
+            or name not in readonly
+            or claim is None
+            or name not in fields
+            or fields[name]["go_type"] != "string"
+            or fields[name]["nullable"]
+            or fields[name]["primary_key"]
+        ):
+            raise ValueError("claim filter requires distinct read-only string fields")
+        scope[name] = claim
+    if not read_only:
+        create = methods["perform_create"]
+        if (
+            create.decorator_list
+            or create.returns
+            or create.type_params
+            or ast.unparse(create.args) != "self, serializer"
+            or len(create.body) != 1
+            or not isinstance(create.body[0], ast.Expr)
+            or not isinstance(create.body[0].value, ast.Call)
+            or ast.unparse(create.body[0].value.func) != "serializer.save"
+            or create.body[0].value.args
+            or {
+                keyword.arg: claims.get(ast.unparse(keyword.value))
+                for keyword in create.body[0].value.keywords
+            }
+            != scope
+        ):
+            raise ValueError("perform_create must bind the same verified claims")
+    return dict(sorted(scope.items()))
 
 
 def _literal(node: ast.AST | None) -> Any:
@@ -918,7 +1011,10 @@ def _serializer(
         not isinstance(names, list)
         or len(names) != len(set(names))
         or "id" not in names
-        or readonly != ["id"]
+        or not isinstance(readonly, list)
+        or len(readonly) != len(set(readonly))
+        or "id" not in readonly
+        or not set(readonly) <= set(names)
         or not all(isinstance(n, str) for n in names)
     ):
         raise ValueError("unsupported serializer field selection")
@@ -961,6 +1057,7 @@ def _serializer(
                 field.update(minimum=minimum, required=True, unique=False, blank=False)
                 field.pop("default", None)
                 field.pop("maximum", None)
+            field["read_only"] = name in readonly
             selected.append(field)
         else:
             if (

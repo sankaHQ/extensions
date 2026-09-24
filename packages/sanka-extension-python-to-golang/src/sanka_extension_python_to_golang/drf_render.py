@@ -108,7 +108,7 @@ import ({http_import} "{MODULES[target]}"; "github.com/jackc/pgx/v5/pgxpool")
 '''
     code = GO_DRF
     if authenticated:
-        from .jwt_security import GO_ACCESS
+        from .jwt_security import go_access_principal
 
         code = code.replace(
             '    "encoding/json"',
@@ -117,11 +117,11 @@ import ({http_import} "{MODULES[target]}"; "github.com/jackc/pgx/v5/pgxpool")
         code = code.replace("AUTHORIZATION_GUARD", "")
         code = code.replace(
             "AUTHORIZATION_CHECK",
-            "if status:=accessStatus(authorization,method,path);status!=0 {\n"
+            'principal:=map[string]string{}\n    if view.Authentication != "" { var status int; principal,status=accessPrincipal(authorization,method,path);if status!=0 {\n'
             '        message:=map[int]string{401:"not authenticated",403:"permission denied",503:"authentication unavailable"}[status]\n'
-            '        return status,map[string]string{"detail":message}\n    }',
+            '        return status,map[string]string{"detail":message}\n    } }',
         )
-        code += GO_ACCESS.replace("SCOPE_CHECK", "")
+        code += go_access_principal("")
     else:
         code = code.replace(
             "AUTHORIZATION_GUARD",
@@ -167,6 +167,7 @@ type drfField struct {
     GoType string `json:"go_type"`
     SQLType string `json:"sql_type"`
     Primary bool `json:"primary_key"`
+    ReadOnly bool `json:"read_only"`
     Unique bool `json:"unique"`
     Blank bool `json:"blank"`
     Required bool `json:"required"`
@@ -199,7 +200,7 @@ type drfQuery struct {
     Pagination bool `json:"pagination"`
     PageSize int64 `json:"page_size"`
 }
-type drfView struct { Path string `json:"path"`; Serializer drfSerializer `json:"serializer"`; Query drfQuery `json:"query"`; ReadOnly bool `json:"read_only"` }
+type drfView struct { Path string `json:"path"`; Serializer drfSerializer `json:"serializer"`; Query drfQuery `json:"query"`; ReadOnly bool `json:"read_only"`; Authentication string `json:"authentication"`; Scope map[string]string `json:"scope"` }
 type drfContract struct {
     Models []drfModel `json:"models"`
     Project struct { Views []drfView `json:"views"`; Database struct { Engine string `json:"engine"` } `json:"database"` } `json:"drf_project"`
@@ -282,7 +283,7 @@ func drfValidate(raw []byte, schema drfSerializer, partial bool) (map[string]any
     }
     values := map[string]any{}
     for _, field := range schema.Fields {
-        if field.Primary { continue }
+        if field.Primary || field.ReadOnly { continue }
         input, present := data[field.Name]
         if !present {
             if partial { continue }
@@ -418,10 +419,12 @@ func drfInsert(ctx context.Context, tx pgx.Tx, model drfModel, values map[string
     return id,err
 }
 
-func drfWhere(query drfQuery) (string,[]any) {
+func drfWhere(query drfQuery, scope map[string]string, principal map[string]string) (string,[]any) {
     names:=[]string{};for name:=range query.Filters { names=append(names,name) };sort.Strings(names)
     terms,args:=[]string{},[]any{}
     for _,name:=range names { args=append(args,query.Filters[name]);terms=append(terms,quoted(name)+fmt.Sprintf("=$%d",len(args))) }
+    names=names[:0];for name:=range scope { names=append(names,name) };sort.Strings(names)
+    for _,name:=range names { args=append(args,principal[scope[name]]);terms=append(terms,quoted(name)+fmt.Sprintf("=$%d",len(args))) }
     if len(terms)==0 { return "",args };return " WHERE "+strings.Join(terms," AND "),args
 }
 func drfParams(raw string) url.Values {
@@ -504,11 +507,12 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
     if !allowed { return 405,map[string]string{"detail":fmt.Sprintf(`Method "%s" not allowed.`,method)} }
     tx,err:=pool.Begin(ctx);if err!=nil { return 500,map[string]string{"detail":"Database unavailable."} };defer tx.Rollback(ctx)
     schema:=view.Serializer;model:=drfModelFor(schema.Model)
-    where,args:=drfWhere(view.Query)
+    where,args:=drfWhere(view.Query,view.Scope,principal)
     existing:=[]map[string]any{}
     if detail {
         if where=="" { where=" WHERE " } else { where+=" AND " };args=append(args,id)
-        existing,err=drfRows(ctx,tx,schema,where+fmt.Sprintf("id=$%d",len(args)),args...)
+        where+=fmt.Sprintf("id=$%d",len(args))
+        existing,err=drfRows(ctx,tx,schema,where,args...)
         if err!=nil { return 500,map[string]string{"detail":"Database read failed."} }
         if len(existing)==0 { return 404,map[string]string{"detail":"No "+model.SourceName+" matches the given query."} }
     }
@@ -518,7 +522,7 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
         items,err:=drfList(ctx,tx,*view,address,where,args);if err!=nil { return 500,map[string]string{"detail":"Database read failed."} };return 200,items
     }
     if actualMethod=="DELETE" {
-        if _,err=tx.Exec(ctx,"DELETE FROM "+quoted(model.Table)+" WHERE id=$1",id);err!=nil { return 500,map[string]string{"detail":"Database write failed."} }
+        if _,err=tx.Exec(ctx,"DELETE FROM "+quoted(model.Table)+where,args...);err!=nil { return 500,map[string]string{"detail":"Database write failed."} }
         if err=tx.Commit(ctx);err!=nil { return 500,map[string]string{"detail":"Database write failed."} };return 204,nil
     }
     if len(raw)>0 && !strings.HasPrefix(contentType,"application/json") { return 415,map[string]string{"detail":fmt.Sprintf(`Unsupported media type "%s" in request.`,contentType)} }
@@ -527,6 +531,7 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
     unique,err:=drfUnique(ctx,tx,schema,values,id);if err!=nil { return 500,map[string]string{"detail":"Database read failed."} }
     for key,value:=range unique { invalid[key]=value };if len(invalid)>0 { return 400,invalid }
     if !detail {
+        for field,claim:=range view.Scope { values[field]=principal[claim] }
         id,err=drfInsert(ctx,tx,model,values)
         if err==nil && schema.Nested!=nil {
             nested:=schema.Nested;total:=int64(0)
@@ -539,12 +544,12 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
             if err==nil && total>nested.Aggregate.Limit { return 400,nested.Aggregate.Error }
         }
     } else {
-        sets,args:=[]string{},[]any{}
+        sets,updateArgs:=[]string{},append([]any{},args...)
         for _,field:=range schema.Fields {
-            if field.Primary { continue };value,present:=values[field.Name];if !present { continue }
-            args=append(args,value);sets=append(sets,quoted(field.Name)+fmt.Sprintf("=$%d",len(args)))
+            if field.Primary || field.ReadOnly { continue };value,present:=values[field.Name];if !present { continue }
+            updateArgs=append(updateArgs,value);sets=append(sets,quoted(field.Name)+fmt.Sprintf("=$%d",len(updateArgs)))
         }
-        if len(sets)>0 { args=append(args,id);_,err=tx.Exec(ctx,"UPDATE "+quoted(model.Table)+" SET "+strings.Join(sets,",")+fmt.Sprintf(" WHERE id=$%d",len(args)),args...) }
+        if len(sets)>0 { _,err=tx.Exec(ctx,"UPDATE "+quoted(model.Table)+" SET "+strings.Join(sets,",")+where,updateArgs...) }
     }
     if err!=nil { return 500,map[string]string{"detail":"Database write failed."} }
     saved,err:=drfRows(ctx,tx,schema," WHERE id=$1",id);if err!=nil || len(saved)!=1 { return 500,map[string]string{"detail":"Database read failed."} }

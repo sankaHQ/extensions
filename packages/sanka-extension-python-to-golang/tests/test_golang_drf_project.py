@@ -72,6 +72,138 @@ def authenticated_project(tmp_path):
     return config
 
 
+def mixed_auth_project(tmp_path):
+    config = authenticated_project(tmp_path)
+    views = tmp_path / "orders/views.py"
+    protected, public = views.read_text().split("class OrderReadOnlyViewSet", 1)
+    public = public.replace(
+        "authentication_classes = [JWTAuthentication]",
+        "authentication_classes = []",
+    ).replace("permission_classes = [IsAuthenticated]", "permission_classes = []")
+    views.write_text(protected + "class OrderReadOnlyViewSet" + public)
+    document = tmp_path / "sanka-verify.json"
+    payload = json.loads(document.read_text())
+    payload["scenarios"].append(
+        {
+            "id": "public-invalid-bearer",
+            "method": "GET",
+            "path": "/api/readonly-orders/",
+            "headers": {"Authorization": "Bearer invalid-replay-token"},
+            "expected_status": 200,
+        }
+    )
+    document.write_text(json.dumps(payload))
+    return config
+
+
+def scoped_project(tmp_path):
+    config = mixed_auth_project(tmp_path)
+    models = tmp_path / "orders/models.py"
+    models.write_text(
+        models.read_text() + "\nclass Note(models.Model):\n"
+        "    owner = models.CharField(max_length=128)\n"
+        "    tenant = models.CharField(max_length=128)\n"
+        "    content = models.CharField(max_length=100)\n"
+        "    class Meta:\n        ordering = ['id']\n"
+    )
+    migration = tmp_path / "orders/migrations/0001_initial.py"
+    source = migration.read_text()
+    assert source.endswith("    ]\n")
+    migration.write_text(
+        source[:-6] + "        migrations.CreateModel(\n"
+        "            name='Note',\n"
+        "            fields=[\n"
+        "                ('id', models.AutoField(primary_key=True, serialize=False)),\n"
+        "                ('owner', models.CharField(max_length=128)),\n"
+        "                ('tenant', models.CharField(max_length=128)),\n"
+        "                ('content', models.CharField(max_length=100)),\n"
+        "            ],\n"
+        "            options={'ordering': ['id']},\n"
+        "        ),\n    ]\n"
+    )
+    serializers = tmp_path / "orders/serializers.py"
+    serializers.write_text(
+        serializers.read_text() + "\nclass NoteSerializer(serializers.ModelSerializer):\n"
+        "    class Meta:\n"
+        "        model = Note\n"
+        "        fields = ['id', 'owner', 'tenant', 'content']\n"
+        "        read_only_fields = ['id', 'owner', 'tenant']\n"
+    )
+    serializers.write_text(
+        serializers.read_text().replace(
+            "from orders.models import Order, OrderItem",
+            "from orders.models import Order, OrderItem, Note",
+        )
+    )
+    views = tmp_path / "orders/views.py"
+    views.write_text(
+        views.read_text()
+        .replace("from orders.models import Order", "from orders.models import Order, Note")
+        .replace(
+            "from orders.serializers import OrderSerializer",
+            "from orders.serializers import OrderSerializer, NoteSerializer",
+        )
+        + "\nclass NoteViewSet(ModelViewSet):\n"
+        "    serializer_class = NoteSerializer\n"
+        "    authentication_classes = [JWTAuthentication]\n"
+        "    permission_classes = [IsAuthenticated]\n"
+        "    def get_queryset(self):\n"
+        "        return Note.objects.filter(owner=self.request.user.pk, tenant=self.request.auth['tenant'])\n"
+        "    def perform_create(self, serializer):\n"
+        "        serializer.save(owner=self.request.user.pk, tenant=self.request.auth['tenant'])\n"
+    )
+    urls = tmp_path / "shop_config/urls.py"
+    urls.write_text(
+        urls.read_text()
+        .replace(
+            "import OrderViewSet, OrderReadOnlyViewSet",
+            "import OrderViewSet, OrderReadOnlyViewSet, NoteViewSet",
+        )
+        .replace(
+            'router.register("readonly-orders", OrderReadOnlyViewSet, basename="readonly-order")',
+            'router.register("readonly-orders", OrderReadOnlyViewSet, basename="readonly-order")\n'
+            'router.register("notes", NoteViewSet, basename="note")',
+        )
+    )
+    document = tmp_path / "sanka-verify.json"
+    payload = json.loads(document.read_text())
+    create = {"method": "POST", "path": "/api/notes/", "body": {"content": "one"}}
+    payload["scenarios"] += [
+        {"id": "note-create", **create, "expected_status": 201},
+        {
+            "id": "note-list",
+            "setup": [create],
+            "method": "GET",
+            "path": "/api/notes/",
+            "expected_status": 200,
+        },
+        {
+            "id": "note-detail",
+            "setup": [create],
+            "method": "GET",
+            "path": "/api/notes/1/",
+            "expected_status": 200,
+        },
+        {
+            "id": "note-patch",
+            "setup": [create],
+            "method": "PATCH",
+            "path": "/api/notes/1/",
+            "body": {"content": "two"},
+            "expected_status": 200,
+        },
+        {
+            "id": "note-delete",
+            "setup": [create],
+            "method": "DELETE",
+            "path": "/api/notes/1/",
+            "expected_status": 204,
+        },
+    ]
+    document.write_text(json.dumps(payload))
+    return config
+
+
 def multiapp_project(tmp_path):
     config = project(tmp_path)
     shutil.copytree(tmp_path / "orders", tmp_path / "sales")
@@ -425,7 +557,15 @@ def test_postgres_conventional_capture_preserves_native_sequences(tmp_path):
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
 @pytest.mark.parametrize(
     "factory",
-    [multiapp_project, crossapp_project, postgres_project, readonly_project, authenticated_project],
+    [
+        multiapp_project,
+        crossapp_project,
+        postgres_project,
+        readonly_project,
+        authenticated_project,
+        mixed_auth_project,
+        scoped_project,
+    ],
 )
 def test_general_project_native_replay(tmp_path, monkeypatch, target, factory):
     dsn = os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN")
@@ -583,6 +723,33 @@ def test_conventional_drf_auth_replay_covers_writer_and_denied_state(tmp_path):
     assert REPLAY_JWT_ENV["AUTH_JWT_SECRET"] not in str(captured)
 
 
+def test_conventional_drf_mixed_public_and_protected_viewsets(tmp_path):
+    captured = capture(tmp_path, mixed_auth_project(tmp_path))
+    assert captured["gaps"] == []
+    assert captured == capture(tmp_path, captured["configuration"])
+    views = captured["drf_project"]["views"]
+    assert views[0]["authentication"] == "jwt-hs256-roles"
+    assert "authentication" not in views[1]
+    groups = scenario_groups(tmp_path, captured)
+    public = [group for group in groups if group[-1]["id"] == "public-invalid-bearer"]
+    assert len(public) == 1
+    assert public[0][-1]["headers"]["authorization"] == "Bearer invalid-replay-token"
+    assert any(case["id"].endswith(":missing") for group in groups for case in group)
+
+
+def test_conventional_drf_captures_claim_scoped_viewset(tmp_path):
+    captured = capture(tmp_path, scoped_project(tmp_path))
+    assert captured["gaps"] == []
+    assert captured == capture(tmp_path, captured["configuration"])
+    note = captured["drf_project"]["views"][-1]
+    assert note["scope"] == {"owner": "sub", "tenant": "tenant"}
+    assert {field["name"] for field in note["serializer"]["fields"] if field["read_only"]} == {
+        "id",
+        "owner",
+        "tenant",
+    }
+
+
 @pytest.mark.parametrize(
     "filename, old, new",
     [
@@ -652,7 +819,9 @@ def test_conventional_drf_renders_backend(tmp_path, target):
 
 
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
-@pytest.mark.parametrize("factory", [project, authenticated_project])
+@pytest.mark.parametrize(
+    "factory", [project, authenticated_project, mixed_auth_project, scoped_project]
+)
 def test_conventional_drf_native_validation(tmp_path, target, factory):
     if os.getenv("SANKA_GO_TESTS") != "1":
         pytest.skip("requires native Go")
