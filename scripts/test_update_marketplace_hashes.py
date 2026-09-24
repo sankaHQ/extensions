@@ -35,14 +35,14 @@ def test_hash_updater_records_each_manifest_dependency_closure(tmp_path: Path) -
         for name in names:
             _wheel(tmp_path, name)
 
-    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a31")
+    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a32")
 
     assert set(manifests) == UPDATED_MANIFESTS
     for package, payload in manifests.items():
         assert [wheel["name"] for wheel in payload["wheels"]] == list(MANIFEST_WHEELS[package])
         assert all(
             wheel["url"].startswith(
-                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a31/"
+                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a32/"
             )
             and len(wheel["sha256"]) == 64
             for wheel in payload["wheels"]
@@ -136,8 +136,8 @@ def test_hash_updater_rejects_an_incomplete_or_wrongly_tagged_wheel_set(tmp_path
     _wheel(tmp_path, "sanka_connector_sdk-0.1.0a12-py3-none-any.whl")
 
     with pytest.raises(RuntimeError, match="complete marketplace wheel set"):
-        update_manifests(tmp_path, release_tag="extensions-v0.1.0a31")
-    with pytest.raises(RuntimeError, match=r"extensions-v0\.1\.0a31"):
+        update_manifests(tmp_path, release_tag="extensions-v0.1.0a32")
+    with pytest.raises(RuntimeError, match=r"extensions-v0\.1\.0a32"):
         update_manifests(tmp_path, release_tag="extensions-v0.1.0a26")
 
 
@@ -223,8 +223,8 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
         ),
         "sanka-extension-sdk": ("0.1.0a4", "sanka_extension_sdk-0.1.0a4-py3-none-any.whl", ""),
         "sanka-extension-drf-to-fastapi": (
-            "0.1.0a17",
-            "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl",
+            "0.1.0a18",
+            "sanka_extension_drf_to_fastapi-0.1.0a18-py3-none-any.whl",
             "[console_scripts]\n"
             "sanka-extension-drf-to-fastapi = sanka_extension_drf_to_fastapi.__main__:main\n",
         ),
@@ -300,7 +300,7 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
 @pytest.mark.parametrize(
     ("distribution", "version"),
     [
-        ("sanka-extension-drf-to-fastapi", "0.1.0a17"),
+        ("sanka-extension-drf-to-fastapi", "0.1.0a18"),
         ("sanka-extension-drf-to-flask", "0.1.0a12"),
     ],
 )
@@ -378,11 +378,11 @@ def test_release_validator_rejects_invalid_release_boundaries(
         manifest["wheels"][1]["sha256"] = "0" * 64
         manifest_path.write_text(json.dumps(manifest))
     elif case == "package_data":
-        fastapi = release / "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl"
+        fastapi = release / "sanka_extension_drf_to_fastapi-0.1.0a18-py3-none-any.whl"
         _metadata_wheel(
             release,
             name="sanka-extension-drf-to-fastapi",
-            version="0.1.0a17",
+            version="0.1.0a18",
             filename=fastapi.name,
             requirements=(
                 "sanka-code-migration==0.1.0a3",

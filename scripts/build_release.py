@@ -16,12 +16,12 @@ from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_DEPENDENCY_WHEEL_BYTES = 128 * 1024 * 1024
-MARKETPLACE_PACKAGES: tuple[str, ...] = ()
+MARKETPLACE_PACKAGES: tuple[str, ...] = ("sanka-extension-drf-to-fastapi",)
 LOCAL_WHEELS = (
     "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
     "sanka_code_migration-0.1.0a3-py3-none-any.whl",
     "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-    "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl",
+    "sanka_extension_drf_to_fastapi-0.1.0a18-py3-none-any.whl",
     "sanka_extension_drf_to_flask-0.1.0a12-py3-none-any.whl",
     "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
     "sanka_connector_markdown-0.1.0a14-py3-none-any.whl",
@@ -112,14 +112,6 @@ PINNED_LOCAL_WHEELS = (
         "sanka_code_migration-0.1.0a3-py3-none-any.whl",
         "e510b981e5ddcad3a269106a69565d034486abed275aaf4217537c6b6b1efe11",
         75727,
-    ),
-    LockedWheel(
-        "sanka-extension-drf-to-fastapi",
-        "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl",
-        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a31/"
-        "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl",
-        "f07bafcd615126e26e26f3abb40f10de870c25614c04b4d3957980e73222e700",
-        78894,
     ),
     LockedWheel(
         "sanka-extension-drf-to-flask",

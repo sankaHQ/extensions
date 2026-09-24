@@ -28,6 +28,14 @@ major/minor version, so locked binary dependencies remain compatible. An incompl
 Without a project `.venv`, execution retains the caller's existing environment.
 On Windows, use `.venv\Scripts\python.exe` for the requirements command.
 
+## Swagger UI
+
+Planning keeps Swagger UI at `/docs` enabled by default. Use
+`sanka plan . --to fastapi --no-swagger-ui` to disable that page, or choose
+Disabled in the TUI Plan configuration. The reviewed plan controls generated
+output in both native and compatibility modes. OpenAPI at `/openapi.json` and
+ReDoc remain available.
+
 ## Parity notes
 
 Every scanned route carries `parity_notes`: facts about the exact behavior of the

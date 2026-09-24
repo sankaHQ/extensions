@@ -18,7 +18,7 @@ if __package__ in {None, ""}:  # Direct script execution keeps only scripts/ on 
 
 from scripts.build_release import LOCKED_DEPENDENCY_WHEELS  # noqa: E402
 
-RELEASE_TAG = "extensions-v0.1.0a31"
+RELEASE_TAG = "extensions-v0.1.0a32"
 LOCAL_MANIFEST_WHEELS = {
     "sanka-extension-drf-to-flask": (
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
@@ -32,7 +32,7 @@ LOCAL_MANIFEST_WHEELS = {
         "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
         "sanka_code_migration-0.1.0a3-py3-none-any.whl",
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-        "sanka_extension_drf_to_fastapi-0.1.0a17-py3-none-any.whl",
+        "sanka_extension_drf_to_fastapi-0.1.0a18-py3-none-any.whl",
     ),
     "sanka-connector-markdown": (
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
@@ -91,10 +91,7 @@ MANIFEST_WHEELS = {
     for package, local in LOCAL_MANIFEST_WHEELS.items()
 }
 MANIFESTS = {package: ROOT / "packages" / package / "extension.json" for package in MANIFEST_WHEELS}
-UPDATED_MANIFESTS = {
-    "sanka-extension-drf-to-flask",
-    "sanka-extension-drf-to-fastapi",
-}
+UPDATED_MANIFESTS = {"sanka-extension-drf-to-fastapi"}
 
 
 def _wheel_hash(path: Path) -> str:

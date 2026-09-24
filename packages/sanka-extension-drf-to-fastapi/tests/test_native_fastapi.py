@@ -176,6 +176,47 @@ def _generate(project: Path) -> Path:
     return project / ".sanka" / "output" / "fastapi"
 
 
+@pytest.mark.parametrize("strategy", ["native", "compatibility"])
+@pytest.mark.parametrize("enabled", [True, False])
+def test_reviewed_swagger_ui_choice_controls_generated_app(
+    crud_project: Path, strategy: str, enabled: bool
+) -> None:
+    assert _run_cli(["scan", str(crud_project)], crud_project).returncode == 0
+    flag = "--swagger-ui" if enabled else "--no-swagger-ui"
+    planned = _run_cli(
+        ["plan", str(crud_project), "--to", "fastapi", "--strategy", strategy, flag],
+        crud_project,
+    )
+    assert planned.returncode == 0, planned.stderr
+    plan = json.loads((crud_project / ".sanka" / "plan-fastapi.json").read_text())
+    assert plan["swagger_ui"] is enabled
+    applied = _run_cli(
+        ["apply", "--root", str(crud_project), "--plan-hash", _plan_hash(crud_project)],
+        crud_project,
+    )
+    assert applied.returncode == 0, applied.stderr
+    output = crud_project / ".sanka" / "output" / "fastapi"
+    manifest = json.loads((output / "sanka-manifest.json").read_text())
+    assert manifest["swagger_ui"] is enabled
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from fastapi.testclient import TestClient; from app import app; "
+            "client = TestClient(app); "
+            f"assert client.get('/docs').status_code == {200 if enabled else 404}; "
+            "assert client.get('/openapi.json').status_code == 200; "
+            "assert client.get('/redoc').status_code == 200",
+        ],
+        cwd=output,
+        env=_clean_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert probe.returncode == 0, probe.stderr
+
+
 def test_native_lifecycle_generates_verifiable_output(crud_project: Path) -> None:
     output = _generate(crud_project)
     for name in ("app.py", "sanka_native.py", "sanka_store.py", "models.py", "sanka-manifest.json"):

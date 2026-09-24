@@ -1,5 +1,20 @@
 # Releasing Sanka extension packages
 
+## FastAPI Swagger choice: a32
+
+`extensions-v0.1.0a32` advances only `sanka-extension-drf-to-fastapi` to
+`0.1.0a18`. Its reviewed Plan choice controls `/docs` in native and compatibility
+output; `/openapi.json` and `/redoc` remain available. The other marketplace
+wheels are byte-identical to their published versions. The FastAPI manifest points
+to the a32 asset set; existing project locks and the a31 release remain unchanged.
+
+Run `make check build-release`, then the private converter regression for the
+exact reviewed merge SHA as described in [converter-regression.md](converter-regression.md).
+After its success, confirm that the a32 tag and release are absent, create the
+immutable `extensions-v0.1.0a32` tag at that merge, and dispatch `publish.yml`.
+Verify the published a18 wheel and manifest hashes, SDK identity and a clean
+FastAPI Plan with Swagger enabled and disabled before advancing the CLI catalog pin.
+
 ## CLI 0.3 compatibility update
 
 The existing Data/Code wheel assets in `extensions-v0.1.0a31` remain immutable.

@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/"
-NEW_RELEASE_PREFIX = RELEASE_PREFIX + "extensions-v0.1.0a31/"
+NEW_RELEASE_PREFIX = RELEASE_PREFIX + "extensions-v0.1.0a32/"
 EXPECTED = {
     "sanka/react-native-to-native": {
         "kind": "migration",
@@ -61,7 +61,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-fastapi",
-            "version": "0.1.0a17",
+            "version": "0.1.0a18",
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },
@@ -143,6 +143,8 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
             assert manifest["providers"] == expected["providers"]
         assert manifest["wheels"]
         expected_prefix = NEW_RELEASE_PREFIX if expected["kind"] == "migration" else RELEASE_PREFIX
+        if item["id"] == "sanka/drf-to-flask":
+            expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a31/"
         if item["id"] == "sanka/llm-to-jev":
             expected_prefix = RELEASE_PREFIX + "llm-to-jev-v0.1.0a1/"
         if item["id"] in {"sanka/python-to-golang", "sanka/typescript-to-rust"}:
