@@ -28,6 +28,20 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
         **_runtime(target, True, True),
     }
     sqlite = captured["drf_project"]["database"]["engine"] == "sqlite"
+    authenticated = captured["drf_project"].get("authentication") == "jwt-hs256-roles"
+    if authenticated:
+        jwt_lock = files("sanka_extension_python_to_golang").joinpath("locks", "jwt")
+        result["go.mod"] += "\n" + jwt_lock.joinpath("go.mod").read_text()
+        result["go.sum"] = (
+            "\n".join(
+                sorted(
+                    set(result["go.sum"].splitlines())
+                    | set(jwt_lock.joinpath("go.sum").read_text().splitlines())
+                )
+            )
+            + "\n"
+        )
+        result[".env.example"] += "AUTH_JWT_SECRET=\nAUTH_JWT_ISSUER=\nAUTH_JWT_AUDIENCE=\n"
     migration = result["migrations/00001_initial.sql"]
     counters = ""
     if sqlite:
@@ -49,6 +63,7 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
     app := fiber.New(fiber.Config{BodyLimit: 1048576, DisableHeadAutoRegister: true, ReadTimeout: 15*time.Second, WriteTimeout: 30*time.Second, IdleTimeout: 60*time.Second})
     app.Use(func(c fiber.Ctx) error {
         status, body := drfRequest(c.Context(), pool, c.Method(), c.Path(), c.Body(), c.Get("Accept"), c.Get("Content-Type"), c.Get("Authorization"), c.Get("Cookie"), c.BaseURL()+c.OriginalURL())
+        if status == 401 { c.Set("WWW-Authenticate", "Bearer") }
         if status == 204 { return c.SendStatus(status) }
         return c.Status(status).JSON(body)
     })
@@ -67,6 +82,7 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
         if err != nil {{ w.WriteHeader(413); return }}
         scheme := "http"; if r.TLS != nil {{ scheme = "https" }}
         status, body := drfRequest(r.Context(), pool, r.Method, r.URL.Path, raw, r.Header.Get("Accept"), r.Header.Get("Content-Type"), r.Header.Get("Authorization"), r.Header.Get("Cookie"), scheme+"://"+r.Host+r.URL.RequestURI())
+        if status == 401 {{ w.Header().Set("WWW-Authenticate", "Bearer") }}
         if status == 204 {{ w.WriteHeader(status); return }}
         w.Header().Set("Content-Type", "application/json"); w.WriteHeader(status)
         if r.Method != "HEAD" {{ _ = json.NewEncoder(w).Encode(body) }}
@@ -74,13 +90,43 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
     {setup}
     return app
 }}"""
+    if authenticated:
+        adapter = adapter.replace(
+            'c.Get("Authorization")',
+            'strings.Join(c.GetReqHeaders()["Authorization"], ", ")',
+        ).replace(
+            'r.Header.Get("Authorization")',
+            'strings.Join(r.Header.Values("Authorization"), ", ")',
+        )
     http_import = '"net/http"; "io"; "encoding/json";' if target != "fiber" else '"time";'
+    if authenticated:
+        http_import += ' "strings";'
     result["app.go"] = f'''// SPDX-License-Identifier: Apache-2.0
 package backend
 import ({http_import} "{MODULES[target]}"; "github.com/jackc/pgx/v5/pgxpool")
 {adapter}
 '''
     code = GO_DRF
+    if authenticated:
+        from .jwt_security import GO_ACCESS
+
+        code = code.replace(
+            '    "encoding/json"',
+            '    "encoding/json"\n    "encoding/base64"\n    "os"\n    "regexp"\n    "time"\n    "github.com/golang-jwt/jwt/v5"',
+        )
+        code = code.replace("AUTHORIZATION_GUARD", "")
+        code = code.replace(
+            "AUTHORIZATION_CHECK",
+            "if status:=accessStatus(authorization,method,path);status!=0 {\n"
+            '        message:=map[int]string{401:"not authenticated",403:"permission denied",503:"authentication unavailable"}[status]\n'
+            '        return status,map[string]string{"detail":message}\n    }',
+        )
+        code += GO_ACCESS.replace("SCOPE_CHECK", "")
+    else:
+        code = code.replace(
+            "AUTHORIZATION_GUARD",
+            'if authorization!="" || strings.Contains(cookie,"sessionid=") { return 501,map[string]string{"detail":"Authentication requires a separately qualified migration profile."} }',
+        ).replace("AUTHORIZATION_CHECK", "")
     if not sqlite:
         code = code.replace(
             '"UPDATE migration_identity SET value=value+1 WHERE table_name=$1 RETURNING value"',
@@ -441,9 +487,7 @@ func drfList(ctx context.Context, tx pgx.Tx, view drfView, address, where string
 
 func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []byte,accept,contentType,authorization,cookie string, requestURL ...string) (int,any) {
     if accept!="" && accept!="*/*" && !strings.Contains(accept,"application/json") { return 406,map[string]string{"detail":"Could not satisfy the request Accept header."} }
-    // This captured profile has public permissions. Authentication identity is
-    // outside its qualified contract; never silently treat credentials as anonymous.
-    if authorization!="" || strings.Contains(cookie,"sessionid=") { return 501,map[string]string{"detail":"Authentication requires a separately qualified migration profile."} }
+    AUTHORIZATION_GUARD
     var view *drfView;id:=int64(0);detail:=false
     for i:=range drfSchema.Project.Views {
         candidate:=&drfSchema.Project.Views[i]
@@ -454,6 +498,7 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
         }
     }
     if view==nil { return 404,map[string]string{"detail":"Not found."} }
+    AUTHORIZATION_CHECK
     actualMethod:=method;if method=="HEAD" { actualMethod="GET" }
     allowed:=actualMethod=="GET" || !view.ReadOnly && (actualMethod=="POST" && !detail || detail && (actualMethod=="PUT" || actualMethod=="PATCH" || actualMethod=="DELETE"))
     if !allowed { return 405,map[string]string{"detail":fmt.Sprintf(`Method "%s" not allowed.`,method)} }

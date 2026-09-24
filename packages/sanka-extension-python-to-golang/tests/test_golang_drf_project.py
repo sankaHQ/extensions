@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from textwrap import indent
 
 import pytest
 from sanka_extension_python_to_golang.capture import capture, configuration
@@ -15,6 +16,60 @@ from sanka_extension_python_to_golang.drf_replay import replay_project, scenario
 from sanka_extension_python_to_golang.render import render
 
 FIXTURE = Path(__file__).parent / "fixtures/drf_project"
+
+
+def authenticated_project(tmp_path):
+    from test_golang_jwt import JWT_BODY
+
+    config = readonly_project(tmp_path)
+    (tmp_path / "orders/auth.py").write_text(
+        "from os import environ\n"
+        "from jwt import decode, get_unverified_header, InvalidTokenError\n"
+        "from re import fullmatch\n"
+        "from time import time\n"
+        "from rest_framework.authentication import BaseAuthentication\n"
+        "from rest_framework.exceptions import APIException, AuthenticationFailed, PermissionDenied\n"
+        "from types import SimpleNamespace\n"
+        "class AuthenticationUnavailable(APIException):\n"
+        "    status_code = 503\n"
+        '    default_detail = "authentication unavailable"\n'
+        "class JWTAuthentication(BaseAuthentication):\n"
+        "    def authenticate(self, request):\n"
+        + indent(
+            JWT_BODY.replace("UNAVAILABLE", "raise AuthenticationUnavailable()")
+            .replace("UNAUTHENTICATED", 'raise AuthenticationFailed("not authenticated")')
+            .replace("FORBIDDEN", 'raise PermissionDenied("permission denied")')
+            + 'return SimpleNamespace(is_authenticated=True, pk=claims["sub"]), claims\n',
+            "        ",
+        )
+        + '    def authenticate_header(self, request):\n        return "Bearer"\n'
+    )
+    views = tmp_path / "orders/views.py"
+    source = views.read_text()
+    source = (
+        "from orders.auth import JWTAuthentication\n"
+        "from rest_framework.permissions import IsAuthenticated\n" + source
+    )
+    source = source.replace(
+        "    serializer_class = OrderSerializer",
+        "    serializer_class = OrderSerializer\n"
+        "    authentication_classes = [JWTAuthentication]\n"
+        "    permission_classes = [IsAuthenticated]",
+    )
+    views.write_text(source)
+    scenarios = tmp_path / "sanka-verify.json"
+    document = json.loads(scenarios.read_text())
+    document["scenarios"].append(
+        {
+            "id": "signed-token-with-irrelevant-session-cookie",
+            "method": "GET",
+            "path": "/api/orders/",
+            "headers": {"Cookie": "sessionid=legacy"},
+            "expected_status": 200,
+        }
+    )
+    scenarios.write_text(json.dumps(document))
+    return config
 
 
 def multiapp_project(tmp_path):
@@ -369,7 +424,8 @@ def test_postgres_conventional_capture_preserves_native_sequences(tmp_path):
 
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
 @pytest.mark.parametrize(
-    "factory", [multiapp_project, crossapp_project, postgres_project, readonly_project]
+    "factory",
+    [multiapp_project, crossapp_project, postgres_project, readonly_project, authenticated_project],
 )
 def test_general_project_native_replay(tmp_path, monkeypatch, target, factory):
     dsn = os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN")
@@ -466,6 +522,67 @@ def test_readonly_viewset_capture_restricts_methods(tmp_path):
     }
 
 
+@pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
+def test_conventional_drf_signed_project_capture_and_render(tmp_path, target):
+    config = authenticated_project(tmp_path) | {"target_framework": target}
+    captured = capture(tmp_path, config)
+    assert captured["gaps"] == []
+    assert captured == capture(tmp_path, config)
+    assert captured["drf_project"]["authentication"] == "jwt-hs256-roles"
+    assert all(
+        view["authentication"] == "jwt-hs256-roles" for view in captured["drf_project"]["views"]
+    )
+    generated = render(captured)
+    assert "github.com/golang-jwt/jwt/v5" in generated["go.mod"]
+    assert "AUTH_JWT_SECRET=\n" in generated[".env.example"]
+    assert "accessStatus(authorization,method,path)" in generated["drf.go"]
+
+
+@pytest.mark.parametrize(
+    "filename,old,new",
+    [
+        (
+            "orders/auth.py",
+            'default_detail = "authentication unavailable"',
+            'default_detail = "okay"',
+        ),
+        ("orders/views.py", "permission_classes = [IsAuthenticated]", "permission_classes = []"),
+        (
+            "orders/views.py",
+            "authentication_classes = [JWTAuthentication]",
+            "authentication_classes = []",
+        ),
+        (
+            "shop_config/settings.py",
+            'SECRET_KEY = "sanka-bench-synthetic-fixture-003-only"',
+            'SECRET_KEY = os.environ["AUTH_JWT_SECRET"]',
+        ),
+    ],
+)
+def test_conventional_drf_auth_changes_fail_closed(tmp_path, filename, old, new):
+    config = authenticated_project(tmp_path)
+    path = tmp_path / filename
+    path.write_text(path.read_text().replace(old, new, 1))
+    assert capture(tmp_path, config)["gaps"]
+
+
+def test_conventional_drf_auth_replay_covers_writer_and_denied_state(tmp_path):
+    from sanka_extension_python_to_golang.jwt_security import REPLAY_JWT_ENV
+
+    captured = capture(tmp_path, authenticated_project(tmp_path))
+    groups = scenario_groups(tmp_path, captured)
+    first = groups[0]
+    assert first[0]["headers"]["authorization"].startswith("Bearer ")
+    assert {case["id"].split(":")[-1] for case in first[1:]} >= {
+        "writer",
+        "missing",
+        "invalid",
+        "reader",
+    }
+    assert [case["expected_status"] for case in first[1:5]] == [200, 401, 401, 200]
+    assert REPLAY_JWT_ENV["AUTH_JWT_SECRET"] not in str(captured)
+
+
 @pytest.mark.parametrize(
     "filename, old, new",
     [
@@ -535,10 +652,11 @@ def test_conventional_drf_renders_backend(tmp_path, target):
 
 
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
-def test_conventional_drf_native_validation(tmp_path, target):
+@pytest.mark.parametrize("factory", [project, authenticated_project])
+def test_conventional_drf_native_validation(tmp_path, target, factory):
     if os.getenv("SANKA_GO_TESTS") != "1":
         pytest.skip("requires native Go")
-    result = capture(tmp_path, project(tmp_path) | {"target_framework": target})
+    result = capture(tmp_path, factory(tmp_path) | {"target_framework": target})
     output = tmp_path / ".sanka/candidate"
     for name, contents in render(result).items():
         path = output / name
@@ -556,6 +674,45 @@ func TestDRFValidation(t *testing.T) {
     if len(invalid)>0 || len(values)>0 { t.Fatalf("partial defaults: %#v %#v",values,invalid) }
 }
 """)
+    if factory is authenticated_project:
+        from sanka_extension_python_to_golang.jwt_security import REPLAY_JWT_ENV, replay_token
+
+        response = (
+            'reply,err:=app.Test(request);if err!=nil { t.Fatal(err) };defer reply.Body.Close();status:=reply.StatusCode;challenge:=reply.Header.Get("WWW-Authenticate")'
+            if target == "fiber"
+            else 'reply:=httptest.NewRecorder();app.ServeHTTP(reply,request);status:=reply.Code;challenge:=reply.Header().Get("WWW-Authenticate")'
+        )
+        duplicate = (
+            "reply2,err:=app.Test(request2);if err!=nil { t.Fatal(err) };defer reply2.Body.Close();status2:=reply2.StatusCode"
+            if target == "fiber"
+            else "reply2:=httptest.NewRecorder();app.ServeHTTP(reply2,request2);status2:=reply2.Code"
+        )
+        token = replay_token(
+            {
+                "iss": REPLAY_JWT_ENV["AUTH_JWT_ISSUER"],
+                "aud": REPLAY_JWT_ENV["AUTH_JWT_AUDIENCE"],
+                "sub": "fixture-user",
+                "tenant": "fixture-tenant",
+                "role": "writer",
+                "exp": 4102444800,
+            }
+        )
+        (output / "drf_auth_test.go").write_text(
+            "package backend\n"
+            'import ("net/http/httptest"; "testing"; "github.com/jackc/pgx/v5/pgxpool")\n'
+            "func TestDRFAuthChallenge(t *testing.T) {\n"
+            ' t.Setenv("AUTH_JWT_SECRET", "sanka-isolated-replay-signing-key-32-bytes")\n'
+            ' t.Setenv("AUTH_JWT_ISSUER", "sanka-replay")\n'
+            ' t.Setenv("AUTH_JWT_AUDIENCE", "sanka-replay-backend")\n'
+            ' app:=NewApp(&pgxpool.Pool{});request:=httptest.NewRequest("GET","http://testserver/api/orders/",nil)\n'
+            + response
+            + '\n if status!=401 || challenge!="Bearer" { t.Fatalf("status=%d challenge=%q",status,challenge) }\n'
+            + ' request2:=httptest.NewRequest("POST","http://testserver/api/readonly-orders/",nil)\n'
+            + f' request2.Header.Add("Authorization",{json.dumps(token)})\n'
+            + ' request2.Header.Add("Authorization","Bearer invalid")\n'
+            + duplicate
+            + '\n if status2!=401 { t.Fatalf("duplicate Authorization status=%d",status2) }\n}\n'
+        )
     completed = subprocess.run(
         ["go", "test", "-mod=readonly", "-p=2", "./..."],
         cwd=output,

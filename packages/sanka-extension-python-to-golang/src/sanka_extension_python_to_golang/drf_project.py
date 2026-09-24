@@ -221,6 +221,39 @@ if __name__ == "__main__":
     )
 
 
+def _project_auth(root: Path, apps: list[str]) -> tuple[str | None, set[str]]:
+    from .native_security import UNAVAILABLE, _body
+
+    files = [f"{app}/auth.py" for app in apps if (root / app / "auth.py").is_file()]
+    if not files:
+        return None, set()
+    if len(files) != 1:
+        raise ValueError("one explicit project authentication module is required")
+    expected = ast.parse(
+        "from os import environ\n"
+        "from jwt import decode, get_unverified_header, InvalidTokenError\n"
+        "from re import fullmatch\n"
+        "from time import time\n"
+        "from rest_framework.authentication import BaseAuthentication\n"
+        "from rest_framework.exceptions import "
+        "APIException, AuthenticationFailed, PermissionDenied\n"
+        "from types import SimpleNamespace\n"
+        + UNAVAILABLE
+        + "class JWTAuthentication(BaseAuthentication):\n"
+        "    def authenticate(self, request):\n        pass\n"
+        '    def authenticate_header(self, request):\n        return "Bearer"\n'
+    )
+    guard = expected.body[-1]
+    assert isinstance(guard, ast.ClassDef) and isinstance(guard.body[0], ast.FunctionDef)
+    guard.body[0].body = (
+        _body("drf")
+        + ast.parse('return SimpleNamespace(is_authenticated=True, pk=claims["sub"]), claims').body
+    )
+    if ast.dump(ast.parse((root / files[0]).read_text())) != ast.dump(expected):
+        raise ValueError(files[0] + ": unsupported authentication policy")
+    return files[0].replace("/", ".").removesuffix(".py"), set(files)
+
+
 def capture_project(
     root: Path, config: dict[str, str], records: dict[str, str], total: int
 ) -> dict[str, Any]:
@@ -250,6 +283,14 @@ def capture_project(
         from .drf_modules import check_imports, normalize, urls
 
         apps = settings["apps"]
+        auth_module, auth_files = _project_auth(root, apps)
+        if auth_module and settings["secret_environment"] in {
+            "AUTH_JWT_SECRET",
+            "AUTH_JWT_ISSUER",
+            "AUTH_JWT_AUDIENCE",
+        }:
+            raise ValueError("Django secret and JWT credentials need independent environments")
+        consumed.update(auth_files)
         qualified = len(apps) > 1
         trees: dict[str, ast.Module] = {}
         symbols: dict[str, dict[str, str]] = {
@@ -261,7 +302,10 @@ def capture_project(
             },
             "rest_framework.filters": {"OrderingFilter": "OrderingFilter"},
             "rest_framework.pagination": {"LimitOffsetPagination": "LimitOffsetPagination"},
+            "rest_framework.permissions": {"IsAuthenticated": "IsAuthenticated"},
         }
+        if auth_module:
+            symbols[auth_module] = {"JWTAuthentication": "JWTAuthentication"}
         for app in apps:
             for role in ("models", "serializers", "views"):
                 module = app + "." + role
@@ -414,8 +458,24 @@ def capture_project(
                 "ordering_fields",
                 "ordering",
                 "pagination_class",
+                "authentication_classes",
+                "permission_classes",
             } or not isinstance(attrs.get("serializer_class"), ast.Name):
                 raise ValueError("viewset overrides require capture")
+            if auth_module:
+                authentication = attrs.get("authentication_classes")
+                permission = attrs.get("permission_classes")
+                if (
+                    authentication is None
+                    or permission is None
+                    or ast.unparse(authentication) != "[JWTAuthentication]"
+                    or ast.unparse(permission) != "[IsAuthenticated]"
+                ):
+                    raise ValueError(
+                        "every ViewSet must select the captured authentication and permission"
+                    )
+            elif {"authentication_classes", "permission_classes"} & attrs.keys():
+                raise ValueError("viewset authentication requires a captured policy")
             serializer_node = attrs["serializer_class"]
             assert isinstance(serializer_node, ast.Name)
             serializer_name = serializer_node.id
@@ -430,6 +490,7 @@ def capture_project(
                     "serializer": contract,
                     "query": query,
                     "read_only": ast.unparse(views[view_name].bases[0]) == "ReadOnlyModelViewSet",
+                    **({"authentication": "jwt-hs256-roles"} if auth_module else {}),
                 }
             )
         if (
@@ -482,6 +543,7 @@ def capture_project(
                 "hosts": settings["hosts"],
                 "views": contracts,
                 "router_prefix": "/",
+                **({"authentication": "jwt-hs256-roles"} if auth_module else {}),
             },
             source_modules=sorted(consumed),
             generation_ready=True,

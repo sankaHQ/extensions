@@ -1177,6 +1177,27 @@ The executable contract is in `tests/test_golang_drf_project.py`. Executable
 annotations, writable identity overrides, nested uniqueness validators, and
 optional aggregate fields are blocked rather than silently changed.
 
+### Signed project authentication
+
+The conventional project profile accepts the same statically matched DRF
+`JWTAuthentication(BaseAuthentication)` recipe used by the native identity profile
+when it lives in one installed app's `auth.py`. Every captured ViewSet must declare
+`authentication_classes = [JWTAuthentication]` and
+`permission_classes = [IsAuthenticated]`. The verifier reads `AUTH_JWT_SECRET`,
+`AUTH_JWT_ISSUER`, and `AUTH_JWT_AUDIENCE` at runtime; captured contracts and
+generated defaults contain no credential values. An environment-backed Django
+`SECRET_KEY` must use a different variable. Verified reader tokens can read;
+writer tokens can read and write. Missing or invalid tokens return 401 with the
+Bearer challenge, reader writes return 403, and invalid runtime credentials fail
+closed with 503. Authentication precedes a protected ViewSet's method denial.
+Duplicate Authorization headers are rejected.
+
+Isolated source-to-Go replay supplies synthetic tokens, exercises malformed claims
+and denied writes, and compares responses, rows, and identity sequences after each
+request across Fiber, chi, mux, and Gin. Mixed public/protected ViewSets, session
+authentication, custom permission classes, other JWT policies, and identity-based
+querysets remain blockers. Anonymous projects retain their prior behavior.
+
 For SQLite sources, generated writes use transactional identity counters because SQLite rolls back
 AUTOINCREMENT allocation with failed writes. IDs are allocated by the generated
 handlers; direct SQL writers must not invent their own allocation. PostgreSQL sources
