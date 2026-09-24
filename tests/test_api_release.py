@@ -74,7 +74,7 @@ def test_publication_requires_landed_tag_and_both_consumer_jobs() -> None:
         for step in jobs["qualify"]["steps"]
         if step.get("name", "").startswith("Verify public CLI")
     )
-    assert "0.3.0" in str(cli_step["env"])
+    assert cli_step["env"]["SANKA_API_RELEASE_CLI_VERSION"] == "0.3.0"
     assert jobs["publish"]["permissions"] == {"contents": "write"}
 
 

@@ -15,9 +15,8 @@ It does not publish React Native, Compose, Jev, or a replacement SDK.
 
 The `api-release.yml` pull-request jobs build six wheels, check the two
 manifests and scoped catalog, and exercise the pinned `sanka-examples` revision
-`e4b9990ccc21ec3d1e775b0955f021f2083fc524`. They use published CLI
-0.2.12 so this change can be reviewed before CLI 0.3.0 is released. The Go
-job also runs the packaged DRF, Flask and FastAPI fixtures against PostgreSQL
+`e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.0.
+The Go job also runs the packaged DRF, Flask and FastAPI fixtures against PostgreSQL
 across Fiber, chi, mux and Gin. Local qualification covers captured source
 tests and an isolated cross-app row transfer; it is not an application cutover.
 
@@ -32,7 +31,7 @@ Review its wheel digest before committing. CI only validates checked-in bytes.
 
 ## Publication gate
 
-Wait until Sanka CLI 0.3.0 is published. After this change lands, tag its
+After this change lands, tag its
 reviewed merge commit `api-converters-v0.1.0a3` and dispatch
 `api-release.yml` on that tag. The dispatch job requires the tag to be on
 `main` and installs published CLI 0.3.0 for both pinned example qualifications

@@ -71,7 +71,7 @@ def installer(examples: Path, release: Path, revision: str | None, tag: str = TA
                 "install",
                 "--python",
                 str(self.root / "cli/bin/python"),
-                "sanka-cli==" + os.environ.get("SANKA_API_RELEASE_CLI_VERSION", "0.2.12"),
+                "sanka-cli==" + os.environ.get("SANKA_API_RELEASE_CLI_VERSION", "0.3.0"),
             )
             self.report["cli_dependencies"] = self.run(
                 "uv", "pip", "freeze", "--python", str(self.root / "cli/bin/python")

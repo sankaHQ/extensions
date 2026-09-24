@@ -90,7 +90,7 @@ jobs:
           persist-credentials: false
       - name: Verify public CLI lifecycle, compilation and actual HTTP parity
         env:
-          SANKA_API_RELEASE_CLI_VERSION: ${{ github.event_name == 'workflow_dispatch' && '0.3.0' || '0.2.12' }}
+          SANKA_API_RELEASE_CLI_VERSION: "0.3.0"
         run: >-
           uv run --no-project --python 3.12 python scripts/qualify_api_release.py
           --examples release/examples --release release/api-converters
