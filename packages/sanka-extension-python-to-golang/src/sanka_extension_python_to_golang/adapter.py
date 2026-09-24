@@ -68,7 +68,9 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 report["qualification"] = {
                     "candidate_executed": True,
                     "source_compared": "source" in report,
-                    "original_tests_executed": False,
+                    "original_tests_executed": bool(
+                        report.get("original_tests", {}).get("tests_run")
+                    ),
                     "cutover_qualified": False,
                 }
                 destination = _safe(root, artifacts / f"{request.command}.json")
@@ -77,7 +79,7 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                     return failure_response(
                         request,
                         code="SANKA_EXTENSION_PARITY_FAILED",
-                        message=f"Captured endpoint checks failed; inspect {request.command}.json",
+                        message=f"Verification checks failed; inspect {request.command}.json",
                         details={"report": str(destination)},
                     )
                 return success_response(
@@ -85,7 +87,10 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                     data=report,
                     artifacts=[str(destination)],
                     limitations=[
-                        "Only captured endpoint scenarios were exercised; "
+                        "Only captured endpoint scenarios and selected original source tests "
+                        "were exercised; not cutover readiness."
+                        if report.get("original_tests")
+                        else "Only captured endpoint scenarios were exercised; "
                         "original source tests were not run; not cutover readiness."
                     ],
                 )

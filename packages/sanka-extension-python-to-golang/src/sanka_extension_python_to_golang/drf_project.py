@@ -856,6 +856,7 @@ def _models(
                     ordering = _literal(meta["ordering"])
                     if ordering not in (["id"], ("id",)):
                         raise ValueError("only primary-key ordering is qualified")
+                    ordering = ["id"]
                 if "db_table" in meta:
                     table = identifier(_literal(meta["db_table"]))
                 if "app_label" in meta and _literal(meta["app_label"]) != app:

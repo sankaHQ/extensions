@@ -7,6 +7,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -202,6 +204,17 @@ def replay_project(
         raise ValueError("requires explicit resettable SANKA_GO_TARGET_TEST_DATABASE_URL fixture")
     _ = url.port
     postgres = captured["drf_project"]["database"]["engine"] == "postgresql"
+    original_tests_opt_in = os.environ.get("SANKA_GO_RUN_ORIGINAL_TESTS", "")
+    if original_tests_opt_in not in {"", "1"}:
+        raise ValueError("SANKA_GO_RUN_ORIGINAL_TESTS must be 1 when set")
+    if command == "verify" and original_tests_opt_in == "1":
+        if postgres:
+            raise ValueError("original source tests currently require a SQLite source fixture")
+        tests = captured["source_inventory"]["module_roles"]["tests"]
+        if not tests or any(
+            len(Path(name).parts) != 2 or not name.endswith("/tests.py") for name in tests
+        ):
+            raise ValueError("original source tests require app/tests.py modules")
     source_dsn = os.environ.get("SANKA_GO_SOURCE_TEST_DATABASE_URL", "")
     if postgres and command == "verify":
         parsed = urlsplit(source_dsn)
@@ -235,6 +248,7 @@ def replay_project(
     go, toolchain = ensure_go(root)
     # Preserve independent-case reset semantics; setup requests remain observed.
     source_groups, target_groups = [], []
+    original_tests = None
     with tempfile.TemporaryDirectory(prefix="sanka-drf-go-") as directory:
         workspace = Path(directory)
         candidate, source = workspace / "candidate", workspace / "source"
@@ -282,6 +296,10 @@ def replay_project(
                 },
             )
             source_groups = _observations(workspace / "source_observed.json")
+            if original_tests_opt_in == "1":
+                original_tests = _run_original_tests(
+                    root, source, workspace, captured, source_python, auth_env
+                )
     failures: list[dict[str, Any]] = []
     if len(target_groups) != len(groups) or (source_python and len(source_groups) != len(groups)):
         raise ValueError("replay omitted scenario groups")
@@ -311,7 +329,71 @@ def replay_project(
     }
     if source_python:
         report["source"] = source_groups
+    if original_tests is not None:
+        report["original_tests"] = original_tests
+        report["ok"] = report["ok"] and original_tests["ok"]
     return report
+
+
+def _run_original_tests(
+    root: Path,
+    source: Path,
+    workspace: Path,
+    captured: dict[str, Any],
+    source_python: str,
+    auth_env: dict[str, str],
+) -> dict[str, Any]:
+    tests = captured["source_inventory"]["module_roles"]["tests"]
+    modules = [name.replace("/", ".").removesuffix(".py") for name in tests]
+    for name in tests:
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((root / name).read_bytes())
+    project = captured["drf_project"]
+    environment = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": str(workspace),
+        "TMPDIR": str(workspace),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        project["database"]["environment"]: str(workspace / "source-tests.sqlite3"),
+    } | auth_env
+    if project.get("secret_environment"):
+        environment[project["secret_environment"]] = "isolated-source-tests-only"
+    runner = (
+        "import os, sys; "
+        "sys.path.insert(0, sys.argv[1]); "
+        "os.environ['DJANGO_SETTINGS_MODULE'] = sys.argv[2]; "
+        "import django; django.setup(); "
+        "from django.core.management import call_command; "
+        "call_command('test', *sys.argv[3:], verbosity=1, interactive=False)"
+    )
+    try:
+        process = subprocess.run(
+            [source_python, "-I", "-c", runner, str(source), project["settings_module"], *modules],
+            cwd=source,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        return {"runner": "django", "modules": modules, "tests_run": 0, "ok": False}
+    count = re.search(r"Ran (\d+) tests? in ", process.stdout + process.stderr)
+    tests_run = int(count.group(1)) if count else 0
+    result = {
+        "runner": "django",
+        "modules": modules,
+        "tests_run": tests_run,
+        "ok": process.returncode == 0 and tests_run > 0,
+    }
+    if not result["ok"]:
+        result["failures"] = re.findall(
+            r"^(?:FAIL|ERROR): [A-Za-z_]\w* \(([\w.]+)\)$",
+            process.stdout + process.stderr,
+            re.MULTILINE,
+        )
+    return result
 
 
 def _observations(path: Path) -> list[Any]:

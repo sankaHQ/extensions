@@ -3,6 +3,7 @@
 """Conventional Django projects must retain serializer and transaction semantics."""
 
 import ast
+import dataclasses
 import json
 import os
 import shutil
@@ -29,6 +30,21 @@ def gadget_project(tmp_path):
             "database_layer": "pgx",
         }
     )
+
+
+def test_gadget_public_scan_serializes_model_ordering(tmp_path):
+    from sanka_extension_python_to_golang.adapter import handle
+    from test_python_to_golang import request
+
+    from sanka_extensions.code import encode_response
+
+    config = gadget_project(tmp_path)
+    scanned = handle(
+        dataclasses.replace(request(tmp_path, "drf", "fiber"), command="scan", configuration=config)
+    )
+    assert scanned.outcome == "success", scanned.error
+    encode_response(scanned)
+    assert scanned.data["models"][0]["ordering"] == ["id"]
 
 
 def authenticated_project(tmp_path):
@@ -1162,6 +1178,57 @@ def test_general_project_native_replay(tmp_path, monkeypatch, target, factory):
             assert report["candidate"] == report["source"]
         finally:
             admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
+
+
+@pytest.mark.parametrize("failing_test", [False, True])
+def test_gadget_original_tests_are_opt_in_qualification(tmp_path, monkeypatch, failing_test):
+    dsn = os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN")
+    if os.getenv("SANKA_GO_TESTS") != "1" or not dsn:
+        pytest.skip("requires native Go and isolated PostgreSQL fixture")
+    import uuid
+
+    import psycopg
+    from psycopg import sql
+    from test_golang_schema import schema_dsn
+
+    config = gadget_project(tmp_path)
+    if failing_test:
+        tests = tmp_path / "inventory/tests.py"
+        content = tests.read_text()
+        assert "self.assertEqual(response.status_code, 200)" in content
+        tests.write_text(
+            content.replace(
+                "self.assertEqual(response.status_code, 200)",
+                "self.assertEqual(response.status_code, 418)",
+            )
+        )
+    captured = capture(tmp_path, config)
+    assert captured["gaps"] == []
+    output = tmp_path / ".sanka/candidate"
+    for name, contents in render(captured).items():
+        path = output / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents)
+    schema = "source_tests_" + uuid.uuid4().hex
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+        try:
+            monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", schema_dsn(dsn, schema))
+            monkeypatch.setenv("SANKA_GO_RUN_ORIGINAL_TESTS", "1")
+            report = replay_project(tmp_path, output, captured, "verify")
+            assert report["source"] == report["candidate"]
+            assert report["ok"] is not failing_test
+            expected_tests = {
+                "runner": "django",
+                "modules": ["inventory.tests"],
+                "tests_run": 3,
+                "ok": not failing_test,
+            }
+            if failing_test:
+                expected_tests["failures"] = ["inventory.tests.GadgetApiTests.test_list"]
+            assert report.get("original_tests") == expected_tests
+        finally:
+            admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 
 
 def project(tmp_path):
