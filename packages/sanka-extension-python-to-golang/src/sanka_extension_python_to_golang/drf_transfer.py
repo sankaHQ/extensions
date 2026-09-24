@@ -127,6 +127,31 @@ def schema_check(source, target):
         sequence(target, table)
 
 
+def excluded_tables(source):
+    captured = {model["table"] for model in MODELS}
+    tables = {row[0] for row in source.execute(
+        "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname=current_schema() AND c.relkind IN ('r','p')"
+    )}
+    schema = source.execute("SELECT current_schema()").fetchone()[0]
+    for child_schema, child, parent_schema, parent in source.execute(
+        "SELECT cn.nspname, c.relname, pn.nspname, p.relname "
+        "FROM pg_constraint fk "
+        "JOIN pg_class c ON c.oid=fk.conrelid "
+        "JOIN pg_namespace cn ON cn.oid=c.relnamespace "
+        "JOIN pg_class p ON p.oid=fk.confrelid "
+        "JOIN pg_namespace pn ON pn.oid=p.relnamespace "
+        "WHERE fk.contype='f' AND (cn.nspname=current_schema() "
+        "OR pn.nspname=current_schema())"
+    ):
+        if (child_schema == schema and child in captured) != (
+            parent_schema == schema and parent in captured
+        ):
+            fail("external foreign key connects captured and excluded tables: "
+                 + child + " -> " + parent)
+    return sorted(tables - captured)
+
+
 def rows(connection, model):
     table = model["table"]
     columns = [f["name"] for f in model["fields"]]
@@ -152,7 +177,7 @@ def fingerprint(connection, model):
     return count, digest.hexdigest()
 
 
-def transfer(execute):
+def transfer(mode, acknowledge_excluded=False):
     source_url = os.environ.get("SANKA_GO_SOURCE_DATABASE_URL")
     target_url = os.environ.get("DATABASE_URL")
     if not source_url or not target_url:
@@ -162,26 +187,44 @@ def transfer(execute):
             fail("source and target identify the same database schema")
         for model in MODELS:
             table = model["table"]
-            if execute:
+            if mode != "dry-run":
                 source.execute(sql.SQL("LOCK TABLE {} IN SHARE MODE").format(sql.Identifier(table)))
-            target.execute(
-                sql.SQL("LOCK TABLE {} IN ACCESS EXCLUSIVE MODE").format(sql.Identifier(table))
-            )
+                target.execute(
+                    sql.SQL("LOCK TABLE {} IN {} MODE").format(
+                        sql.Identifier(table),
+                        sql.SQL("ACCESS EXCLUSIVE" if mode == "execute" else "SHARE"),
+                    )
+                )
         schema_check(source, target)
+        excluded = excluded_tables(source)
         counts = {}
         for model in MODELS:
             table = model["table"]
-            if target.execute(sql.SQL("SELECT EXISTS(SELECT 1 FROM {})").format(
-                sql.Identifier(table)
-            )).fetchone()[0]:
-                fail("target is nonempty: " + table)
+            if mode != "verify":
+                if target.execute(sql.SQL("SELECT EXISTS(SELECT 1 FROM {})").format(
+                    sql.Identifier(table)
+                )).fetchone()[0]:
+                    fail("target is nonempty: " + table)
             counts[table] = source.execute(sql.SQL("SELECT count(*) FROM {}").format(
                 sql.Identifier(table)
             )).fetchone()[0]
-        if not execute:
+        if mode == "verify":
+            for model in MODELS:
+                table = model["table"]
+                if fingerprint(source, model) != fingerprint(target, model):
+                    fail(table + " row snapshot differs after copy")
+                if sequence(source, table)[1] != sequence(target, table)[1]:
+                    fail(table + " sequence differs after copy")
             target.rollback()
             source.rollback()
-            return {"mode": "dry-run", "rows": counts}
+            return {"mode": "verified", "rows": counts, "excluded_tables": excluded}
+        if mode == "dry-run":
+            target.rollback()
+            source.rollback()
+            return {"mode": "dry-run", "rows": counts, "excluded_tables": excluded}
+        if excluded and not acknowledge_excluded:
+            fail("source has excluded tables; review the dry run and use "
+                 "--acknowledge-excluded-tables")
         for model in MODELS:
             table = model["table"]
             columns = [f["name"] for f in model["fields"]]
@@ -201,14 +244,21 @@ def transfer(execute):
                 fail(table + " sequence differs after copy")
         target.commit()
         source.rollback()
-        return {"mode": "executed", "rows": counts}
+        return {"mode": "executed", "rows": counts, "excluded_tables": excluded}
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] not in ([], ["--execute"]):
-        raise SystemExit("usage: transfer_existing.py [--execute]")
+    arguments = sys.argv[1:]
+    allowed = ([], ["--execute"], ["--execute", "--acknowledge-excluded-tables"],
+               ["--verify"])
+    if arguments not in allowed:
+        raise SystemExit("usage: transfer_existing.py "
+                         "[--execute [--acknowledge-excluded-tables] | --verify]")
     try:
-        print(json.dumps(transfer(sys.argv[1:] == ["--execute"]), sort_keys=True))
+        mode = ("verify" if arguments == ["--verify"] else
+                "execute" if arguments else "dry-run")
+        report = transfer(mode, "--acknowledge-excluded-tables" in arguments)
+        print(json.dumps(report, sort_keys=True))
     except psycopg.OperationalError:
         raise SystemExit("transfer refused: database connection failed") from None
     except (ValueError, psycopg.Error) as error:

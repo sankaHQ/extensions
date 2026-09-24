@@ -16,6 +16,19 @@ from sanka_extension_python_to_golang.drf_replay import replay_project, scenario
 from sanka_extension_python_to_golang.render import render
 
 FIXTURE = Path(__file__).parent / "fixtures/drf_project"
+GADGET_FIXTURE = Path(__file__).parent / "fixtures/gadget_project"
+
+
+def gadget_project(tmp_path):
+    shutil.copytree(GADGET_FIXTURE, tmp_path, dirs_exist_ok=True)
+    return configuration(
+        {
+            "source_framework": "drf",
+            "source_file": "crud_config/urls.py",
+            "models_file": "inventory/models.py",
+            "database_layer": "pgx",
+        }
+    )
 
 
 def authenticated_project(tmp_path):
@@ -775,7 +788,7 @@ def test_postgres_conventional_adoption_preserves_rows_and_checks_drift(tmp_path
             with psycopg.connect(target_dsn) as connection:
                 assert connection.execute("SELECT count(*) FROM orders_order").fetchone()[0] == 0
             copied = subprocess.run(
-                [os.sys.executable, str(transfer), "--execute"],
+                [os.sys.executable, str(transfer), "--execute", "--acknowledge-excluded-tables"],
                 env=environment,
                 text=True,
                 capture_output=True,
@@ -886,19 +899,92 @@ def test_copy_existing_from_django_postgres_schema(tmp_path):
                 timeout=60,
             )
             assert same_schema.returncode != 0 and "same database schema" in same_schema.stderr
+            transfer_environment = os.environ | {
+                "SANKA_GO_SOURCE_DATABASE_URL": source_dsn,
+                "DATABASE_URL": target_dsn,
+            }
+            transfer_command = [os.sys.executable, str(generated / "tools/transfer_existing.py")]
+            dry = subprocess.run(
+                transfer_command,
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert dry.returncode == 0, dry.stderr
+            assert "django_migrations" in json.loads(dry.stdout)["excluded_tables"]
+            unacknowledged = subprocess.run(
+                [*transfer_command, "--execute"],
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert unacknowledged.returncode != 0
+            assert "acknowledge-excluded-tables" in unacknowledged.stderr
             copied = subprocess.run(
-                [os.sys.executable, str(generated / "tools/transfer_existing.py"), "--execute"],
-                env=os.environ
-                | {"SANKA_GO_SOURCE_DATABASE_URL": source_dsn, "DATABASE_URL": target_dsn},
+                [*transfer_command, "--execute", "--acknowledge-excluded-tables"],
+                env=transfer_environment,
                 text=True,
                 capture_output=True,
                 timeout=60,
             )
             assert copied.returncode == 0, copied.stderr
+            verified = subprocess.run(
+                [*transfer_command, "--verify"],
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert verified.returncode == 0, verified.stderr
+            assert json.loads(verified.stdout)["mode"] == "verified"
             with psycopg.connect(target_dsn) as connection:
                 assert connection.execute(
                     "SELECT reference,status,memo FROM orders_order"
                 ).fetchall() == [("source", "new", "retained")]
+            with psycopg.connect(source_dsn, autocommit=True) as connection:
+                connection.execute(
+                    "UPDATE orders_order SET memo='drifted' WHERE reference='source'"
+                )
+            divergent = subprocess.run(
+                [*transfer_command, "--verify"],
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert divergent.returncode != 0 and "row snapshot differs" in divergent.stderr
+            with psycopg.connect(source_dsn, autocommit=True) as connection:
+                connection.execute(
+                    "UPDATE orders_order SET memo='retained' WHERE reference='source'"
+                )
+                connection.execute("SELECT setval('orders_order_id_seq', 20, true)")
+            sequence_drift = subprocess.run(
+                [*transfer_command, "--verify"],
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert sequence_drift.returncode != 0 and "sequence differs" in sequence_drift.stderr
+            with psycopg.connect(source_dsn, autocommit=True) as connection:
+                connection.execute("SELECT setval('orders_order_id_seq', 1, true)")
+                connection.execute(
+                    "CREATE TABLE audit_order (id integer PRIMARY KEY, "
+                    "order_id integer REFERENCES orders_order(id))"
+                )
+            excluded_relation = subprocess.run(
+                [*transfer_command, "--verify"],
+                env=transfer_environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            assert excluded_relation.returncode != 0
+            assert "external foreign key" in excluded_relation.stderr
+            with psycopg.connect(source_dsn, autocommit=True) as connection:
+                connection.execute("DROP TABLE audit_order")
             drift_schema = "drf_drift_" + uuid.uuid4().hex
             admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(drift_schema)))
             try:
@@ -1024,6 +1110,7 @@ def test_conventional_schema_history_rejects_data_operation(tmp_path):
         mixed_auth_project,
         scoped_project,
         composed_project,
+        gadget_project,
     ],
 )
 def test_general_project_native_replay(tmp_path, monkeypatch, target, factory):
@@ -1087,6 +1174,107 @@ def project(tmp_path):
             "database_layer": "pgx",
         }
     )
+
+
+def test_conventional_drf_annotated_manage_wrapper(tmp_path):
+    config = project(tmp_path)
+    manage = tmp_path / "manage.py"
+    source = manage.read_text()
+    manage.write_text(
+        "from __future__ import annotations\n"
+        + source.replace(
+            'if __name__ == "__main__":\n',
+            "def main() -> None:\n",
+        )
+        + '\nif __name__ == "__main__":\n    main()\n'
+    )
+    assert capture(tmp_path, config)["gaps"] == []
+    manage.write_text(manage.read_text().replace("def main() -> None:", "def main() -> int:"))
+    assert capture(tmp_path, config)["gaps"]
+
+
+def test_conventional_drf_literal_tuple_fields_and_ordering(tmp_path):
+    config = project(tmp_path)
+    for relative in (
+        "orders/models.py",
+        "orders/serializers.py",
+        "orders/migrations/0001_initial.py",
+    ):
+        path = tmp_path / relative
+        source = path.read_text()
+        source = source.replace('ordering = ["id"]', 'ordering = ("id",)')
+        source = source.replace('"ordering": ["id"]', '"ordering": ("id",)')
+        source = source.replace(
+            'fields = ["id", "sku", "quantity", "price"]',
+            'fields = ("id", "sku", "quantity", "price")',
+        )
+        source = source.replace(
+            'fields = ["id", "reference", "status", "memo", "items"]',
+            'fields = ("id", "reference", "status", "memo", "items")',
+        )
+        source = source.replace('read_only_fields = ["id"]', 'read_only_fields = ("id",)')
+        path.write_text(source)
+    assert capture(tmp_path, config)["gaps"] == []
+
+
+def test_conventional_drf_classvar_migration_declarations(tmp_path):
+    config = project(tmp_path)
+    migration = tmp_path / "orders/migrations/0001_initial.py"
+    migration.write_text(
+        migration.read_text()
+        .replace(
+            "from django.db import migrations, models",
+            "from typing import ClassVar\nfrom django.db import migrations, models",
+        )
+        .replace("dependencies = []", "dependencies: ClassVar[list[tuple[str, str]]] = []")
+        .replace("operations = [", "operations: ClassVar[list[object]] = [")
+    )
+    assert capture(tmp_path, config)["gaps"] == []
+    migration.write_text(
+        migration.read_text().replace("ClassVar[list[object]]", "ClassVar[object]")
+    )
+    assert capture(tmp_path, config)["gaps"]
+
+
+def test_conventional_drf_typed_migration_dependencies(tmp_path):
+    config = project(tmp_path)
+    migration = tmp_path / "orders/migrations/0001_initial.py"
+    migration.write_text(
+        migration.read_text().replace(
+            "dependencies = []", "dependencies: list[tuple[str, str]] = []"
+        )
+    )
+    assert capture(tmp_path, config)["gaps"] == []
+
+
+def test_conventional_drf_docstring_only_package_init(tmp_path):
+    config = project(tmp_path)
+    (tmp_path / "shop_config/__init__.py").write_text('"""Project package."""\n')
+    assert capture(tmp_path, config)["gaps"] == []
+
+
+@pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
+def test_gadget_project_static_capture_and_render(tmp_path, target):
+    config = gadget_project(tmp_path) | {"target_framework": target}
+    captured = capture(tmp_path, config)
+    assert captured["gaps"] == []
+    assert captured == capture(tmp_path, config)
+    assert [(route["path"], route["method"]) for route in captured["routes"]] == [
+        ("/api/gadgets/", "GET"),
+        ("/api/gadgets/", "POST"),
+        ("/api/gadgets/:id/", "GET"),
+        ("/api/gadgets/:id/", "PUT"),
+        ("/api/gadgets/:id/", "PATCH"),
+        ("/api/gadgets/:id/", "DELETE"),
+    ]
+    assert "drf.go" in render(captured)
+
+
+def test_gadget_project_rejects_changed_primary_key_metadata(tmp_path):
+    config = gadget_project(tmp_path)
+    migration = tmp_path / "inventory/migrations/0001_initial.py"
+    migration.write_text(migration.read_text().replace("auto_created=True", "auto_created=False"))
+    assert capture(tmp_path, config)["gaps"]
 
 
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
