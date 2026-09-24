@@ -1256,6 +1256,65 @@ def test_gadget_original_tests_are_opt_in_qualification(
             admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 
 
+@pytest.mark.parametrize("failing_test", [False, True])
+def test_postgres_original_tests_use_disposable_database(tmp_path, monkeypatch, failing_test):
+    dsn = os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN")
+    if os.getenv("SANKA_GO_TESTS") != "1" or not dsn:
+        pytest.skip("requires native Go and isolated PostgreSQL fixture")
+    import uuid
+
+    import psycopg
+    from psycopg import sql
+    from test_golang_schema import schema_dsn
+
+    config = postgres_project(tmp_path)
+    scenario = tmp_path / "sanka-verify.json"
+    document = json.loads(scenario.read_text())
+    document.pop("db_env", None)
+    scenario.write_text(json.dumps(document))
+    tests = tmp_path / "orders/tests.py"
+    content = tests.read_text().replace(
+        "from orders.models import Order, OrderItem",
+        "from orders.models import Order\nfrom shipping.models import OrderItem",
+    )
+    if failing_test:
+        content = content.replace(
+            "self.assertEqual(response.status_code, 201)",
+            "self.assertEqual(response.status_code, 418)",
+        )
+    tests.write_text(content)
+    captured = capture(tmp_path, config)
+    assert captured["gaps"] == []
+    output = tmp_path / ".sanka/candidate"
+    for name, contents in render(captured).items():
+        path = output / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents)
+    schema = "original_tests_" + uuid.uuid4().hex
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        before = admin.execute(
+            "SELECT datname FROM pg_database WHERE datname LIKE 'sanka_verify_%'"
+        ).fetchall()
+        admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+        try:
+            monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", schema_dsn(dsn, schema))
+            monkeypatch.setenv("SANKA_GO_SOURCE_TEST_DATABASE_URL", dsn)
+            monkeypatch.setenv("SANKA_GO_RUN_ORIGINAL_TESTS", "1")
+            report = replay_project(tmp_path, output, captured, "verify")
+            assert report["source"] == report["candidate"]
+            assert report["ok"] is not failing_test
+            assert report["original_tests"]["runner"] == "django"
+            assert report["original_tests"]["modules"] == ["orders.tests"]
+            assert report["original_tests"]["tests_run"] == 3
+            assert report["original_tests"]["ok"] is not failing_test
+            after = admin.execute(
+                "SELECT datname FROM pg_database WHERE datname LIKE 'sanka_verify_%'"
+            ).fetchall()
+            assert after == before
+        finally:
+            admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
+
+
 def project(tmp_path):
     shutil.copytree(FIXTURE, tmp_path, dirs_exist_ok=True)
     return configuration(

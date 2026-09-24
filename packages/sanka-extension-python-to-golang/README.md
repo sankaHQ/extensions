@@ -1232,15 +1232,19 @@ and logical identity state with an explicitly resettable PostgreSQL fixture.
 Hosted-style `sanka-verify.json` cases with `setup` retain independent resets;
 setup requests are observed too. Ordinary shared scenarios run in order. Original
 source tests are fingerprinted, but are not translated or run by default.
-For a trusted conventional DRF project with a SQLite source and `app/tests.py`
-or `app/tests/test_*.py` modules, set `SANKA_GO_RUN_ORIGINAL_TESTS=1` and forward it with
+For a trusted conventional DRF project with `app/tests.py` or
+`app/tests/test_*.py` modules, set `SANKA_GO_RUN_ORIGINAL_TESTS=1` and forward it with
 `sanka verify --extension-env SANKA_GO_RUN_ORIGINAL_TESTS`. Verify runs those
 modules in a disposable copy after HTTP replay. The report records the module
 names, test count and result; a failing or undiscovered test fails Verify.
+SQLite source tests use a disposable SQLite database. PostgreSQL source tests
+use a uniquely named test database on the supplied fixture server; the fixture
+user must be able to create and remove databases. Verify removes that test
+database even when a source assertion fails, and fails closed if removal fails.
 For Flask and FastAPI projects without a database layer, the same opt-in runs
 captured `test_*.py` files with pytest in the disposable source copy.
-This is opt-in code execution, not a security sandbox. PostgreSQL source tests
-and database-backed Flask/FastAPI source tests remain unqualified.
+This is opt-in code execution, not a security sandbox. Database-backed
+Flask/FastAPI source tests remain unqualified.
 Forward the fixture DSN and source interpreter through the CLI using
 `--extension-env SANKA_GO_TARGET_TEST_DATABASE_URL` and
 `--extension-env SANKA_GO_SOURCE_PYTHON` for test/verify.
