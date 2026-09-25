@@ -11,22 +11,21 @@ Extensions contribute capabilities such as:
 
 - **Framework extensions** detect and inspect frameworks such as Django or Flask
   and provide typed conversion lifecycles.
-- **Database extensions** inspect or write databases such as PostgreSQL, SQLite, and
-  ClickHouse.
+- **Database extensions** can inspect or write databases.
 - **Language and library extensions** contribute bounded analysis or
   transformation capabilities for one ecosystem.
-- **File extensions** read or write formats such as CSV and Markdown inside a
-  reviewed root.
+- **File extensions** can read or write files inside a reviewed root.
 - **Business extensions** will provide reusable CRM, billing and other business
   configurations. Their declarative SDK contract is `sanka_extensions.flow`;
   executable packages and runtime dispatch remain future work.
 
 The Sanka Extension SDK provides one `sanka_extensions` namespace. Use
-`sanka_extensions.data` for data readers, writers, and registration;
+`sanka_extensions.app` for data readers, writers, and registration;
 use `sanka_extensions.code` for typed code-migration requests and responses.
 Use `sanka_extensions.flow` for the [declarative Flow contract](flow.md).
-Both interfaces are implemented, including executable PostgreSQL, SQLite, CSV,
-Markdown, ClickHouse, DRF-to-FastAPI, and DRF-to-Flask extensions. See the
+The application data interface is available in the SDK; no application data
+extension is currently offered in the marketplace. Code extensions include
+DRF-to-FastAPI and DRF-to-Flask. See the
 [generated catalog](catalog.md) and [development guide](extension-development.md).
 New capabilities require reviewed, typed contracts and boundary validation.
 Published identifiers are documented in the [compatibility guide](naming-compatibility.md).

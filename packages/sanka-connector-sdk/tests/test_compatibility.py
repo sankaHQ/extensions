@@ -4,7 +4,7 @@
 import pytest
 
 import sanka_connector as legacy
-import sanka_extensions.data as canonical
+import sanka_extensions.app as canonical
 
 
 def test_old_registration_and_errors_work_with_canonical_interfaces() -> None:

@@ -2,8 +2,8 @@
 
 Extensions for the open source [Sanka CLI](https://github.com/sankaHQ/sanka).
 Install one and `sanka scan`, `plan`, `apply`, `test` and `verify` gain a
-migration path (for example Django REST Framework to FastAPI) or a data endpoint
-type (for example PostgreSQL). Apache-2.0, Python 3.12+.
+migration path (for example Django REST Framework to FastAPI). Apache-2.0,
+Python 3.12+.
 
 Extensions add capabilities to Sanka (data migrations), Sanka Flow (workflow
 migrations) and Sanka Code (code migrations); data endpoints are the configured
@@ -19,11 +19,6 @@ sources and destinations those capabilities read from and write to.
 | --- | --- |
 | `sanka/drf-to-fastapi` | Converts a Django REST Framework app to native async FastAPI ([guide](https://sanka.com/docs/developers/migrate/django-to-fastapi/)) |
 | `sanka/drf-to-flask` | Converts a Django REST Framework app to Flask ([guide](https://sanka.com/docs/developers/migrate/django-to-flask/)) |
-| `sanka/postgres` | Reads and writes PostgreSQL records for data migrations |
-| `sanka/sqlite` | Reads and writes SQLite records |
-| `sanka/csv` | Reads CSV files as a migration source |
-| `sanka/markdown` | Reads Markdown documents as a migration source |
-| `sanka/clickhouse` | Writes to ClickHouse as a migration destination |
 
 The generated [catalog](docs/catalog.md) is the authoritative list, with roles
 and versions checked against `marketplace.json` and each manifest. Experimental
@@ -49,11 +44,9 @@ compatibility range, then installs the wheel into an isolated environment with
 fallback, and a missing or mismatched hash stops execution instead of
 substituting another version.
 
-Installing a data extension makes a capability available; it does not connect
-to anything. Sources and destinations are configured separately as data
-endpoints with their own credentials. Hosted SaaS systems such as HubSpot,
-Salesforce and SendGrid are capabilities of the hosted Sanka API, not local
-extensions.
+The official marketplace currently publishes code migration extensions. Hosted
+SaaS systems such as HubSpot, Salesforce and SendGrid are capabilities of the
+hosted Sanka API, not local extensions.
 
 Other marketplaces need explicit `--trust`; adding one pins an immutable
 snapshot, and `--revision FULL_COMMIT_SHA` pins a specific catalog:
@@ -64,22 +57,23 @@ sanka extension marketplace add PATH_OR_GIT_URL --name third-party --trust
 
 ## Build your own
 
-The Sanka Extension SDK (`sanka_extensions`) is published as release wheels.
-Install the latest `sdk-v*` release into a Python 3.12 virtual environment, not
-into the CLI's tool environment:
+The `sanka_extensions.app` interface is in the a8 SDK candidate in this
+checkout. Build it into a Python 3.12 virtual environment while its release is
+pending:
 
 ```bash
+uv build --wheel --package sanka-extension-sdk --out-dir dist/sdk
 uv venv --python 3.12 .venv
 source .venv/bin/activate
 uv pip install \
   https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a7/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
-  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a7/sanka_extension_sdk-0.1.0a7-py3-none-any.whl
+  dist/sdk/sanka_extension_sdk-0.1.0a8-py3-none-any.whl
 ```
 
 | Interface | Use it for |
 | --- | --- |
 | `sanka_extensions.code` | Code migrations: typed requests and responses for `scan`, `plan`, `apply`, `test` and `verify` |
-| `sanka_extensions.data` | Data migrations: readers, writers, records, capabilities and registration |
+| `sanka_extensions.app` | Application data access: readers, writers, records, capabilities and registration |
 | `sanka_extensions.flow` | Workflow migrations: a declarative definition contract only; no runnable Flow packages are published yet |
 
 Start with the [SDK guide](docs/sdk.md) and

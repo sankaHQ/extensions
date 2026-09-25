@@ -13,13 +13,7 @@ Read or write records and content in configured data endpoints.
 An endpoint can be a database, a file or a directory of files.
 Readers supply migration sources; writers supply migration destinations.
 
-| Extension | Data endpoint type | Reads | Writes |
-| --- | --- | --- | --- |
-| `sanka/clickhouse` | clickhouse | — | Yes |
-| `sanka/csv` | csv | Yes | — |
-| `sanka/markdown` | markdown | Yes | — |
-| `sanka/postgres` | postgres | Yes | Yes |
-| `sanka/sqlite` | sqlite | Yes | Yes |
+No application data extensions are currently offered in this marketplace.
 
 ## Workflow
 

@@ -44,7 +44,7 @@ def check(root: Path) -> list[str]:
                     or node.module.startswith("sanka_extensions.systems.")
                 ):
                     errors.append(
-                        f"{source.relative_to(root)}:{node.lineno}: use sanka_extensions.data"
+                        f"{source.relative_to(root)}:{node.lineno}: use sanka_extensions.app"
                     )
                 for alias in node.names:
                     if alias.name in LEGACY_TYPES:
