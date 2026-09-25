@@ -34,7 +34,7 @@ from .values import (
 
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
-VERSION = "0.1.0a5"
+VERSION = "0.1.0a6"
 MAX_SOURCE_BYTES = 256 * 1024 * 1024
 MAX_SOURCE_FILES = 20_000
 GAP_PATH_SAMPLES = 8
@@ -1704,15 +1704,26 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             if model["module"] in lowered_schema_files
         )
         lowered_models = {model["name"] for model in models}
+        migration_gap = False
+        if persistence["migrations"] and not persistence_gaps:
+            try:
+                from .persistence import lower_linear_migrations
+
+                persistence["lowered_migrations"] = lower_linear_migrations(
+                    persistence, models, config["schema_mode"]
+                )
+            except (ValueError, TypeError, SyntaxError) as error:
+                gaps.append("persistence: " + str(error))
+                migration_gap = True
         requires_lowering = bool(
-            persistence["migrations"]
+            migration_gap
             or remaining_repositories
             or {model["name"] for model in persistence["pydantic_models"]} - lowered_schemas
             or {model["name"] for model in persistence["sqlalchemy_models"]} - lowered_models
         )
         if requires_lowering:
             gaps.append("persistence: captured contracts require Go lowering")
-        elif not persistence_gaps:
+        elif not persistence_gaps and not persistence["migrations"]:
             persistence = None
     transactions: dict[str, dict[str, Any]] = {}
     for candidate in tree.body:

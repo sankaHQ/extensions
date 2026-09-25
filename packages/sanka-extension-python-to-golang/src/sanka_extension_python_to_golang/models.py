@@ -291,6 +291,7 @@ def _sqlalchemy(model: ast.ClassDef) -> dict[str, Any]:
         raise ValueError("only direct SQLAlchemy Base subclasses are qualified")
     table = None
     fields = []
+    relationships = []
     metadata: dict[str, Any] = {}
     for node in model.body:
         if (
@@ -316,6 +317,42 @@ def _sqlalchemy(model: ast.ClassDef) -> dict[str, Any]:
                 "constraints": [item for item in entries if item.get("unique")],
                 "indexes": [item for item in entries if not item.get("unique")],
             }
+            continue
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and isinstance(node.annotation, ast.Subscript)
+            and isinstance(node.annotation.value, ast.Name)
+            and node.annotation.value.id == "Mapped"
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "relationship"
+        ):
+            if node.value.args:
+                raise ValueError("relationship target must come from Mapped annotation")
+            options = _keywords(node.value, {"back_populates"})
+            if set(options) != {"back_populates"} or type(options["back_populates"]) is not str:
+                raise ValueError("relationships require literal back_populates")
+            assert isinstance(node.annotation, ast.Subscript)
+            target = node.annotation.slice
+            many = isinstance(target, ast.Subscript) and ast.unparse(target.value) == "list"
+            if many:
+                assert isinstance(target, ast.Subscript)
+                target = target.slice
+            if isinstance(target, ast.Constant) and type(target.value) is str:
+                target_name = target.value
+            elif isinstance(target, ast.Name):
+                target_name = target.id
+            else:
+                raise ValueError("only direct one-to-many relationships are qualified")
+            relationships.append(
+                {
+                    "name": node.target.id,
+                    "target": target_name,
+                    "many": many,
+                    "back_populates": options["back_populates"],
+                }
+            )
             continue
         if not (
             isinstance(node, ast.AnnAssign)
@@ -447,7 +484,13 @@ def _sqlalchemy(model: ast.ClassDef) -> dict[str, Any]:
         fields.append(field)
     if table is None:
         raise ValueError("SQLAlchemy models require __tablename__")
-    return {"name": model.name, "table": table, "fields": fields, **metadata}
+    return {
+        "name": model.name,
+        "table": table,
+        "fields": fields,
+        **metadata,
+        **({"relationships": relationships} if relationships else {}),
+    }
 
 
 def capture_models(path: Path, framework: str) -> list[dict[str, Any]]:
@@ -457,7 +500,7 @@ def capture_models(path: Path, framework: str) -> list[dict[str, Any]]:
         {"django.db": {"models"}}
         if framework == "drf"
         else {
-            "sqlalchemy.orm": {"DeclarativeBase", "Mapped", "mapped_column"},
+            "sqlalchemy.orm": {"DeclarativeBase", "Mapped", "mapped_column", "relationship"},
             "sqlalchemy": {
                 *(set(SQLA_TYPES) - {"JSONB"}),
                 "ForeignKey",
@@ -499,7 +542,7 @@ def capture_models(path: Path, framework: str) -> list[dict[str, Any]]:
                     for item in ast.walk(node)
                     if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Load)
                 }
-                if referenced - names - {"int", "str", "bool", "dict"}:
+                if referenced - names - {"int", "str", "bool", "dict", "list"}:
                     raise ValueError("model references an unresolved symbol")
                 if not re.fullmatch(r"[A-Z][A-Za-z0-9]*", node.name) or node.name in {
                     "NewApp",
@@ -567,6 +610,38 @@ def capture_models(path: Path, framework: str) -> list[dict[str, Any]]:
             if primary["name"] != reference["column"] or primary["sql_type"] != field["sql_type"]:
                 raise ValueError("foreign key must match the captured primary-key type")
             dependencies[model["table"]].add(parent["table"])
+    for model in models:
+        for relation in model.get("relationships", []):
+            target = by_name.get(relation["target"])
+            if (
+                target is None
+                or target is model
+                or relation["name"] in {field["name"] for field in model["fields"]}
+            ):
+                raise ValueError("relationship target must be another captured model")
+            reverse = next(
+                (
+                    item
+                    for item in target.get("relationships", [])
+                    if item["name"] == relation["back_populates"]
+                ),
+                None,
+            )
+            if (
+                reverse is None
+                or reverse["target"] != model["name"]
+                or reverse["back_populates"] != relation["name"]
+                or reverse["many"] == relation["many"]
+            ):
+                raise ValueError("relationship requires a reciprocal one-to-many pair")
+            child, parent = (target, model) if relation["many"] else (model, target)
+            links = [
+                field
+                for field in child["fields"]
+                if field.get("references", {}).get("table") == parent["table"]
+            ]
+            if len(links) != 1:
+                raise ValueError("relationship requires exactly one captured foreign key")
     ordered = []
     while dependencies:
         ready = sorted(table for table, parents in dependencies.items() if not parents)

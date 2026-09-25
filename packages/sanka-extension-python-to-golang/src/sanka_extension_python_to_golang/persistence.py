@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 from typing import Any
+
+from .models import SQLA_TYPES, identifier
 
 IGNORED = {".git", ".sanka", ".venv", "__pycache__"}
 PYDANTIC_FIELD_OPTIONS = {
@@ -357,11 +360,31 @@ def _migration(path: Path, tree: ast.Module, gaps: list[str]) -> dict[str, Any] 
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     for node in tree.body:
         if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and type(node.value.value) is str
+        ):
+            continue
+        if isinstance(node, ast.ImportFrom) and node.module == "alembic" and not node.level:
+            if len(node.names) != 1 or node.names[0].name != "op" or node.names[0].asname:
+                gaps.append(f"{relative}: unsupported migration import")
+            continue
+        if isinstance(node, ast.Import):
+            if (
+                len(node.names) != 1
+                or node.names[0].name != "sqlalchemy"
+                or node.names[0].asname != "sa"
+            ):
+                gaps.append(f"{relative}: unsupported migration import")
+            continue
+        if (
             isinstance(node, ast.Assign)
             and len(node.targets) == 1
             and isinstance(node.targets[0], ast.Name)
             and node.targets[0].id in {"revision", "down_revision", "branch_labels", "depends_on"}
         ):
+            if node.targets[0].id in metadata:
+                gaps.append(f"{relative}: duplicate revision metadata")
             try:
                 metadata[node.targets[0].id] = _json_literal(node.value)
             except (TypeError, ValueError) as error:
@@ -370,7 +393,11 @@ def _migration(path: Path, tree: ast.Module, gaps: list[str]) -> dict[str, Any] 
             "upgrade",
             "downgrade",
         }:
+            if node.name in functions or node.decorator_list or node.returns:
+                gaps.append(f"{relative}: unsupported migration function")
             functions[node.name] = node
+        else:
+            gaps.append(f"{relative}: unsupported top-level migration statement")
     if "revision" not in metadata:
         return None
     if type(metadata["revision"]) is not str or not metadata["revision"]:
@@ -626,3 +653,230 @@ def capture_fastapi_persistence(
         ),
         "gaps": sorted(set(gaps)),
     }
+
+
+def _migration_literal(text: str) -> Any:
+    return ast.literal_eval(ast.parse(text, mode="eval").body)
+
+
+def _migration_call(text: str, name: str) -> ast.Call:
+    node = ast.parse(text, mode="eval").body
+    if not isinstance(node, ast.Call) or _call_name(node.func) != f"sa.{name}":
+        raise ValueError(f"expected static sa.{name}")
+    return node
+
+
+def _migration_column(text: str) -> dict[str, Any]:
+    call = _migration_call(text, "Column")
+    if len(call.args) < 2:
+        raise ValueError("migration Column requires a name and type")
+    name = identifier(ast.literal_eval(call.args[0]))
+    type_node = call.args[1]
+    if not isinstance(type_node, ast.Call) or not _call_name(type_node.func).startswith("sa."):
+        raise ValueError("migration Column requires a static SQLAlchemy type")
+    type_name = _call_name(type_node.func)[3:]
+    if type_name not in SQLA_TYPES:
+        raise ValueError(f"unsupported migration column type: {type_name}")
+    sql_type = SQLA_TYPES[type_name][0]
+    type_options = _literal_keywords(type_node)
+    if type_name == "String" and len(type_node.args) == 1 and not type_options:
+        sql_type += f"({ast.literal_eval(type_node.args[0])})"
+    elif type_name == "Numeric" and len(type_node.args) == 2 and not type_options:
+        sql_type += f"({ast.literal_eval(type_node.args[0])},{ast.literal_eval(type_node.args[1])})"
+    elif type_name == "DateTime" and not type_node.args and type_options == {"timezone": True}:
+        pass
+    elif type_node.args or type_options:
+        raise ValueError("unsupported migration type options")
+    options = _literal_keywords(call)
+    if set(options) - {"nullable", "primary_key", "unique", "autoincrement"}:
+        raise ValueError("unsupported migration Column options")
+    if any(type(value) is not bool for value in options.values()):
+        raise ValueError("migration Column options must be boolean")
+    foreign = [arg for arg in call.args[2:] if isinstance(arg, ast.Call)]
+    if len(foreign) != len(call.args[2:]) or len(foreign) > 1:
+        raise ValueError("unsupported migration Column constraint")
+    reference = None
+    if foreign:
+        fk = foreign[0]
+        if _call_name(fk.func) != "sa.ForeignKey" or len(fk.args) != 1:
+            raise ValueError("only static ForeignKey constraints are qualified")
+        target = ast.literal_eval(fk.args[0])
+        if type(target) is not str or len(target.split(".")) != 2:
+            raise ValueError("migration ForeignKey requires table.column")
+        ref_table, ref_column = map(identifier, target.split("."))
+        fk_options = _literal_keywords(fk)
+        if set(fk_options) - {"ondelete", "deferrable", "initially"}:
+            raise ValueError("unsupported migration ForeignKey options")
+        if "deferrable" in fk_options and type(fk_options["deferrable"]) is not bool:
+            raise ValueError("migration ForeignKey deferrable must be boolean")
+        reference = {
+            "table": ref_table,
+            "column": ref_column,
+            "on_delete": fk_options.get("ondelete", "NO ACTION"),
+            "deferrable": fk_options.get("deferrable", False),
+            "deferred": fk_options.get("initially", "IMMEDIATE") == "DEFERRED",
+        }
+        if fk_options.get("initially", "IMMEDIATE") not in {"IMMEDIATE", "DEFERRED"}:
+            raise ValueError("unsupported migration ForeignKey timing")
+    return {"name": name, "sql_type": sql_type, "options": options, "references": reference}
+
+
+def lower_linear_migrations(
+    persistence: dict[str, Any], models: list[dict[str, Any]], schema_mode: str
+) -> list[dict[str, Any]]:
+    """Validate a static, additive Alembic chain against the final model schema."""
+    revisions = persistence["migrations"]
+    if not revisions:
+        return []
+    if schema_mode != "empty":
+        raise ValueError("Alembic history requires an empty target schema")
+    by_revision = {item["revision"]: item for item in revisions}
+    if len(by_revision) != len(revisions):
+        raise ValueError("migration revisions must be unique")
+    if any(
+        type(item["revision"]) is not str
+        or not re.fullmatch(r"[A-Za-z0-9_]{1,64}", item["revision"])
+        for item in revisions
+    ):
+        raise ValueError("migration revision must be a safe file identifier")
+    roots = [item for item in revisions if item["down_revision"] is None]
+    if len(roots) != 1:
+        raise ValueError("migration history must have one linear root")
+    children: dict[str, list[dict[str, Any]]] = {}
+    for item in revisions:
+        if item["branch_labels"] is not None or item["depends_on"] is not None:
+            raise ValueError("branched or dependent migrations require lowering")
+        if item["down_revision"] is not None:
+            if type(item["down_revision"]) is not str or item["down_revision"] not in by_revision:
+                raise ValueError("migration history must be linear")
+            children.setdefault(item["down_revision"], []).append(item)
+    ordered = []
+    current = roots[0]
+    while True:
+        ordered.append(current)
+        next_items = children.get(current["revision"], [])
+        if len(next_items) > 1:
+            raise ValueError("branched migrations require lowering")
+        if not next_items:
+            break
+        current = next_items[0]
+        if current in ordered:
+            raise ValueError("cyclic migration history")
+    if len(ordered) != len(revisions):
+        raise ValueError("migration history is disconnected")
+    by_table = {model["table"]: model for model in models}
+    created: set[str] = set()
+    indexes: set[tuple[str, tuple[str, ...]]] = set()
+    index_names: set[str] = set()
+    result = []
+    for revision in ordered:
+        imported = {
+            (item["module"], item["name"], item["local"])
+            for item in persistence["imports"][revision["module"]]
+        }
+        if {("alembic", "op", "op"), ("sqlalchemy", None, "sa")} - imported:
+            raise ValueError("migration requires canonical Alembic and SQLAlchemy imports")
+        steps = []
+        for operation in revision["upgrade"]:
+            name, args, options = operation["name"], operation["arguments"], operation["options"]
+            if name == "create_table" and args and not options:
+                table = identifier(_migration_literal(args[0]))
+                model = by_table.get(table)
+                if model is None or table in created:
+                    raise ValueError("migration creates an unknown or duplicate table")
+                columns = [_migration_column(arg) for arg in args[1:]]
+                if [column["name"] for column in columns] != [
+                    field["name"] for field in model["fields"]
+                ]:
+                    raise ValueError(f"migration columns differ from model {table}")
+                for column, field in zip(columns, model["fields"], strict=True):
+                    opts = column["options"]
+                    if (
+                        column["sql_type"] != field["sql_type"]
+                        or opts.get("nullable", not opts.get("primary_key", False))
+                        != field["nullable"]
+                        or opts.get("primary_key", False) != field["primary_key"]
+                        or opts.get("unique", False) != field["unique"]
+                        or opts.get("autoincrement", field["auto"]) != field["auto"]
+                        or column["references"] != field.get("references")
+                    ):
+                        raise ValueError(
+                            f"migration column differs from model {table}.{field['name']}"
+                        )
+                    if field.get("default"):
+                        raise ValueError("migration defaults require lowering")
+                    if field.get("references") and field["references"]["table"] not in created:
+                        raise ValueError("migration foreign key precedes its parent table")
+                if model.get("constraints"):
+                    raise ValueError("migration table constraints require lowering")
+                created.add(table)
+                steps.append({"name": name, "table": table})
+            elif name == "create_index" and len(args) == 3 and set(options) <= {"unique"}:
+                index = identifier(_migration_literal(args[0]))
+                table = identifier(_migration_literal(args[1]))
+                index_columns = _migration_literal(args[2])
+                if (
+                    table not in created
+                    or type(index_columns) is not list
+                    or not index_columns
+                    or not all(type(column) is str for column in index_columns)
+                    or _migration_literal(options.get("unique", "False")) is not False
+                ):
+                    raise ValueError("unsupported migration index")
+                names = tuple(identifier(column) for column in index_columns)
+                model = by_table[table]
+                matching = any(
+                    item["name"] == index and tuple(item["columns"]) == names
+                    for item in model.get("indexes", [])
+                ) or (
+                    len(names) == 1
+                    and index == f"ix_{table}_{names[0]}"
+                    and any(
+                        field["name"] == names[0] and field.get("index")
+                        for field in model["fields"]
+                    )
+                )
+                if not matching or (table, names) in indexes or index in index_names:
+                    raise ValueError("migration index differs from model")
+                indexes.add((table, names))
+                index_names.add(index)
+                steps.append({"name": name, "table": table, "index": index, "columns": list(names)})
+            else:
+                raise ValueError(f"unsupported Alembic operation: {name}")
+        expected_down = [
+            ("drop_table", step["table"], None)
+            if step["name"] == "create_table"
+            else ("drop_index", step["index"], step["table"])
+            for step in reversed(steps)
+        ]
+        actual_down = []
+        for item in revision["downgrade"]:
+            if len(item["arguments"]) != 1:
+                raise ValueError("migration downgrade must reverse its upgrade")
+            actual_down.append(
+                (
+                    item["name"],
+                    identifier(_migration_literal(item["arguments"][0])),
+                    identifier(_migration_literal(item["options"]["table_name"]))
+                    if item["options"] and set(item["options"]) == {"table_name"}
+                    else None,
+                )
+            )
+        if actual_down != expected_down:
+            raise ValueError("migration downgrade must reverse its upgrade")
+        result.append({"revision": revision["revision"], "steps": steps})
+    if created != set(by_table):
+        raise ValueError("migration history does not match the captured model tables")
+    expected_indexes = {
+        (model["table"], (field["name"],))
+        for model in models
+        for field in model["fields"]
+        if field.get("index")
+    } | {
+        (model["table"], tuple(item["columns"]))
+        for model in models
+        for item in model.get("indexes", [])
+    }
+    if indexes != expected_indexes:
+        raise ValueError("migration history does not match the captured model indexes")
+    return result

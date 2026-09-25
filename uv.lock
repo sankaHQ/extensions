@@ -1281,7 +1281,7 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 
 [[package]]
 name = "sanka-extension-python-to-golang"
-version = "0.1.0a5"
+version = "0.1.0a6"
 source = { editable = "packages/sanka-extension-python-to-golang" }
 dependencies = [
     { name = "sanka-extension-sdk" },
