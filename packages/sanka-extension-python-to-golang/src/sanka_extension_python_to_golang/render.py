@@ -619,6 +619,10 @@ func writeResponse(w http.ResponseWriter, status int, payload any) {
 
     if captured["configuration"]["database_layer"] == "pgx":
         result.update(render_database(captured))
+        if captured["configuration"]["source_framework"] == "fastapi":
+            from .drf_transfer import TRANSFER_SCRIPT
+
+            result["tools/transfer_existing.py"] = TRANSFER_SCRIPT
     result.update(_runtime(target, database, captured["configuration"]["database_layer"] == "pgx"))
     if captured.get("security"):
         result["security.go"] = render_security(captured)
