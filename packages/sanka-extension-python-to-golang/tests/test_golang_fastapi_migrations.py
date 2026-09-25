@@ -1,0 +1,198 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Bounded Alembic and relationship lowering, with four-router PostgreSQL replay."""
+
+import json
+import os
+import subprocess
+import uuid
+from pathlib import Path
+
+import pytest
+from sanka_extension_python_to_golang.capture import capture, configuration
+from test_golang_relational_writes import backend_source, models_source, scenarios
+from test_golang_schema import generate, schema_dsn
+
+
+def project(root: Path) -> str:
+    model = models_source("fastapi")
+    model = model.replace(
+        "DeclarativeBase, Mapped, mapped_column",
+        "DeclarativeBase, Mapped, mapped_column, relationship",
+    )
+    model = model.replace(
+        '    __tablename__ = "parents"',
+        '    __tablename__ = "parents"\n'
+        '    widgets: Mapped[list["Widget"]] = relationship(back_populates="parent")',
+    ).replace(
+        '    parent_id: Mapped[int] = mapped_column(Integer, ForeignKey("parents.id"))',
+        "    parent_id: Mapped[int] = mapped_column("
+        'Integer, ForeignKey("parents.id"), index=True)\n'
+        '    parent: Mapped[Parent] = relationship(back_populates="widgets")',
+    )
+    revisions = root / "alembic" / "versions"
+    revisions.mkdir(parents=True)
+    (revisions / "0001_parents.py").write_text("""from alembic import op
+import sqlalchemy as sa
+revision = "0001"
+down_revision = None
+branch_labels = None
+depends_on = None
+def upgrade():
+    op.create_table("parents",
+        sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
+        sa.Column("name", sa.String(40), nullable=False, unique=True),
+        sa.Column("count", sa.Integer(), nullable=False),
+        sa.Column("enabled", sa.Boolean(), nullable=False),
+        sa.Column("note", sa.Text(), nullable=True))
+def downgrade():
+    op.drop_table("parents")
+""")
+    (revisions / "0002_widgets.py").write_text("""from alembic import op
+import sqlalchemy as sa
+revision = "0002"
+down_revision = "0001"
+branch_labels = None
+depends_on = None
+def upgrade():
+    op.create_table("widgets",
+        sa.Column("id", sa.BigInteger(), primary_key=True, nullable=False),
+        sa.Column("name", sa.String(40), nullable=False, unique=True),
+        sa.Column("parent_id", sa.Integer(), sa.ForeignKey("parents.id"), nullable=False),
+        sa.Column("enabled", sa.Boolean(), nullable=False),
+        sa.Column("note", sa.Text(), nullable=True))
+    op.create_index("ix_widgets_parent_id", "widgets", ["parent_id"], unique=False)
+def downgrade():
+    op.drop_index("ix_widgets_parent_id", table_name="widgets")
+    op.drop_table("widgets")
+""")
+    return model
+
+
+@pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
+def test_linear_migrations_and_relationships_generate(tmp_path: Path, target: str) -> None:
+    model = project(tmp_path)
+    output = generate(
+        tmp_path,
+        "fastapi",
+        target,
+        app_source=backend_source("fastapi"),
+        model_text=model,
+    )
+    assert sorted(path.name for path in (output / "migrations").iterdir()) == [
+        "00001_0001.sql",
+        "00002_0002.sql",
+    ]
+    assert 'CREATE TABLE "parents"' in (output / "migrations/00001_0001.sql").read_text()
+    assert 'CREATE TABLE "widgets"' in (output / "migrations/00002_0002.sql").read_text()
+    assert "DownTo(ctx, 0)" in (output / "database.go").read_text()
+
+
+@pytest.mark.parametrize(
+    "file,before,after",
+    [
+        ("0002_widgets.py", 'down_revision = "0001"', "down_revision = None"),
+        ("0002_widgets.py", "sa.String(40)", "sa.String(80)"),
+        ("0002_widgets.py", '["parent_id"]', '["enabled"]'),
+        ("0002_widgets.py", '"ix_widgets_parent_id"', '"ix_widgets_other"'),
+        ("0002_widgets.py", 'op.drop_table("widgets")', 'op.drop_table("parents")'),
+        ("0002_widgets.py", 'op.create_table("widgets",', 'op.alter_column("widgets",'),
+        ("0002_widgets.py", 'revision = "0002"', 'revision = "../escape"'),
+        ("0002_widgets.py", "depends_on = None", 'depends_on = None\nprint("side effect")'),
+    ],
+)
+def test_history_mismatch_blocks(tmp_path: Path, file: str, before: str, after: str) -> None:
+    model = project(tmp_path)
+    (tmp_path / "app.py").write_text(backend_source("fastapi"))
+    (tmp_path / "models.py").write_text(model)
+    path = tmp_path / "alembic" / "versions" / file
+    path.write_text(path.read_text().replace(before, after))
+    result = capture(
+        tmp_path, configuration({"source_framework": "fastapi", "database_layer": "pgx"})
+    )
+    assert result["gaps"]
+
+
+def test_unbacked_relationship_blocks(tmp_path: Path) -> None:
+    model = project(tmp_path)
+    (tmp_path / "app.py").write_text(backend_source("fastapi"))
+    (tmp_path / "models.py").write_text(
+        model.replace('ForeignKey("parents.id")', 'ForeignKey("widgets.id")')
+    )
+    result = capture(
+        tmp_path, configuration({"source_framework": "fastapi", "database_layer": "pgx"})
+    )
+    assert any("models:" in gap for gap in result["gaps"])
+
+
+@pytest.mark.skipif(
+    os.getenv("SANKA_GO_TESTS") != "1" or not os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN"),
+    reason="requires isolated PostgreSQL and Go",
+)
+@pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
+def test_source_to_go_postgres_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    import psycopg
+    from psycopg import sql
+    from sanka_extension_python_to_golang.replay import replay
+
+    model = project(tmp_path)
+    (tmp_path / "sanka-verify.json").write_text(json.dumps({"scenarios": scenarios()}))
+    output = generate(
+        tmp_path,
+        "fastapi",
+        target,
+        app_source=backend_source("fastapi"),
+        model_text=model,
+    )
+    captured = capture(
+        tmp_path,
+        configuration(
+            {"source_framework": "fastapi", "target_framework": target, "database_layer": "pgx"}
+        ),
+    )
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    schemas = ["go_alembic_" + uuid.uuid4().hex for _ in range(2)]
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        try:
+            for schema in schemas:
+                admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+            source, destination = [schema_dsn(dsn, schema) for schema in schemas]
+            monkeypatch.setenv(
+                "SANKA_GO_SOURCE_TEST_DATABASE_URL",
+                source.replace("postgresql://", "postgresql+psycopg://", 1),
+            )
+            monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", destination)
+            report = replay(tmp_path, output, captured, "verify")
+            assert report["ok"], report["steps"]
+            assert report["candidate"] == report["source"]
+            indexes = [
+                admin.execute(
+                    "SELECT tablename,indexname FROM pg_indexes "
+                    "WHERE schemaname=%s AND indexname NOT LIKE '%%_pkey' "
+                    "ORDER BY tablename,indexname",
+                    (schema,),
+                ).fetchall()
+                for schema in schemas
+            ]
+            assert indexes[0] == indexes[1]
+            if target == "fiber":
+                rolled_back = subprocess.run(
+                    ["go", "run", "-mod=readonly", "./cmd/migrate", "down"],
+                    cwd=output,
+                    env=os.environ
+                    | {"DATABASE_URL": destination, "GOTOOLCHAIN": "local", "GOWORK": "off"},
+                    capture_output=True,
+                    timeout=180,
+                )
+                assert rolled_back.returncode == 0, "generated migration rollback failed"
+                assert admin.execute(
+                    "SELECT count(*) FROM information_schema.tables "
+                    "WHERE table_schema=%s AND table_name IN ('parents','widgets')",
+                    (schemas[1],),
+                ).fetchone() == (0,)
+        finally:
+            for schema in schemas:
+                admin.execute(
+                    sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema))
+                )

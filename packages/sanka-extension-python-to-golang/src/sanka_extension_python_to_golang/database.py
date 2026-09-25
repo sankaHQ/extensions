@@ -24,7 +24,7 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-// Migrate applies or rolls back the baseline only when explicitly called.
+// Migrate applies or rolls back the captured schema only when explicitly called.
 func Migrate(ctx context.Context, dsn string, direction string) error {
     if dsn == "" { return fmt.Errorf("DATABASE_URL is required") }
     if direction != "up" && direction != "down" {
@@ -41,7 +41,7 @@ func Migrate(ctx context.Context, dsn string, direction string) error {
     provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations,
         goose.WithSessionLocker(locker))
     if err != nil { return err }
-    if direction == "up" { _, err = provider.Up(ctx) } else { _, err = provider.Down(ctx) }
+    if direction == "up" { _, err = provider.Up(ctx) } else { _, err = provider.DownTo(ctx, 0) }
     return err
 }
 """
@@ -352,6 +352,7 @@ $sanka$;""",
 def render_database(captured: dict[str, Any]) -> dict[str, str]:
     models = captured["models"]
     definitions = []
+    table_sql: dict[str, list[str]] = {}
     if captured["configuration"]["schema_mode"] == "adopt-existing":
         sql = _adoption_sql(captured)
         down_help = "down preserves adopted application tables"
@@ -407,17 +408,46 @@ END; $$;""",
             columns.append(f'    CONSTRAINT "{constraint["name"]}" UNIQUE ({names})')
         definitions.append(f"type {model['name']} struct {{\n" + "\n".join(lines) + "\n}")
         if captured["configuration"]["schema_mode"] == "empty":
-            sql.append(f'CREATE TABLE "{model["table"]}" (\n' + ",\n".join(columns) + "\n);")
+            statements = [f'CREATE TABLE "{model["table"]}" (\n' + ",\n".join(columns) + "\n);"]
             for field in model["fields"]:
                 if field.get("index"):
-                    sql.append(f'CREATE INDEX ON "{model["table"]}" ("{field["name"]}");')
+                    statements.append(f'CREATE INDEX ON "{model["table"]}" ("{field["name"]}");')
             for index in model.get("indexes", []):
                 names = ", ".join(f'"{name}"' for name in index["columns"])
-                sql.append(f'CREATE INDEX "{index["name"]}" ON "{model["table"]}" ({names});')
-    if captured["configuration"]["schema_mode"] == "empty":
-        sql.append("-- +goose Down")
-        for model in reversed(models):
-            sql.append(f'DROP TABLE "{model["table"]}";')
+                statements.append(
+                    f'CREATE INDEX "{index["name"]}" ON "{model["table"]}" ({names});'
+                )
+            table_sql[model["table"]] = statements
+    history = captured.get("fastapi_persistence", {}).get("lowered_migrations", [])
+    if history:
+        migrations = {}
+        for number, revision in enumerate(history, 1):
+            statements = sql.copy() if number == 1 else ["-- +goose Up"]
+            for step in revision["steps"]:
+                if step["name"] == "create_table":
+                    statements.append(table_sql[step["table"]][0])
+                else:
+                    names = ", ".join(f'"{name}"' for name in step["columns"])
+                    statements.append(
+                        f'CREATE INDEX "{step["index"]}" ON "{step["table"]}" ({names});'
+                    )
+            statements.append("-- +goose Down")
+            for step in reversed(revision["steps"]):
+                if step["name"] == "create_table":
+                    statements.append(f'DROP TABLE "{step["table"]}";')
+                else:
+                    statements.append(f'DROP INDEX "{step["index"]}";')
+            migrations[f"migrations/{number:05d}_{revision['revision']}.sql"] = (
+                "\n\n".join(statements) + "\n"
+            )
+    else:
+        if captured["configuration"]["schema_mode"] == "empty":
+            for model in models:
+                sql.extend(table_sql[model["table"]])
+            sql.append("-- +goose Down")
+            for model in reversed(models):
+                sql.append(f'DROP TABLE "{model["table"]}";')
+        migrations = {"migrations/00001_initial.sql": "\n\n".join(sql) + "\n"}
     return {
         **render_values(
             models,
@@ -429,7 +459,7 @@ END; $$;""",
         "models.go": "// SPDX-License-Identifier: Apache-2.0\npackage backend\n\n"
         + "\n\n".join(definitions)
         + "\n",
-        "migrations/00001_initial.sql": "\n\n".join(sql) + "\n",
+        **migrations,
         "database.go": MIGRATION_RUNNER,
         "cmd/migrate/main.go": COMMAND.replace("{down_help}", down_help),
         ".env.example": "# Supply the PostgreSQL URL at execution time.\nDATABASE_URL=\n",

@@ -311,12 +311,15 @@ Alembic revision ancestry plus ordered upgrade/downgrade operations; and ordered
 `AsyncSession` calls with explicit `begin` or `begin_nested` scopes. Files recognized by
 this scanner no longer appear as generic unconsumed-module gaps.
 
-This persistence document is a lowering prerequisite. Migrations, unqualified repositories,
-relationships, and domain/request/response models outside the existing flat write
-profile remain explicit gaps and block generation. Dynamic field options, migration
-operations, session methods, conditional repository flows and custom validators also
-remain gaps. Existing qualified flat schemas and SQLAlchemy models continue through
-their current Go generation path.
+For an empty target schema, a single linear chain of static Alembic `create_table`
+and non-unique `create_index` operations lowers to ordered Goose migrations when
+its columns, keys and indexes match the captured SQLAlchemy models exactly.
+Reciprocal `relationship(back_populates=...)` declarations qualify only when a
+single captured foreign key links the child and parent; Go operations continue
+to use the foreign-key column. `migrate down` reverses the full chain.
+Branches, schema alterations, data migrations, ORM cascades or object traversal,
+unqualified repositories, and richer domain/request/response models remain
+explicit gaps. Migration lowering never runs against an existing schema.
 
 FastAPI also lowers the same flat CRUD profile from async handlers using
 `async with AsyncSession(engine) as session`. The engine must use
@@ -449,7 +452,8 @@ scan/plan/apply.
 Qualified schema fields are 32/64-bit integers, booleans, bounded strings, and
 text, with nullability, single integer primary keys, automatic IDs and single
 column uniqueness. Nullable Go fields use pointers. Defaults (including Python
-and server defaults), ORM object relationships, custom indexes, custom types, validators, managers,
+and server defaults), ORM object traversal and cascades, custom index behavior,
+custom types, validators, managers,
 and model methods remain blockers. Generated structs do not implement validation.
 
 Single-column foreign keys may reference a captured integer primary key of the
