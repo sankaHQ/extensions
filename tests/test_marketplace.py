@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/"
-NEW_RELEASE_PREFIX = RELEASE_PREFIX + "extensions-v0.1.0a32/"
+NEW_RELEASE_PREFIX = RELEASE_PREFIX + "extensions-v0.1.0a33/"
 EXPECTED = {
     "sanka/react-native-to-native": {
         "kind": "migration",
@@ -69,8 +69,8 @@ EXPECTED = {
         "kind": "connector",
         "protocol_version": "sanka-connector/v1",
         "distribution": {
-            "name": "sanka-connector-markdown",
-            "version": "0.1.0a14",
+            "name": "sanka-extension-markdown",
+            "version": "0.1.0a15",
             "entry_point": "markdown",
         },
         "providers": [{"name": "markdown", "roles": ["source"]}],
@@ -79,8 +79,8 @@ EXPECTED = {
         "kind": "connector",
         "protocol_version": "sanka-connector/v1",
         "distribution": {
-            "name": "sanka-connector-csv",
-            "version": "0.1.0a14",
+            "name": "sanka-extension-csv",
+            "version": "0.1.0a15",
             "entry_point": "csv",
         },
         "providers": [{"name": "csv", "roles": ["source"]}],
@@ -89,8 +89,8 @@ EXPECTED = {
         "kind": "connector",
         "protocol_version": "sanka-connector/v1",
         "distribution": {
-            "name": "sanka-connector-sqlite",
-            "version": "0.1.0a14",
+            "name": "sanka-extension-sqlite",
+            "version": "0.1.0a15",
             "entry_point": "sqlite",
         },
         "providers": [{"name": "sqlite", "roles": ["source", "destination"]}],
@@ -99,8 +99,8 @@ EXPECTED = {
         "kind": "connector",
         "protocol_version": "sanka-connector/v1",
         "distribution": {
-            "name": "sanka-connector-postgres",
-            "version": "0.1.0a14",
+            "name": "sanka-extension-postgres",
+            "version": "0.1.0a15",
             "entry_point": "postgres",
         },
         "providers": [{"name": "postgres", "roles": ["source", "destination"]}],
@@ -109,8 +109,8 @@ EXPECTED = {
         "kind": "connector",
         "protocol_version": "sanka-connector/v1",
         "distribution": {
-            "name": "sanka-connector-clickhouse",
-            "version": "0.1.0a14",
+            "name": "sanka-extension-clickhouse",
+            "version": "0.1.0a15",
             "entry_point": "clickhouse",
         },
         "providers": [{"name": "clickhouse", "roles": ["destination"]}],
@@ -118,7 +118,7 @@ EXPECTED = {
 }
 
 
-def test_official_marketplace_has_system_access_and_code_conversion() -> None:
+def test_official_marketplace_has_data_and_code_extensions() -> None:
     catalog = json.loads(Path("marketplace.json").read_text())
 
     assert catalog["schema_version"] == "sanka-marketplace/v1"
@@ -142,9 +142,11 @@ def test_official_marketplace_has_system_access_and_code_conversion() -> None:
         if "providers" in expected:
             assert manifest["providers"] == expected["providers"]
         assert manifest["wheels"]
-        expected_prefix = NEW_RELEASE_PREFIX if expected["kind"] == "migration" else RELEASE_PREFIX
+        expected_prefix = NEW_RELEASE_PREFIX if expected["kind"] == "connector" else RELEASE_PREFIX
         if item["id"] == "sanka/drf-to-flask":
             expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a31/"
+        if item["id"] == "sanka/drf-to-fastapi":
+            expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a32/"
         if item["id"] == "sanka/llm-to-jev":
             expected_prefix = RELEASE_PREFIX + "llm-to-jev-v0.1.0a1/"
         if item["id"] == "sanka/python-to-golang":
@@ -174,11 +176,11 @@ def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> No
         "release-assets/sanka-extension-llm-to-jev.json",
         "release-assets/sanka-extension-drf-to-fastapi.json",
         "release-assets/sanka-extension-drf-to-flask.json",
-        "release-assets/sanka-connector-markdown.json",
-        "release-assets/sanka-connector-csv.json",
-        "release-assets/sanka-connector-sqlite.json",
-        "release-assets/sanka-connector-postgres.json",
-        "release-assets/sanka-connector-clickhouse.json",
+        "release-assets/sanka-extension-markdown.json",
+        "release-assets/sanka-extension-csv.json",
+        "release-assets/sanka-extension-sqlite.json",
+        "release-assets/sanka-extension-postgres.json",
+        "release-assets/sanka-extension-clickhouse.json",
     ]
     assert len(destinations) == len(set(destinations))
 

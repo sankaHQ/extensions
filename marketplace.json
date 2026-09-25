@@ -27,23 +27,23 @@
     },
     {
       "id": "sanka/markdown",
-      "manifest": "packages/sanka-connector-markdown/extension.json"
+      "manifest": "packages/sanka-extension-markdown/extension.json"
     },
     {
       "id": "sanka/csv",
-      "manifest": "packages/sanka-connector-csv/extension.json"
+      "manifest": "packages/sanka-extension-csv/extension.json"
     },
     {
       "id": "sanka/sqlite",
-      "manifest": "packages/sanka-connector-sqlite/extension.json"
+      "manifest": "packages/sanka-extension-sqlite/extension.json"
     },
     {
       "id": "sanka/postgres",
-      "manifest": "packages/sanka-connector-postgres/extension.json"
+      "manifest": "packages/sanka-extension-postgres/extension.json"
     },
     {
       "id": "sanka/clickhouse",
-      "manifest": "packages/sanka-connector-clickhouse/extension.json"
+      "manifest": "packages/sanka-extension-clickhouse/extension.json"
     }
   ]
 }

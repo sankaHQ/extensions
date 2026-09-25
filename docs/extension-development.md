@@ -47,7 +47,8 @@ Keep base protocols and optional capabilities separate. Implement `DataReader` a
 
 - Import `sanka_extensions.data` and the extension's own third-party driver dependencies. Never import `sanka`, `sanka.runtime`, or another extension.
 - Keep the SDK free of drivers and runtime dependencies except its typed compatibility package and every source file marked `SPDX-License-Identifier: Apache-2.0`.
-- Export `EXTENSION`. Retain `CONNECTOR = EXTENSION` while published entry points target that compatibility name.
+- Export `EXTENSION`. Retain `CONNECTOR = EXTENSION` for existing Python callers;
+  new package entry points target `EXTENSION`.
 - Keep immutable distribution/module/entry-point identifiers listed in [naming-compatibility.md](naming-compatibility.md).
 - Reject invalid capabilities and identities explicitly; do not add arbitrary in-process hooks.
 

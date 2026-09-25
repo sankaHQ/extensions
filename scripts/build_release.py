@@ -16,7 +16,13 @@ from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_DEPENDENCY_WHEEL_BYTES = 128 * 1024 * 1024
-MARKETPLACE_PACKAGES: tuple[str, ...] = ("sanka-extension-drf-to-fastapi",)
+MARKETPLACE_PACKAGES: tuple[str, ...] = (
+    "sanka-extension-markdown",
+    "sanka-extension-csv",
+    "sanka-extension-sqlite",
+    "sanka-extension-postgres",
+    "sanka-extension-clickhouse",
+)
 LOCAL_WHEELS = (
     "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
     "sanka_code_migration-0.1.0a3-py3-none-any.whl",
@@ -24,11 +30,11 @@ LOCAL_WHEELS = (
     "sanka_extension_drf_to_fastapi-0.1.0a18-py3-none-any.whl",
     "sanka_extension_drf_to_flask-0.1.0a12-py3-none-any.whl",
     "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-    "sanka_connector_markdown-0.1.0a14-py3-none-any.whl",
-    "sanka_connector_csv-0.1.0a14-py3-none-any.whl",
-    "sanka_connector_sqlite-0.1.0a14-py3-none-any.whl",
-    "sanka_connector_postgres-0.1.0a14-py3-none-any.whl",
-    "sanka_connector_clickhouse-0.1.0a14-py3-none-any.whl",
+    "sanka_extension_markdown-0.1.0a15-py3-none-any.whl",
+    "sanka_extension_csv-0.1.0a15-py3-none-any.whl",
+    "sanka_extension_sqlite-0.1.0a15-py3-none-any.whl",
+    "sanka_extension_postgres-0.1.0a15-py3-none-any.whl",
+    "sanka_extension_clickhouse-0.1.0a15-py3-none-any.whl",
 )
 DEPENDENCIES = (
     "backports-zstd",
@@ -98,6 +104,14 @@ PINNED_LOCAL_WHEELS = (
     # These a31 assets are published; rebuilding changed source under the same
     # wheel filenames would make the catalog point at bytes users cannot fetch.
     LockedWheel(
+        "sanka-extension-drf-to-fastapi",
+        "sanka_extension_drf_to_fastapi-0.1.0a18-py3-none-any.whl",
+        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a32/"
+        "sanka_extension_drf_to_fastapi-0.1.0a18-py3-none-any.whl",
+        "898d6138a179bb25176bc6df468f58bb56a75ba04e21f03d7278a8459bdc4840",
+        80219,
+    ),
+    LockedWheel(
         "sanka-drf-replay",
         "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
         "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a31/"
@@ -128,46 +142,6 @@ PINNED_LOCAL_WHEELS = (
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
         "34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e",
         17355,
-    ),
-    LockedWheel(
-        "sanka-connector-markdown",
-        "sanka_connector_markdown-0.1.0a14-py3-none-any.whl",
-        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a25/"
-        "sanka_connector_markdown-0.1.0a14-py3-none-any.whl",
-        "702ab178a936849a3ba8781e58ba2ffa14b4857c5a0778f64d961f3256e91579",
-        9751,
-    ),
-    LockedWheel(
-        "sanka-connector-csv",
-        "sanka_connector_csv-0.1.0a14-py3-none-any.whl",
-        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a25/"
-        "sanka_connector_csv-0.1.0a14-py3-none-any.whl",
-        "8980178f7ab1da0c32da561a5e59e963606328bbab2fbdb50d02bdadb883b8ef",
-        8952,
-    ),
-    LockedWheel(
-        "sanka-connector-sqlite",
-        "sanka_connector_sqlite-0.1.0a14-py3-none-any.whl",
-        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a25/"
-        "sanka_connector_sqlite-0.1.0a14-py3-none-any.whl",
-        "b6437e9005d5c44f14b1e1eea52d6e222f5c6396a1b245532751e3144e52d3eb",
-        10967,
-    ),
-    LockedWheel(
-        "sanka-connector-postgres",
-        "sanka_connector_postgres-0.1.0a14-py3-none-any.whl",
-        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a25/"
-        "sanka_connector_postgres-0.1.0a14-py3-none-any.whl",
-        "a8f3c796f7c8c8eb47f264f39ce1dcda213d6323ddaa6ec77b9d79007a26dcc1",
-        20059,
-    ),
-    LockedWheel(
-        "sanka-connector-clickhouse",
-        "sanka_connector_clickhouse-0.1.0a14-py3-none-any.whl",
-        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a25/"
-        "sanka_connector_clickhouse-0.1.0a14-py3-none-any.whl",
-        "d9173413e5f63fd6123a23136085a60ea07b64b0f4a5a2f9b7bd144659d772aa",
-        12856,
     ),
 )
 

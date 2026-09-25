@@ -23,6 +23,12 @@ The canonical `sanka_extensions.data` facade and old Python imports resolve to t
 
 The public SDK is named **Sanka Extension SDK**, with one `sanka_extensions` namespace. The standalone `sanka_data` namespace was never released. The selected API is `sanka_extensions.data`; it remains part of the one SDK alongside `.flow` and `.code`. The unified SDK owns `sanka_extensions` and the published code-contract module; its data facade uses the separately owned compatibility package so wheels do not overwrite each other's files.
 
+The current Data distributions are `sanka-extension-clickhouse`,
+`sanka-extension-csv`, `sanka-extension-markdown`, `sanka-extension-postgres`,
+and `sanka-extension-sqlite`. Their Python modules use `sanka_extension_*`;
+their stable install IDs remain `sanka/<name>`. New wheels retain the old
+`sanka_connector_*` import paths as compatibility aliases.
+
 The added `sanka_extensions.flow` namespace defines business-construction requests.
 The earlier `sanka_extensions.blueprints` suggestion was never implemented or
 published and needs no compatibility alias. `Blueprint` remains a name for Flow's
@@ -33,7 +39,7 @@ availability and the separate runtime implementation requirements.
 
 | Contract retained | Consumer / reason | Removal condition |
 | --- | --- | --- |
-| `sanka-connector-sdk`, `sanka-connector-*` distributions and `sanka_connector_*` module paths | Immutable marketplace wheels and existing Python installations | A coordinated package release, migrated manifests, and tested rollback paths |
+| `sanka-connector-sdk`, old `sanka-connector-*` distributions and `sanka_connector_*` module paths | Immutable marketplace wheels and existing Python installations | Retain old locks and import aliases until an announced incompatible release |
 | `sanka_connector` and its public submodules / old exported type names | Existing extension wheels and private cloud bridges | All supported consumers move to `sanka_extensions.data`; remove only in a documented incompatible SDK release |
 | `sanka_extensions.systems` and its submodules / `SystemReader`, `SystemWriter`, identity and error names | Earlier source consumers remain compatible aliases of `.data` | Retain during migration; remove only through an explicit incompatible API transition |
 | `sanka_extension_sdk` and `sanka_extension_sdk.contract` | Published code-extension imports | Migrate consumers to `sanka_extensions.code` before a documented incompatible release |

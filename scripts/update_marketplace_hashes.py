@@ -18,7 +18,7 @@ if __package__ in {None, ""}:  # Direct script execution keeps only scripts/ on 
 
 from scripts.build_release import LOCKED_DEPENDENCY_WHEELS  # noqa: E402
 
-RELEASE_TAG = "extensions-v0.1.0a32"
+RELEASE_TAG = "extensions-v0.1.0a33"
 LOCAL_MANIFEST_WHEELS = {
     "sanka-extension-drf-to-flask": (
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
@@ -34,45 +34,45 @@ LOCAL_MANIFEST_WHEELS = {
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
         "sanka_extension_drf_to_fastapi-0.1.0a18-py3-none-any.whl",
     ),
-    "sanka-connector-markdown": (
+    "sanka-extension-markdown": (
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_connector_markdown-0.1.0a14-py3-none-any.whl",
+        "sanka_extension_markdown-0.1.0a15-py3-none-any.whl",
     ),
-    "sanka-connector-csv": (
+    "sanka-extension-csv": (
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_connector_csv-0.1.0a14-py3-none-any.whl",
+        "sanka_extension_csv-0.1.0a15-py3-none-any.whl",
     ),
-    "sanka-connector-sqlite": (
+    "sanka-extension-sqlite": (
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_connector_sqlite-0.1.0a14-py3-none-any.whl",
+        "sanka_extension_sqlite-0.1.0a15-py3-none-any.whl",
     ),
-    "sanka-connector-postgres": (
+    "sanka-extension-postgres": (
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_connector_postgres-0.1.0a14-py3-none-any.whl",
+        "sanka_extension_postgres-0.1.0a15-py3-none-any.whl",
     ),
-    "sanka-connector-clickhouse": (
+    "sanka-extension-clickhouse": (
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_connector_clickhouse-0.1.0a14-py3-none-any.whl",
+        "sanka_extension_clickhouse-0.1.0a15-py3-none-any.whl",
     ),
 }
 MANIFEST_DEPENDENCIES = {
     "sanka-extension-drf-to-flask": (),
     "sanka-extension-drf-to-fastapi": (),
-    "sanka-connector-markdown": ("pyyaml",),
-    "sanka-connector-csv": (),
-    "sanka-connector-sqlite": (),
-    "sanka-connector-postgres": (
+    "sanka-extension-markdown": ("pyyaml",),
+    "sanka-extension-csv": (),
+    "sanka-extension-sqlite": (),
+    "sanka-extension-postgres": (
         "psycopg",
         "psycopg-binary",
         "typing-extensions",
         "tzdata",
     ),
-    "sanka-connector-clickhouse": (
+    "sanka-extension-clickhouse": (
         "backports-zstd",
         "certifi",
         "clickhouse-connect",
@@ -91,7 +91,13 @@ MANIFEST_WHEELS = {
     for package, local in LOCAL_MANIFEST_WHEELS.items()
 }
 MANIFESTS = {package: ROOT / "packages" / package / "extension.json" for package in MANIFEST_WHEELS}
-UPDATED_MANIFESTS = {"sanka-extension-drf-to-fastapi"}
+UPDATED_MANIFESTS = {
+    "sanka-extension-markdown",
+    "sanka-extension-csv",
+    "sanka-extension-sqlite",
+    "sanka-extension-postgres",
+    "sanka-extension-clickhouse",
+}
 
 
 def _wheel_hash(path: Path) -> str:

@@ -16,7 +16,7 @@ Read `docs/naming-compatibility.md` before changing published identifiers.
 - Keep existing class identity across canonical and compatibility imports.
 - The SDK must not depend on Sanka's AGPL runtime, database drivers, framework
   runtimes, or provider clients.
-- Each `packages/sanka-connector-*` extension depends on the SDK and only
+- Each `packages/sanka-extension-*` data extension depends on the SDK and only
   the third-party libraries that extension needs.
 - Published extension entry points use the `sanka.connectors` group and resolve to a
   `sanka_extensions.data.ExtensionRegistration`.

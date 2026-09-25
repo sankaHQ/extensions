@@ -10,20 +10,20 @@ resolution-markers = [
 [manifest]
 members = [
     "sanka-code-migration",
-    "sanka-connector-clickhouse",
-    "sanka-connector-csv",
-    "sanka-connector-markdown",
-    "sanka-connector-postgres",
     "sanka-connector-sdk",
-    "sanka-connector-sqlite",
     "sanka-drf-replay",
     "sanka-extension-business-flows",
+    "sanka-extension-clickhouse",
+    "sanka-extension-csv",
     "sanka-extension-drf-to-fastapi",
     "sanka-extension-drf-to-flask",
     "sanka-extension-llm-to-jev",
+    "sanka-extension-markdown",
+    "sanka-extension-postgres",
     "sanka-extension-python-to-golang",
     "sanka-extension-react-native-to-native",
     "sanka-extension-sdk",
+    "sanka-extension-sqlite",
     "sanka-extension-typescript-to-rust",
     "sanka-extensions-workspace",
     "sanka-http-replay",
@@ -1147,9 +1147,30 @@ version = "0.1.0a3"
 source = { editable = "packages/sanka-code-migration" }
 
 [[package]]
-name = "sanka-connector-clickhouse"
-version = "0.1.0a14"
-source = { editable = "packages/sanka-connector-clickhouse" }
+name = "sanka-connector-sdk"
+version = "0.1.0a12"
+source = { editable = "packages/sanka-connector-sdk" }
+
+[[package]]
+name = "sanka-drf-replay"
+version = "0.1.0a4"
+source = { editable = "packages/sanka-drf-replay" }
+
+[[package]]
+name = "sanka-extension-business-flows"
+version = "0.1.0a2"
+source = { editable = "packages/sanka-extension-business-flows" }
+dependencies = [
+    { name = "sanka-extension-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
+
+[[package]]
+name = "sanka-extension-clickhouse"
+version = "0.1.0a15"
+source = { editable = "packages/sanka-extension-clickhouse" }
 dependencies = [
     { name = "clickhouse-connect" },
     { name = "sanka-extension-sdk" },
@@ -1162,71 +1183,9 @@ requires-dist = [
 ]
 
 [[package]]
-name = "sanka-connector-csv"
-version = "0.1.0a14"
-source = { editable = "packages/sanka-connector-csv" }
-dependencies = [
-    { name = "sanka-extension-sdk" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
-
-[[package]]
-name = "sanka-connector-markdown"
-version = "0.1.0a14"
-source = { editable = "packages/sanka-connector-markdown" }
-dependencies = [
-    { name = "pyyaml" },
-    { name = "sanka-extension-sdk" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pyyaml", specifier = ">=6" },
-    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
-]
-
-[[package]]
-name = "sanka-connector-postgres"
-version = "0.1.0a14"
-source = { editable = "packages/sanka-connector-postgres" }
-dependencies = [
-    { name = "psycopg", extra = ["binary"] },
-    { name = "sanka-extension-sdk" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
-]
-
-[[package]]
-name = "sanka-connector-sdk"
-version = "0.1.0a12"
-source = { editable = "packages/sanka-connector-sdk" }
-
-[[package]]
-name = "sanka-connector-sqlite"
-version = "0.1.0a14"
-source = { editable = "packages/sanka-connector-sqlite" }
-dependencies = [
-    { name = "sanka-extension-sdk" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
-
-[[package]]
-name = "sanka-drf-replay"
-version = "0.1.0a4"
-source = { editable = "packages/sanka-drf-replay" }
-
-[[package]]
-name = "sanka-extension-business-flows"
-version = "0.1.0a2"
-source = { editable = "packages/sanka-extension-business-flows" }
+name = "sanka-extension-csv"
+version = "0.1.0a15"
+source = { editable = "packages/sanka-extension-csv" }
 dependencies = [
     { name = "sanka-extension-sdk" },
 ]
@@ -1280,6 +1239,36 @@ dependencies = [
 requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
 
 [[package]]
+name = "sanka-extension-markdown"
+version = "0.1.0a15"
+source = { editable = "packages/sanka-extension-markdown" }
+dependencies = [
+    { name = "pyyaml" },
+    { name = "sanka-extension-sdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pyyaml", specifier = ">=6" },
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+]
+
+[[package]]
+name = "sanka-extension-postgres"
+version = "0.1.0a15"
+source = { editable = "packages/sanka-extension-postgres" }
+dependencies = [
+    { name = "psycopg", extra = ["binary"] },
+    { name = "sanka-extension-sdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+]
+
+[[package]]
 name = "sanka-extension-python-to-golang"
 version = "0.1.0a5"
 source = { editable = "packages/sanka-extension-python-to-golang" }
@@ -1319,6 +1308,17 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "sanka-connector-sdk", editable = "packages/sanka-connector-sdk" }]
+
+[[package]]
+name = "sanka-extension-sqlite"
+version = "0.1.0a15"
+source = { editable = "packages/sanka-extension-sqlite" }
+dependencies = [
+    { name = "sanka-extension-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
 
 [[package]]
 name = "sanka-extension-typescript-to-rust"

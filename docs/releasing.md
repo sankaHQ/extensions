@@ -1,5 +1,20 @@
 # Releasing Sanka extension packages
 
+## Data extension package names: a33
+
+`extensions-v0.1.0a33` builds `sanka-extension-{clickhouse,csv,markdown,postgres,sqlite}`
+at `0.1.0a15`. Their `sanka/<name>` IDs and data-access protocol remain stable.
+The former `sanka-connector-*` releases and locked marketplace snapshots remain
+immutable. The new wheels include compatibility Python imports for the published
+`sanka_connector_*` paths; the SDK compatibility wheel is still pinned to a12.
+
+Build the exact candidate with `make update-marketplace-hashes`, review the five
+new wheel hashes and manifests, then run `make check build-release`. After the
+reviewed merge, create the a33 tag and run `publish.yml`. Verify a clean install
+of each new wheel and an old locked project's readback before advancing the CLI's
+official catalog revision. A catalog refresh must present the new distribution as
+an update; the project lock changes only on an explicit `sanka extension add`.
+
 ## FastAPI Swagger choice: a32
 
 `extensions-v0.1.0a32` advances only `sanka-extension-drf-to-fastapi` to

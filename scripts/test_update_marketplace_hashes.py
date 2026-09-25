@@ -17,7 +17,7 @@ import pytest
 
 from scripts import build_release
 from scripts.build_release import _prepare_output
-from scripts.check_release_artifacts import REQUIRED_PACKAGE_FILES, validate_release
+from scripts.check_release_artifacts import DATA_MANIFESTS, REQUIRED_PACKAGE_FILES, validate_release
 from scripts.update_marketplace_hashes import (
     MANIFEST_DEPENDENCIES,
     MANIFEST_WHEELS,
@@ -35,14 +35,14 @@ def test_hash_updater_records_each_manifest_dependency_closure(tmp_path: Path) -
         for name in names:
             _wheel(tmp_path, name)
 
-    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a32")
+    manifests = update_manifests(tmp_path, release_tag="extensions-v0.1.0a33")
 
     assert set(manifests) == UPDATED_MANIFESTS
     for package, payload in manifests.items():
         assert [wheel["name"] for wheel in payload["wheels"]] == list(MANIFEST_WHEELS[package])
         assert all(
             wheel["url"].startswith(
-                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a32/"
+                "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a33/"
             )
             and len(wheel["sha256"]) == 64
             for wheel in payload["wheels"]
@@ -50,9 +50,9 @@ def test_hash_updater_records_each_manifest_dependency_closure(tmp_path: Path) -
 
 
 def test_connector_manifests_include_locked_third_party_wheel_variants() -> None:
-    assert any(name.startswith("pyyaml-") for name in MANIFEST_WHEELS["sanka-connector-markdown"])
+    assert any(name.startswith("pyyaml-") for name in MANIFEST_WHEELS["sanka-extension-markdown"])
     assert any(
-        name.startswith("psycopg_binary-") for name in MANIFEST_WHEELS["sanka-connector-postgres"]
+        name.startswith("psycopg_binary-") for name in MANIFEST_WHEELS["sanka-extension-postgres"]
     )
 
 
@@ -94,11 +94,11 @@ def test_manifest_dependency_sets_cover_every_locked_platform_marker() -> None:
         assert set(dependencies) == _locked_dependency_closure(package)
     assert any(
         name.startswith("clickhouse_connect-")
-        for name in MANIFEST_WHEELS["sanka-connector-clickhouse"]
+        for name in MANIFEST_WHEELS["sanka-extension-clickhouse"]
     )
     assert all(
         any(name.startswith("tzdata-") for name in MANIFEST_WHEELS[package])
-        for package in ("sanka-connector-clickhouse", "sanka-connector-postgres")
+        for package in ("sanka-extension-clickhouse", "sanka-extension-postgres")
     )
 
 
@@ -136,8 +136,8 @@ def test_hash_updater_rejects_an_incomplete_or_wrongly_tagged_wheel_set(tmp_path
     _wheel(tmp_path, "sanka_connector_sdk-0.1.0a12-py3-none-any.whl")
 
     with pytest.raises(RuntimeError, match="complete marketplace wheel set"):
-        update_manifests(tmp_path, release_tag="extensions-v0.1.0a32")
-    with pytest.raises(RuntimeError, match=r"extensions-v0\.1\.0a32"):
+        update_manifests(tmp_path, release_tag="extensions-v0.1.0a33")
+    with pytest.raises(RuntimeError, match=r"extensions-v0\.1\.0a33"):
         update_manifests(tmp_path, release_tag="extensions-v0.1.0a26")
 
 
@@ -145,7 +145,7 @@ def test_build_release_cleanup_is_limited_to_known_wheels(tmp_path: Path) -> Non
     root = tmp_path / "repo"
     output = root / "dist"
     output.mkdir(parents=True)
-    stale_wheel = output / "sanka_connector_csv-0.1.0a14-py3-none-any.whl"
+    stale_wheel = output / "sanka_extension_csv-0.1.0a15-py3-none-any.whl"
     stale_wheel.write_bytes(b"stale")
     dependency = output / build_release.LOCKED_DEPENDENCY_WHEELS[0].name
     dependency.write_bytes(b"dependency is revalidated before reuse")
@@ -154,7 +154,7 @@ def test_build_release_cleanup_is_limited_to_known_wheels(tmp_path: Path) -> Non
 
     _prepare_output(output, root=root)
 
-    assert stale_wheel.read_bytes() == b"stale"
+    assert not stale_wheel.exists()
     assert dependency.exists()
     assert keep.read_text() == "keep"
     with pytest.raises(ValueError, match="repository-owned"):
@@ -229,30 +229,30 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
             "sanka-extension-drf-to-fastapi = sanka_extension_drf_to_fastapi.__main__:main\n",
         ),
         "sanka-connector-sdk": ("0.1.0a12", "sanka_connector_sdk-0.1.0a12-py3-none-any.whl", ""),
-        "sanka-connector-markdown": (
-            "0.1.0a14",
-            "sanka_connector_markdown-0.1.0a14-py3-none-any.whl",
-            "[sanka.connectors]\nmarkdown = sanka_connector_markdown:CONNECTOR\n",
+        "sanka-extension-markdown": (
+            "0.1.0a15",
+            "sanka_extension_markdown-0.1.0a15-py3-none-any.whl",
+            "[sanka.connectors]\nmarkdown = sanka_extension_markdown:EXTENSION\n",
         ),
-        "sanka-connector-csv": (
-            "0.1.0a14",
-            "sanka_connector_csv-0.1.0a14-py3-none-any.whl",
-            "[sanka.connectors]\ncsv = sanka_connector_csv:CONNECTOR\n",
+        "sanka-extension-csv": (
+            "0.1.0a15",
+            "sanka_extension_csv-0.1.0a15-py3-none-any.whl",
+            "[sanka.connectors]\ncsv = sanka_extension_csv:EXTENSION\n",
         ),
-        "sanka-connector-sqlite": (
-            "0.1.0a14",
-            "sanka_connector_sqlite-0.1.0a14-py3-none-any.whl",
-            "[sanka.connectors]\nsqlite = sanka_connector_sqlite:CONNECTOR\n",
+        "sanka-extension-sqlite": (
+            "0.1.0a15",
+            "sanka_extension_sqlite-0.1.0a15-py3-none-any.whl",
+            "[sanka.connectors]\nsqlite = sanka_extension_sqlite:EXTENSION\n",
         ),
-        "sanka-connector-postgres": (
-            "0.1.0a14",
-            "sanka_connector_postgres-0.1.0a14-py3-none-any.whl",
-            "[sanka.connectors]\npostgres = sanka_connector_postgres:CONNECTOR\n",
+        "sanka-extension-postgres": (
+            "0.1.0a15",
+            "sanka_extension_postgres-0.1.0a15-py3-none-any.whl",
+            "[sanka.connectors]\npostgres = sanka_extension_postgres:EXTENSION\n",
         ),
-        "sanka-connector-clickhouse": (
-            "0.1.0a14",
-            "sanka_connector_clickhouse-0.1.0a14-py3-none-any.whl",
-            "[sanka.connectors]\nclickhouse = sanka_connector_clickhouse:CONNECTOR\n",
+        "sanka-extension-clickhouse": (
+            "0.1.0a15",
+            "sanka_extension_clickhouse-0.1.0a15-py3-none-any.whl",
+            "[sanka.connectors]\nclickhouse = sanka_extension_clickhouse:EXTENSION\n",
         ),
     }
     for package, (version, filename, entry_points) in packages.items():
@@ -271,7 +271,7 @@ def _release_snapshot(tmp_path: Path) -> tuple[Path, Path]:
             else ("sanka-connector-sdk==0.1.0a12",)
             if package == "sanka-extension-sdk"
             else ("sanka-extension-sdk==0.1.0a4",)
-            if package.startswith("sanka-connector-") and package != "sanka-connector-sdk"
+            if package in DATA_MANIFESTS
             else ()
         )
         _metadata_wheel(
@@ -340,7 +340,7 @@ def test_converter_dependency_closures_resolve_without_an_index(
 @pytest.mark.parametrize(
     ("case", "expected"),
     [
-        ("connector_entry_point", "exact connector entry point"),
+        ("data_entry_point", "exact data extension entry point"),
         ("dependency", "does not depend on the exact Extension SDK"),
         ("hash", "manifest hash does not match release artifact"),
         ("package_data", "missing required package data"),
@@ -351,29 +351,29 @@ def test_release_validator_rejects_invalid_release_boundaries(
     tmp_path: Path, case: str, expected: str
 ) -> None:
     root, release = _release_snapshot(tmp_path)
-    markdown = release / "sanka_connector_markdown-0.1.0a14-py3-none-any.whl"
-    if case == "connector_entry_point":
+    markdown = release / "sanka_extension_markdown-0.1.0a15-py3-none-any.whl"
+    if case == "data_entry_point":
         _metadata_wheel(
             release,
-            name="sanka-connector-markdown",
-            version="0.1.0a14",
+            name="sanka-extension-markdown",
+            version="0.1.0a15",
             filename=markdown.name,
             requirements=("sanka-extension-sdk==0.1.0a4",),
-            entry_points="[sanka.connectors]\nmarkdown = attacker:CONNECTOR\n",
+            entry_points="[sanka.connectors]\nmarkdown = attacker:EXTENSION\n",
         )
-        _set_manifest_hash(root, "sanka-connector-markdown", markdown)
+        _set_manifest_hash(root, "sanka-extension-markdown", markdown)
     elif case == "dependency":
         _metadata_wheel(
             release,
-            name="sanka-connector-markdown",
-            version="0.1.0a14",
+            name="sanka-extension-markdown",
+            version="0.1.0a15",
             filename=markdown.name,
             requirements=("requests==2.0",),
-            entry_points="[sanka.connectors]\nmarkdown = sanka_connector_markdown:CONNECTOR\n",
+            entry_points="[sanka.connectors]\nmarkdown = sanka_extension_markdown:EXTENSION\n",
         )
-        _set_manifest_hash(root, "sanka-connector-markdown", markdown)
+        _set_manifest_hash(root, "sanka-extension-markdown", markdown)
     elif case == "hash":
-        manifest_path = root / "packages" / "sanka-connector-markdown" / "extension.json"
+        manifest_path = root / "packages" / "sanka-extension-markdown" / "extension.json"
         manifest = json.loads(manifest_path.read_text())
         manifest["wheels"][1]["sha256"] = "0" * 64
         manifest_path.write_text(json.dumps(manifest))

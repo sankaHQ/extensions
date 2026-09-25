@@ -17,7 +17,7 @@ jobs:
           version: "0.11.21"
           python-version: "3.12"
           enable-cache: true
-      - run: test "$GITHUB_REF_TYPE" = tag && test "$GITHUB_REF_NAME" = extensions-v0.1.0a32
+      - run: test "$GITHUB_REF_TYPE" = tag && test "$GITHUB_REF_NAME" = extensions-v0.1.0a33
       - run: uv sync --frozen --all-packages
       - run: make check
       - run: uv run python scripts/build_release.py --output-dir dist
@@ -66,11 +66,11 @@ jobs:
           cp packages/sanka-extension-llm-to-jev/extension.json release-assets/sanka-extension-llm-to-jev.json
           cp packages/sanka-extension-drf-to-fastapi/extension.json release-assets/sanka-extension-drf-to-fastapi.json
           cp packages/sanka-extension-drf-to-flask/extension.json release-assets/sanka-extension-drf-to-flask.json
-          cp packages/sanka-connector-markdown/extension.json release-assets/sanka-connector-markdown.json
-          cp packages/sanka-connector-csv/extension.json release-assets/sanka-connector-csv.json
-          cp packages/sanka-connector-sqlite/extension.json release-assets/sanka-connector-sqlite.json
-          cp packages/sanka-connector-postgres/extension.json release-assets/sanka-connector-postgres.json
-          cp packages/sanka-connector-clickhouse/extension.json release-assets/sanka-connector-clickhouse.json
+          cp packages/sanka-extension-markdown/extension.json release-assets/sanka-extension-markdown.json
+          cp packages/sanka-extension-csv/extension.json release-assets/sanka-extension-csv.json
+          cp packages/sanka-extension-sqlite/extension.json release-assets/sanka-extension-sqlite.json
+          cp packages/sanka-extension-postgres/extension.json release-assets/sanka-extension-postgres.json
+          cp packages/sanka-extension-clickhouse/extension.json release-assets/sanka-extension-clickhouse.json
       - run: >-
           gh release create "$GITHUB_REF_NAME"
           dist/*.whl
