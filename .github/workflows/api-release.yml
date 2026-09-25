@@ -21,7 +21,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a7
+          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a8
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
@@ -145,7 +145,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "Python-to-Go converter 0.1.0a7" \
-            --notes "Experimental Python-to-Go 0.1.0a7 qualified with published Sanka CLI 0.3.0. Includes guarded FastAPI PostgreSQL row transfer plus the unchanged Rust 0.1.0a2 converter and helper wheels. Acceptance covers pinned examples, source-to-target HTTP comparison, captured source tests and PostgreSQL transfer fixtures. No arbitrary-application or production-cutover claim."
+            --title "Python-to-Go converter 0.1.0a8" \
+            --notes "Experimental Python-to-Go 0.1.0a8 qualified with published Sanka CLI 0.3.0. Adds bounded linear FastAPI Alembic add_column lowering, with PostgreSQL replay, existing-row transfer, and rollback checks across Go routers. Includes the unchanged Rust 0.1.0a2 converter and helper wheels. No arbitrary-application or production-cutover claim."
         env:
           GH_TOKEN: ${{ github.token }}

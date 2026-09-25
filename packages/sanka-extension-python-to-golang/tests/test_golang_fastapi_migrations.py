@@ -13,7 +13,7 @@ from test_golang_relational_writes import backend_source, models_source, scenari
 from test_golang_schema import generate, schema_dsn
 
 
-def project(root: Path) -> str:
+def project(root: Path, *, evolution: bool = False) -> str:
     model = models_source("fastapi")
     model = model.replace(
         "DeclarativeBase, Mapped, mapped_column",
@@ -65,6 +65,27 @@ def downgrade():
     op.drop_index("ix_widgets_parent_id", table_name="widgets")
     op.drop_table("widgets")
 """)
+    if evolution:
+        second = revisions / "0002_widgets.py"
+        second.write_text(
+            second.read_text()
+            .replace('        sa.Column("enabled", sa.Boolean(), nullable=False),\n', "")
+            .replace('        sa.Column("note", sa.Text(), nullable=True))', "    )")
+        )
+        (revisions / "0003_widget_fields.py").write_text("""from alembic import op
+import sqlalchemy as sa
+revision = "0003"
+down_revision = "0002"
+branch_labels = None
+depends_on = None
+def upgrade():
+    op.add_column("widgets", sa.Column(
+        "enabled", sa.Boolean(), nullable=False, server_default="true"))
+    op.add_column("widgets", sa.Column("note", sa.Text(), nullable=True))
+def downgrade():
+    op.drop_column("widgets", "note")
+    op.drop_column("widgets", "enabled")
+""")
     return model
 
 
@@ -86,6 +107,50 @@ def test_linear_migrations_and_relationships_generate(tmp_path: Path, target: st
     assert 'CREATE TABLE "widgets"' in (output / "migrations/00002_0002.sql").read_text()
     assert "DownTo(ctx, 0)" in (output / "database.go").read_text()
     assert (output / "tools/transfer_existing.py").is_file()
+
+
+@pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
+def test_linear_add_column_migration_generate(tmp_path: Path, target: str) -> None:
+    model = project(tmp_path, evolution=True)
+    output = generate(
+        tmp_path,
+        "fastapi",
+        target,
+        app_source=backend_source("fastapi"),
+        model_text=model,
+    )
+    migrations = output / "migrations"
+    assert sorted(path.name for path in migrations.iterdir()) == [
+        "00001_0001.sql",
+        "00002_0002.sql",
+        "00003_0003.sql",
+    ]
+    assert '"enabled" boolean' not in (migrations / "00002_0002.sql").read_text()
+    third = (migrations / "00003_0003.sql").read_text()
+    assert 'ALTER TABLE "widgets" ADD COLUMN "enabled" boolean NOT NULL DEFAULT \'true\';' in third
+    assert 'ALTER TABLE "widgets" ADD COLUMN "note" text;' in third
+    assert third.index('DROP COLUMN "note"') < third.index('DROP COLUMN "enabled"')
+
+
+@pytest.mark.parametrize(
+    "before,after",
+    [
+        ('server_default="true"', 'server_default="maybe"'),
+        ("sa.Boolean(), nullable=False", "sa.Integer(), nullable=False"),
+        ('op.drop_column("widgets", "enabled")', 'op.drop_column("widgets", "note")'),
+        ('op.add_column("widgets", sa.Column("note"', 'op.add_column("parents", sa.Column("note"'),
+    ],
+)
+def test_add_column_mismatch_blocks(tmp_path: Path, before: str, after: str) -> None:
+    model = project(tmp_path, evolution=True)
+    (tmp_path / "app.py").write_text(backend_source("fastapi"))
+    (tmp_path / "models.py").write_text(model)
+    path = tmp_path / "alembic/versions/0003_widget_fields.py"
+    path.write_text(path.read_text().replace(before, after))
+    result = capture(
+        tmp_path, configuration({"source_framework": "fastapi", "database_layer": "pgx"})
+    )
+    assert result["gaps"]
 
 
 @pytest.mark.parametrize(
@@ -137,7 +202,7 @@ def test_source_to_go_postgres_replay(
     from psycopg import sql
     from sanka_extension_python_to_golang.replay import replay
 
-    model = project(tmp_path)
+    model = project(tmp_path, evolution=True)
     (tmp_path / "sanka-verify.json").write_text(json.dumps({"scenarios": scenarios()}))
     output = generate(
         tmp_path,
@@ -212,7 +277,7 @@ def test_fastapi_existing_rows_transfer(tmp_path: Path) -> None:
     from psycopg import sql
     from sqlalchemy import create_engine
 
-    model = project(tmp_path)
+    model = project(tmp_path, evolution=True)
     output = generate(
         tmp_path,
         "fastapi",
@@ -245,16 +310,23 @@ def test_fastapi_existing_rows_transfer(tmp_path: Path) -> None:
                     Operations.context(MigrationContext.configure(connection)),
                 ):
                     for revision in sorted((tmp_path / "alembic/versions").glob("*.py")):
+                        if revision.name == "0003_widget_fields.py":
+                            connection.exec_driver_sql(
+                                "INSERT INTO parents(name,count,enabled) VALUES ('parent',2,true)"
+                            )
+                            connection.exec_driver_sql(
+                                "INSERT INTO widgets(name,parent_id) VALUES ('widget',1)"
+                            )
                         runpy.run_path(str(revision))["upgrade"]()
             finally:
                 engine.dispose()
             with psycopg.connect(source_dsn, autocommit=True) as source:
-                source.execute("INSERT INTO parents(name,count,enabled) VALUES ('parent',2,true)")
-                source.execute(
-                    "INSERT INTO widgets(name,parent_id,enabled) VALUES ('widget',1,true)"
+                assert source.execute("SELECT enabled,note FROM widgets").fetchone() == (
+                    True,
+                    None,
                 )
                 source.execute("CREATE TABLE alembic_version(version_num text NOT NULL)")
-                source.execute("INSERT INTO alembic_version VALUES ('0002')")
+                source.execute("INSERT INTO alembic_version VALUES ('0003')")
             migrated = subprocess.run(
                 [str(binary), "up"],
                 env=os.environ | {"DATABASE_URL": target_dsn},
@@ -288,19 +360,30 @@ def test_fastapi_existing_rows_transfer(tmp_path: Path) -> None:
             assert unacknowledged.returncode != 0
             assert "acknowledge-excluded-tables" in unacknowledged.stderr
             with psycopg.connect(target_dsn, autocommit=True) as target:
-                target.execute("DELETE FROM goose_db_version WHERE version_id=2")
+                target.execute("DELETE FROM goose_db_version WHERE version_id=3")
             partial = transfer()
             assert partial.returncode != 0
             assert "not fully applied" in partial.stderr
             with psycopg.connect(target_dsn, autocommit=True) as target:
                 target.execute(
-                    "INSERT INTO goose_db_version(version_id,is_applied) VALUES (2,true)"
+                    "INSERT INTO goose_db_version(version_id,is_applied) VALUES (3,true)"
                 )
             copied = transfer("--execute", "--acknowledge-excluded-tables")
             assert copied.returncode == 0, copied.stderr
             verified = transfer("--verify")
             assert verified.returncode == 0, verified.stderr
             assert json.loads(verified.stdout)["rows"] == {"parents": 1, "widgets": 1}
+            with psycopg.connect(target_dsn) as target:
+                assert target.execute("SELECT enabled,note FROM widgets").fetchone() == (
+                    True,
+                    None,
+                )
+            with psycopg.connect(target_dsn, autocommit=True) as target:
+                target.execute("ALTER TABLE widgets ALTER COLUMN enabled SET DEFAULT false")
+            wrong_default = transfer("--verify")
+            assert wrong_default.returncode != 0 and "columns differ" in wrong_default.stderr
+            with psycopg.connect(target_dsn, autocommit=True) as target:
+                target.execute("ALTER TABLE widgets ALTER COLUMN enabled SET DEFAULT true")
             again = transfer("--execute", "--acknowledge-excluded-tables")
             assert again.returncode != 0 and "nonempty" in again.stderr
             with psycopg.connect(source_dsn, autocommit=True) as source:

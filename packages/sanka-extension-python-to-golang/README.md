@@ -37,8 +37,9 @@ This does not change the CLI's default catalog or install an unpublished candida
 The public release check runs pinned examples through Scan, Plan, Apply, Test,
 and Verify and compares source and target HTTP responses. See
 [sanka-examples](https://github.com/sankaHQ/sanka-examples) for that example's
-setup and plan review. The new FastAPI row-transfer command requires the 0.1.0a7
-wheel once that prerelease is published. Do not install a manifest that points
+setup and plan review. The FastAPI row-transfer command requires the published
+0.1.0a7 wheel. Alembic `add_column` lowering requires the 0.1.0a8 wheel after
+that prerelease is published. Do not install a manifest that points
 to an unpublished asset.
 
 ## Start with a project
@@ -310,13 +311,16 @@ Alembic revision ancestry plus ordered upgrade/downgrade operations; and ordered
 `AsyncSession` calls with explicit `begin` or `begin_nested` scopes. Files recognized by
 this scanner no longer appear as generic unconsumed-module gaps.
 
-For an empty target schema, a single linear chain of static Alembic `create_table`
-and non-unique `create_index` operations lowers to ordered Goose migrations when
-its columns, keys and indexes match the captured SQLAlchemy models exactly.
+For an empty target schema, a single linear chain of static Alembic `create_table`,
+`add_column`, and non-unique `create_index` operations lowers to ordered Goose
+migrations when its final columns, keys and indexes match the captured SQLAlchemy
+models exactly. Added columns must follow the model order. Nullable columns have
+no default; non-null columns require a static string, Boolean, or bounded integer
+server default. Each downgrade must explicitly reverse its additions.
 Reciprocal `relationship(back_populates=...)` declarations qualify only when a
 single captured foreign key links the child and parent; Go operations continue
 to use the foreign-key column. `migrate down` reverses the full chain.
-Branches, schema alterations, data migrations, ORM cascades or object traversal,
+Branches, other schema alterations, data migrations, ORM cascades or object traversal,
 unqualified repositories, and richer domain/request/response models remain
 explicit gaps. Migration lowering never runs against an existing schema.
 

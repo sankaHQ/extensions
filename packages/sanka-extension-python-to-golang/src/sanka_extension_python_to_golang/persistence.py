@@ -688,10 +688,12 @@ def _migration_column(text: str) -> dict[str, Any]:
     elif type_node.args or type_options:
         raise ValueError("unsupported migration type options")
     options = _literal_keywords(call)
-    if set(options) - {"nullable", "primary_key", "unique", "autoincrement"}:
+    if set(options) - {"nullable", "primary_key", "unique", "autoincrement", "server_default"}:
         raise ValueError("unsupported migration Column options")
-    if any(type(value) is not bool for value in options.values()):
-        raise ValueError("migration Column options must be boolean")
+    if any(type(value) is not bool for key, value in options.items() if key != "server_default"):
+        raise ValueError("migration Column flags must be boolean")
+    if "server_default" in options and type(options["server_default"]) is not str:
+        raise ValueError("migration server_default must be a static string")
     foreign = [arg for arg in call.args[2:] if isinstance(arg, ast.Call)]
     if len(foreign) != len(call.args[2:]) or len(foreign) > 1:
         raise ValueError("unsupported migration Column constraint")
@@ -766,6 +768,7 @@ def lower_linear_migrations(
         raise ValueError("migration history is disconnected")
     by_table = {model["table"]: model for model in models}
     created: set[str] = set()
+    columns_by_table: dict[str, list[str]] = {}
     indexes: set[tuple[str, tuple[str, ...]]] = set()
     index_names: set[str] = set()
     result = []
@@ -785,11 +788,10 @@ def lower_linear_migrations(
                 if model is None or table in created:
                     raise ValueError("migration creates an unknown or duplicate table")
                 columns = [_migration_column(arg) for arg in args[1:]]
-                if [column["name"] for column in columns] != [
-                    field["name"] for field in model["fields"]
-                ]:
+                names = [column["name"] for column in columns]
+                if not names or names != [field["name"] for field in model["fields"][: len(names)]]:
                     raise ValueError(f"migration columns differ from model {table}")
-                for column, field in zip(columns, model["fields"], strict=True):
+                for column, field in zip(columns, model["fields"][: len(columns)], strict=True):
                     opts = column["options"]
                     if (
                         column["sql_type"] != field["sql_type"]
@@ -799,18 +801,85 @@ def lower_linear_migrations(
                         or opts.get("unique", False) != field["unique"]
                         or opts.get("autoincrement", field["auto"]) != field["auto"]
                         or column["references"] != field.get("references")
+                        or "server_default" in opts
                     ):
                         raise ValueError(
                             f"migration column differs from model {table}.{field['name']}"
                         )
-                    if field.get("default"):
+                    if "default" in field:
                         raise ValueError("migration defaults require lowering")
                     if field.get("references") and field["references"]["table"] not in created:
                         raise ValueError("migration foreign key precedes its parent table")
                 if model.get("constraints"):
                     raise ValueError("migration table constraints require lowering")
                 created.add(table)
-                steps.append({"name": name, "table": table})
+                columns_by_table[table] = names
+                steps.append({"name": name, "table": table, "columns": names.copy()})
+            elif name == "add_column" and len(args) == 2 and not options:
+                table = identifier(_migration_literal(args[0]))
+                if table not in created:
+                    raise ValueError("migration adds a column before its table")
+                column = _migration_column(args[1])
+                names = columns_by_table[table]
+                model = by_table[table]
+                if len(names) >= len(model["fields"]):
+                    raise ValueError("migration added column differs from model order")
+                if column["name"] != model["fields"][len(names)]["name"]:
+                    raise ValueError("migration added column differs from model order")
+                field = model["fields"][len(names)]
+                opts = column["options"]
+                if (
+                    column["sql_type"] != field["sql_type"]
+                    or opts.get("nullable", True) != field["nullable"]
+                    or opts.get("primary_key", False)
+                    or opts.get("unique", False)
+                    or opts.get("autoincrement", False)
+                    or field["primary_key"]
+                    or field["unique"]
+                    or field["auto"]
+                    or column["references"] is not None
+                    or field.get("references") is not None
+                ):
+                    raise ValueError("migration added column differs from model")
+                default = opts.get("server_default")
+                if field["nullable"]:
+                    if default is not None or "default" in field:
+                        raise ValueError("nullable migration defaults require lowering")
+                else:
+                    kind = field["go_type"]
+                    valid = type(default) is str and "\x00" not in default
+                    if kind == "string" and valid:
+                        length = re.fullmatch(r"varchar\(([0-9]+)\)", field["sql_type"])
+                        valid = length is None or len(default) <= int(length[1])
+                    elif kind == "bool":
+                        valid = valid and default in {"true", "false"}
+                    elif kind in {"int32", "int64"}:
+                        valid = valid and re.fullmatch(r"-?(0|[1-9][0-9]*)", default) is not None
+                        if valid:
+                            bits = 32 if kind == "int32" else 64
+                            valid = -(2 ** (bits - 1)) <= int(default) < 2 ** (bits - 1)
+                    else:
+                        valid = False
+                    if "default" in field:
+                        expected = (
+                            field["default"]
+                            if kind == "string"
+                            else str(field["default"]).lower()
+                            if kind == "bool"
+                            else str(field["default"])
+                        )
+                        valid = valid and default == expected
+                    if not valid:
+                        raise ValueError("non-null added column requires matching static default")
+                names.append(column["name"])
+                steps.append(
+                    {
+                        "name": name,
+                        "table": table,
+                        "column": column["name"],
+                        "server_default": default,
+                    }
+                )
             elif name == "create_index" and len(args) == 3 and set(options) <= {"unique"}:
                 index = identifier(_migration_literal(args[0]))
                 table = identifier(_migration_literal(args[1]))
@@ -823,50 +892,71 @@ def lower_linear_migrations(
                     or _migration_literal(options.get("unique", "False")) is not False
                 ):
                     raise ValueError("unsupported migration index")
-                names = tuple(identifier(column) for column in index_columns)
+                index_fields = tuple(identifier(column) for column in index_columns)
+                if not set(index_fields) <= set(columns_by_table[table]):
+                    raise ValueError("migration index precedes its columns")
                 model = by_table[table]
                 matching = any(
-                    item["name"] == index and tuple(item["columns"]) == names
+                    item["name"] == index and tuple(item["columns"]) == index_fields
                     for item in model.get("indexes", [])
                 ) or (
-                    len(names) == 1
-                    and index == f"ix_{table}_{names[0]}"
+                    len(index_fields) == 1
+                    and index == f"ix_{table}_{index_fields[0]}"
                     and any(
-                        field["name"] == names[0] and field.get("index")
+                        field["name"] == index_fields[0] and field.get("index")
                         for field in model["fields"]
                     )
                 )
-                if not matching or (table, names) in indexes or index in index_names:
+                if not matching or (table, index_fields) in indexes or index in index_names:
                     raise ValueError("migration index differs from model")
-                indexes.add((table, names))
+                indexes.add((table, index_fields))
                 index_names.add(index)
-                steps.append({"name": name, "table": table, "index": index, "columns": list(names)})
+                steps.append(
+                    {"name": name, "table": table, "index": index, "columns": list(index_fields)}
+                )
             else:
                 raise ValueError(f"unsupported Alembic operation: {name}")
         expected_down = [
             ("drop_table", step["table"], None)
             if step["name"] == "create_table"
+            else ("drop_column", step["table"], step["column"])
+            if step["name"] == "add_column"
             else ("drop_index", step["index"], step["table"])
             for step in reversed(steps)
         ]
-        actual_down = []
+        actual_down: list[tuple[str, str, str | None]] = []
         for item in revision["downgrade"]:
-            if len(item["arguments"]) != 1:
-                raise ValueError("migration downgrade must reverse its upgrade")
-            actual_down.append(
-                (
-                    item["name"],
-                    identifier(_migration_literal(item["arguments"][0])),
-                    identifier(_migration_literal(item["options"]["table_name"]))
-                    if item["options"] and set(item["options"]) == {"table_name"}
-                    else None,
+            args, options = item["arguments"], item["options"]
+            if item["name"] == "drop_column" and len(args) == 2 and not options:
+                actual_down.append(
+                    (
+                        "drop_column",
+                        identifier(_migration_literal(args[0])),
+                        identifier(_migration_literal(args[1])),
+                    )
                 )
-            )
+            elif item["name"] == "drop_table" and len(args) == 1 and not options:
+                actual_down.append(("drop_table", identifier(_migration_literal(args[0])), None))
+            elif item["name"] == "drop_index" and len(args) == 1 and set(options) == {"table_name"}:
+                actual_down.append(
+                    (
+                        "drop_index",
+                        identifier(_migration_literal(args[0])),
+                        identifier(_migration_literal(options["table_name"])),
+                    )
+                )
+            else:
+                raise ValueError("migration downgrade must reverse its upgrade")
         if actual_down != expected_down:
             raise ValueError("migration downgrade must reverse its upgrade")
         result.append({"revision": revision["revision"], "steps": steps})
     if created != set(by_table):
         raise ValueError("migration history does not match the captured model tables")
+    if any(
+        columns_by_table[table] != [field["name"] for field in model["fields"]]
+        for table, model in by_table.items()
+    ):
+        raise ValueError("migration history does not match the captured model columns")
     expected_indexes = {
         (model["table"], (field["name"],))
         for model in models

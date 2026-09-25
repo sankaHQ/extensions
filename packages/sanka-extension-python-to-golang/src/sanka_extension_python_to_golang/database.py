@@ -353,6 +353,7 @@ def render_database(captured: dict[str, Any]) -> dict[str, str]:
     models = captured["models"]
     definitions = []
     table_sql: dict[str, list[str]] = {}
+    column_sql: dict[str, dict[str, str]] = {}
     if captured["configuration"]["schema_mode"] == "adopt-existing":
         sql = _adoption_sql(captured)
         down_help = "down preserves adopted application tables"
@@ -374,6 +375,7 @@ END; $$;""",
     for model in models:
         lines = []
         columns = []
+        column_sql[model["table"]] = {}
         for field in model["fields"]:
             kind = field["sql_type"]
             suffix = ""
@@ -397,7 +399,9 @@ END; $$;""",
                     suffix += " DEFERRABLE INITIALLY " + (
                         "DEFERRED" if reference["deferred"] else "IMMEDIATE"
                     )
-            columns.append(f'    "{field["name"]}" {kind}{suffix}')
+            definition = f'    "{field["name"]}" {kind}{suffix}'
+            columns.append(definition)
+            column_sql[model["table"]][field["name"]] = definition
             go_type = ("*" if field["nullable"] else "") + field["go_type"]
             lines.append(
                 f"    {go_name(field['name'])} {go_type} "
@@ -425,7 +429,16 @@ END; $$;""",
             statements = sql.copy() if number == 1 else ["-- +goose Up"]
             for step in revision["steps"]:
                 if step["name"] == "create_table":
-                    statements.append(table_sql[step["table"]][0])
+                    table_columns = [column_sql[step["table"]][name] for name in step["columns"]]
+                    statements.append(
+                        f'CREATE TABLE "{step["table"]}" (\n' + ",\n".join(table_columns) + "\n);"
+                    )
+                elif step["name"] == "add_column":
+                    definition = column_sql[step["table"]][step["column"]].strip()
+                    if step["server_default"] is not None:
+                        default = step["server_default"].replace("'", "''")
+                        definition += f" DEFAULT '{default}'"
+                    statements.append(f'ALTER TABLE "{step["table"]}" ADD COLUMN {definition};')
                 else:
                     names = ", ".join(f'"{name}"' for name in step["columns"])
                     statements.append(
@@ -435,6 +448,10 @@ END; $$;""",
             for step in reversed(revision["steps"]):
                 if step["name"] == "create_table":
                     statements.append(f'DROP TABLE "{step["table"]}";')
+                elif step["name"] == "add_column":
+                    statements.append(
+                        f'ALTER TABLE "{step["table"]}" DROP COLUMN "{step["column"]}";'
+                    )
                 else:
                     statements.append(f'DROP INDEX "{step["index"]}";')
             migrations[f"migrations/{number:05d}_{revision['revision']}.sql"] = (
