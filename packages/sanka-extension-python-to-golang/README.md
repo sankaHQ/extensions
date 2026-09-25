@@ -21,12 +21,12 @@ The main contracts are [routing and package imports](#project-routing),
 
 ## Install the published prerelease
 
-The published `api-converters-v0.1.0a1` GitHub prerelease contains the converter
-and dependency wheels with SHA-256 manifests. With the published CLI 0.2.12, pin it
+The published `api-converters-v0.1.0a6` GitHub prerelease contains the converter
+and dependency wheels with SHA-256 manifests. With the published CLI 0.3.0, pin it
 in a separate marketplace entry:
 
 ```bash
-RELEASE_COMMIT=$(git ls-remote https://github.com/sankaHQ/extensions.git refs/tags/api-converters-v0.1.0a1 | cut -f1)
+RELEASE_COMMIT=$(git ls-remote https://github.com/sankaHQ/extensions.git refs/tags/api-converters-v0.1.0a6 | cut -f1)
 test "${#RELEASE_COMMIT}" -eq 40
 sanka extension marketplace add https://github.com/sankaHQ/extensions.git \
   --revision "$RELEASE_COMMIT" --name api-converters --trust
@@ -34,13 +34,12 @@ sanka extension add sanka/python-to-golang --marketplace api-converters
 ```
 
 This does not change the CLI's default catalog or install an unpublished candidate.
-The public release check runs the small literal-GET example through Scan, Plan,
-Apply, Test, and Verify and compares source and target HTTP responses. See
+The public release check runs pinned examples through Scan, Plan, Apply, Test,
+and Verify and compares source and target HTTP responses. See
 [sanka-examples](https://github.com/sankaHQ/sanka-examples) for that example's
-setup and plan review. That published wheel predates the conventional DRF and
-composed-backend support described below. Those contracts require a wheel built
-from this source until a newer version is published; the public literal-GET
-example does not test them.
+setup and plan review. The new FastAPI row-transfer command requires the 0.1.0a7
+wheel once that prerelease is published. Do not install a manifest that points
+to an unpublished asset.
 
 ## Start with a project
 
@@ -1269,10 +1268,12 @@ database environment. This does not touch an application database during verific
 
 ### Existing PostgreSQL rows
 
-For a captured PostgreSQL source, the generated `tools/transfer_existing.py`
-copies only the contract's application tables to a separately migrated, empty
-PostgreSQL target schema. It requires `psycopg` 3 in the invoking Python
-environment. The default invocation is a read-only dry run:
+For a captured PostgreSQL DRF or FastAPI source, the generated
+`tools/transfer_existing.py` copies only the contract's application tables to a
+separately migrated, empty PostgreSQL target schema. FastAPI requires the
+qualified linear Alembic history and every generated Goose revision applied.
+The tool requires `psycopg` 3 in the invoking Python environment. The default
+invocation is a read-only dry run:
 
 ```bash
 export SANKA_GO_SOURCE_DATABASE_URL='postgresql://.../source'
@@ -1282,8 +1283,9 @@ python tools/transfer_existing.py --execute --acknowledge-excluded-tables
 python tools/transfer_existing.py --verify
 ```
 
-The command compares captured columns, constraints and required indexes, rejects
-row security, triggers, same-schema connections and nonempty targets, then copies
+The command compares captured columns, foreign-key behavior, constraints and
+required indexes, rejects row security, triggers, same-schema connections,
+incomplete target migrations and nonempty targets, then copies
 rows in model dependency order. The dry run lists excluded source tables;
 `--execute` requires `--acknowledge-excluded-tables` when that list is nonempty.
 Foreign keys crossing from captured to excluded tables are refused. Execution
@@ -1294,7 +1296,9 @@ refuses to run. Use a source write freeze and an isolated clone first; this
 command does not synchronize writes made after its source snapshot. Excluded
 tables, including Django's built-in auth and migration tables, and
 application-specific jobs still need a separate cutover plan. SQLite source
-databases do not have this transfer recipe.
+databases do not have this transfer recipe. The FastAPI transfer requires source
+and target schema parity; it does not apply Alembic migrations or copy
+`alembic_version`, which appears in the dry run as an excluded table.
 
 `adopt-existing` is a validation-only Goose baseline for a PostgreSQL schema
 containing exactly the captured tables. It refuses extra tables, changed columns,

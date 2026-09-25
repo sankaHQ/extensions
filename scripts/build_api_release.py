@@ -20,7 +20,7 @@ if __package__ in {None, ""}:
 from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel  # noqa: E402
 from scripts.check_release_artifacts import _entry_points, _wheel_metadata  # noqa: E402
 
-VERSION = "0.1.0a6"
+VERSION = "0.1.0a7"
 TAG = f"api-converters-v{VERSION}"
 PREFIX = f"https://github.com/sankaHQ/extensions/releases/download/{TAG}/"
 RUST_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a2/"

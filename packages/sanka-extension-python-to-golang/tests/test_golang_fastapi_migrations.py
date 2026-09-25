@@ -85,6 +85,7 @@ def test_linear_migrations_and_relationships_generate(tmp_path: Path, target: st
     assert 'CREATE TABLE "parents"' in (output / "migrations/00001_0001.sql").read_text()
     assert 'CREATE TABLE "widgets"' in (output / "migrations/00002_0002.sql").read_text()
     assert "DownTo(ctx, 0)" in (output / "database.go").read_text()
+    assert (output / "tools/transfer_existing.py").is_file()
 
 
 @pytest.mark.parametrize(
@@ -193,6 +194,125 @@ def test_source_to_go_postgres_replay(
                 ).fetchone() == (0,)
         finally:
             for schema in schemas:
+                admin.execute(
+                    sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema))
+                )
+
+
+@pytest.mark.skipif(
+    os.getenv("SANKA_GO_TESTS") != "1" or not os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN"),
+    reason="requires isolated PostgreSQL and Go",
+)
+def test_fastapi_existing_rows_transfer(tmp_path: Path) -> None:
+    import runpy
+
+    import psycopg
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+    from psycopg import sql
+    from sqlalchemy import create_engine
+
+    model = project(tmp_path)
+    output = generate(
+        tmp_path,
+        "fastapi",
+        "fiber",
+        app_source=backend_source("fastapi"),
+        model_text=model,
+    )
+    binary = tmp_path / "migrate-copy"
+    built = subprocess.run(
+        ["go", "build", "-mod=readonly", "-p=2", "-o", str(binary), "./cmd/migrate"],
+        cwd=output,
+        env=os.environ | {"GOWORK": "off", "GOTOOLCHAIN": "local", "GOMAXPROCS": "2"},
+        capture_output=True,
+        timeout=180,
+    )
+    assert built.returncode == 0, built.stderr.decode()
+    dsn = os.environ["SANKA_MIGRATE_TEST_POSTGRES_DSN"]
+    source_schema, target_schema = ["go_copy_" + uuid.uuid4().hex for _ in range(2)]
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        for schema in (source_schema, target_schema):
+            admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+        try:
+            source_dsn, target_dsn = [
+                schema_dsn(dsn, schema) for schema in (source_schema, target_schema)
+            ]
+            engine = create_engine(source_dsn.replace("postgresql://", "postgresql+psycopg://", 1))
+            try:
+                with (
+                    engine.begin() as connection,
+                    Operations.context(MigrationContext.configure(connection)),
+                ):
+                    for revision in sorted((tmp_path / "alembic/versions").glob("*.py")):
+                        runpy.run_path(str(revision))["upgrade"]()
+            finally:
+                engine.dispose()
+            with psycopg.connect(source_dsn, autocommit=True) as source:
+                source.execute("INSERT INTO parents(name,count,enabled) VALUES ('parent',2,true)")
+                source.execute(
+                    "INSERT INTO widgets(name,parent_id,enabled) VALUES ('widget',1,true)"
+                )
+                source.execute("CREATE TABLE alembic_version(version_num text NOT NULL)")
+                source.execute("INSERT INTO alembic_version VALUES ('0002')")
+            migrated = subprocess.run(
+                [str(binary), "up"],
+                env=os.environ | {"DATABASE_URL": target_dsn},
+                capture_output=True,
+                timeout=60,
+            )
+            assert migrated.returncode == 0, migrated.stderr.decode()
+            command = [os.sys.executable, str(output / "tools/transfer_existing.py")]
+            environment = os.environ | {
+                "SANKA_GO_SOURCE_DATABASE_URL": source_dsn,
+                "DATABASE_URL": target_dsn,
+            }
+
+            def transfer(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [*command, *args],
+                    env=environment,
+                    text=True,
+                    capture_output=True,
+                    timeout=60,
+                )
+
+            dry = transfer()
+            assert dry.returncode == 0, dry.stderr
+            assert json.loads(dry.stdout) == {
+                "mode": "dry-run",
+                "rows": {"parents": 1, "widgets": 1},
+                "excluded_tables": ["alembic_version"],
+            }
+            unacknowledged = transfer("--execute")
+            assert unacknowledged.returncode != 0
+            assert "acknowledge-excluded-tables" in unacknowledged.stderr
+            with psycopg.connect(target_dsn, autocommit=True) as target:
+                target.execute("DELETE FROM goose_db_version WHERE version_id=2")
+            partial = transfer()
+            assert partial.returncode != 0
+            assert "not fully applied" in partial.stderr
+            with psycopg.connect(target_dsn, autocommit=True) as target:
+                target.execute(
+                    "INSERT INTO goose_db_version(version_id,is_applied) VALUES (2,true)"
+                )
+            copied = transfer("--execute", "--acknowledge-excluded-tables")
+            assert copied.returncode == 0, copied.stderr
+            verified = transfer("--verify")
+            assert verified.returncode == 0, verified.stderr
+            assert json.loads(verified.stdout)["rows"] == {"parents": 1, "widgets": 1}
+            again = transfer("--execute", "--acknowledge-excluded-tables")
+            assert again.returncode != 0 and "nonempty" in again.stderr
+            with psycopg.connect(source_dsn, autocommit=True) as source:
+                source.execute("ALTER TABLE widgets DROP CONSTRAINT widgets_parent_id_fkey")
+                source.execute(
+                    "ALTER TABLE widgets ADD CONSTRAINT widgets_parent_id_fkey "
+                    "FOREIGN KEY (parent_id) REFERENCES parents(id) ON DELETE CASCADE"
+                )
+            mismatched = transfer("--verify")
+            assert mismatched.returncode != 0 and "constraints differ" in mismatched.stderr
+        finally:
+            for schema in (source_schema, target_schema):
                 admin.execute(
                     sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema))
                 )

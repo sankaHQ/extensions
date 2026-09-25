@@ -316,6 +316,7 @@ def test_installed_cli_database_lifecycle(tmp_path, installed_cli, framework, ta
                     "00001_0001.sql",
                     "00002_0002.sql",
                 ]
+                assert (output / "tools/transfer_existing.py").is_file()
             generated = hashes(output)
             assert generated == {
                 name: hashlib.sha256(content.encode()).hexdigest()

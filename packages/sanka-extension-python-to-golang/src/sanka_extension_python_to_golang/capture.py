@@ -34,7 +34,7 @@ from .values import (
 
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
-VERSION = "0.1.0a6"
+VERSION = "0.1.0a7"
 MAX_SOURCE_BYTES = 256 * 1024 * 1024
 MAX_SOURCE_FILES = 20_000
 GAP_PATH_SAMPLES = 8
