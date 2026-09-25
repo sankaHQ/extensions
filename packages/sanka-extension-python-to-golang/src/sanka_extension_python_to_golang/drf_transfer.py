@@ -19,6 +19,12 @@ from psycopg import sql
 
 CONTRACT = json.loads((Path(__file__).resolve().parents[1] / "contract.json").read_text())
 MODELS = CONTRACT["models"]
+DEFAULT_COLUMNS = {
+    (step["table"], step["column"])
+    for revision in CONTRACT.get("fastapi_persistence", {}).get("lowered_migrations", [])
+    for step in revision["steps"]
+    if step["name"] == "add_column" and step["server_default"] is not None
+}
 
 
 def fail(message):
@@ -48,13 +54,16 @@ def column_signature(connection, model):
     ).fetchall()
     if [row[0] for row in columns] != [field["name"] for field in model["fields"]]:
         fail(table + " columns differ from the captured schema")
+    signatures = []
     for row, field in zip(columns, model["fields"], strict=True):
         default, identity, generated = row[6:]
+        expected_default = (table, field["name"]) in DEFAULT_COLUMNS
         if generated != "NEVER" or (
             field["auto"] and identity != "YES" and not (default or "").startswith("nextval(")
-        ) or (not field["auto"] and (default is not None or identity != "NO")):
+        ) or (not field["auto"] and (identity != "NO" or (default is None) == expected_default)):
             fail(table + " has unsupported column defaults or generated values")
-    return [row[:6] for row in columns]
+        signatures.append(row[:6] + (default if expected_default else None,))
+    return signatures
 
 
 def constraint_signature(connection, model, *, source=False):
