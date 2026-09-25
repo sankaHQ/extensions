@@ -18,7 +18,9 @@ The `api-release.yml` pull-request jobs build six wheels, check the two
 manifests and scoped catalog, and exercise the pinned `sanka-examples` revision
 `e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.0.
 The Go job also runs packaged DRF, Flask and FastAPI fixtures against PostgreSQL
-across Fiber, chi, mux and Gin. Selected DRF, Flask and FastAPI original tests
+across Fiber, chi, mux and Gin. Its installed-CLI cases include the two-revision
+FastAPI/Alembic fixture, so scan, plan, apply, test and verify exercise the
+released wheel and the generated migrations. Selected DRF, Flask and FastAPI original tests
 run against disposable PostgreSQL databases. Local qualification covers an
 isolated cross-app row transfer; it is not an application cutover.
 

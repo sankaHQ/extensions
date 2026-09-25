@@ -31,6 +31,7 @@ PROJECT_SOURCES = (
     "flask-complete",
     "fastapi-complete",
     "fastapi-async-complete",
+    "fastapi-alembic",
 )
 
 
@@ -93,6 +94,18 @@ def installed_cli(tmp_path_factory):
 
 
 def cli_project(root, framework, target):
+    if framework == "fastapi-alembic":
+        from test_golang_fastapi_migrations import project
+        from test_golang_relational_writes import backend_source, scenarios
+
+        (root / "app.py").write_text(backend_source("fastapi"))
+        (root / "models.py").write_text(project(root))
+        (root / "sanka-verify.json").write_text(json.dumps({"scenarios": scenarios()}))
+        return {
+            "source_framework": "fastapi",
+            "target_framework": target,
+            "database_layer": "pgx",
+        }
     if framework.endswith("-complete"):
         from test_golang_complete_projects import complete_project
 
@@ -298,6 +311,11 @@ def test_installed_cli_database_lifecycle(tmp_path, installed_cli, framework, ta
             output = tmp_path / ".sanka/extensions/sanka/python-to-golang/golang"
             assert not output.exists()
             cli("apply", "--plan-hash", planned["plan_hash"])
+            if framework == "fastapi-alembic":
+                assert sorted(path.name for path in (output / "migrations").iterdir()) == [
+                    "00001_0001.sql",
+                    "00002_0002.sql",
+                ]
             generated = hashes(output)
             assert generated == {
                 name: hashlib.sha256(content.encode()).hexdigest()
