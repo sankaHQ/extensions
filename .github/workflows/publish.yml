@@ -66,11 +66,6 @@ jobs:
           cp packages/sanka-extension-llm-to-jev/extension.json release-assets/sanka-extension-llm-to-jev.json
           cp packages/sanka-extension-drf-to-fastapi/extension.json release-assets/sanka-extension-drf-to-fastapi.json
           cp packages/sanka-extension-drf-to-flask/extension.json release-assets/sanka-extension-drf-to-flask.json
-          cp packages/sanka-extension-markdown/extension.json release-assets/sanka-extension-markdown.json
-          cp packages/sanka-extension-csv/extension.json release-assets/sanka-extension-csv.json
-          cp packages/sanka-extension-sqlite/extension.json release-assets/sanka-extension-sqlite.json
-          cp packages/sanka-extension-postgres/extension.json release-assets/sanka-extension-postgres.json
-          cp packages/sanka-extension-clickhouse/extension.json release-assets/sanka-extension-clickhouse.json
       - run: >-
           gh release create "$GITHUB_REF_NAME"
           dist/*.whl

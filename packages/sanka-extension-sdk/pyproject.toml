@@ -1,6 +1,6 @@
 [project]
 name = "sanka-extension-sdk"
-version = "0.1.0a7"
+version = "0.1.0a8"
 description = "Sanka Extension SDK for data access, business flows and code migration"
 readme = "README.md"
 requires-python = ">=3.12"

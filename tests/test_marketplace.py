@@ -2,14 +2,11 @@
 """Public marketplace contract for runtime extension discovery."""
 
 import json
-import os
-import subprocess
 from pathlib import Path
 
 import yaml
 
 RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/"
-NEW_RELEASE_PREFIX = RELEASE_PREFIX + "extensions-v0.1.0a33/"
 EXPECTED = {
     "sanka/react-native-to-native": {
         "kind": "migration",
@@ -65,60 +62,10 @@ EXPECTED = {
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },
-    "sanka/markdown": {
-        "kind": "connector",
-        "protocol_version": "sanka-connector/v1",
-        "distribution": {
-            "name": "sanka-extension-markdown",
-            "version": "0.1.0a15",
-            "entry_point": "markdown",
-        },
-        "providers": [{"name": "markdown", "roles": ["source"]}],
-    },
-    "sanka/csv": {
-        "kind": "connector",
-        "protocol_version": "sanka-connector/v1",
-        "distribution": {
-            "name": "sanka-extension-csv",
-            "version": "0.1.0a15",
-            "entry_point": "csv",
-        },
-        "providers": [{"name": "csv", "roles": ["source"]}],
-    },
-    "sanka/sqlite": {
-        "kind": "connector",
-        "protocol_version": "sanka-connector/v1",
-        "distribution": {
-            "name": "sanka-extension-sqlite",
-            "version": "0.1.0a15",
-            "entry_point": "sqlite",
-        },
-        "providers": [{"name": "sqlite", "roles": ["source", "destination"]}],
-    },
-    "sanka/postgres": {
-        "kind": "connector",
-        "protocol_version": "sanka-connector/v1",
-        "distribution": {
-            "name": "sanka-extension-postgres",
-            "version": "0.1.0a15",
-            "entry_point": "postgres",
-        },
-        "providers": [{"name": "postgres", "roles": ["source", "destination"]}],
-    },
-    "sanka/clickhouse": {
-        "kind": "connector",
-        "protocol_version": "sanka-connector/v1",
-        "distribution": {
-            "name": "sanka-extension-clickhouse",
-            "version": "0.1.0a15",
-            "entry_point": "clickhouse",
-        },
-        "providers": [{"name": "clickhouse", "roles": ["destination"]}],
-    },
 }
 
 
-def test_official_marketplace_has_data_and_code_extensions() -> None:
+def test_official_marketplace_has_only_current_code_extensions() -> None:
     catalog = json.loads(Path("marketplace.json").read_text())
 
     assert catalog["schema_version"] == "sanka-marketplace/v1"
@@ -139,10 +86,8 @@ def test_official_marketplace_has_data_and_code_extensions() -> None:
         assert manifest["kind"] == expected["kind"]
         assert manifest["protocol_version"] == expected["protocol_version"]
         assert manifest["distribution"] == expected["distribution"]
-        if "providers" in expected:
-            assert manifest["providers"] == expected["providers"]
         assert manifest["wheels"]
-        expected_prefix = NEW_RELEASE_PREFIX if expected["kind"] == "connector" else RELEASE_PREFIX
+        expected_prefix = RELEASE_PREFIX
         if item["id"] == "sanka/drf-to-flask":
             expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a31/"
         if item["id"] == "sanka/drf-to-fastapi":
@@ -176,32 +121,5 @@ def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> No
         "release-assets/sanka-extension-llm-to-jev.json",
         "release-assets/sanka-extension-drf-to-fastapi.json",
         "release-assets/sanka-extension-drf-to-flask.json",
-        "release-assets/sanka-extension-markdown.json",
-        "release-assets/sanka-extension-csv.json",
-        "release-assets/sanka-extension-sqlite.json",
-        "release-assets/sanka-extension-postgres.json",
-        "release-assets/sanka-extension-clickhouse.json",
     ]
     assert len(destinations) == len(set(destinations))
-
-
-def test_release_workflow_only_accepts_current_candidate_tag() -> None:
-    workflow = yaml.safe_load(Path(".github/workflows/publish.yml").read_text())
-    guard = next(
-        step["run"]
-        for step in workflow["jobs"]["build"]["steps"]
-        if "GITHUB_REF_TYPE" in step.get("run", "")
-    )
-    tag = NEW_RELEASE_PREFIX.removeprefix(RELEASE_PREFIX).rstrip("/")
-    for ref_type, ref_name, allowed in [
-        ("tag", tag, True),
-        ("branch", tag, False),
-        ("tag", "extensions-v0.1.0a27", False),
-        ("branch", "main", False),
-    ]:
-        result = subprocess.run(
-            ["sh", "-c", guard],
-            env={**os.environ, "GITHUB_REF_TYPE": ref_type, "GITHUB_REF_NAME": ref_name},
-            check=False,
-        )
-        assert (result.returncode == 0) is allowed

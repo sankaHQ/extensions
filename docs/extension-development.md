@@ -33,7 +33,7 @@ from the runtime and never edit its cache or project lock to simulate installati
 ## Data access
 
 ```python
-from sanka_extensions.data import ExtensionRegistration, DataReader, DataWriter
+from sanka_extensions.app import ExtensionRegistration, DataReader, DataWriter
 
 
 # The implementations satisfy the typed protocols and receive credentials per call.
@@ -45,7 +45,7 @@ A registration declares a endpoint-type key and optional source/destination role
 
 Keep base protocols and optional capabilities separate. Implement `DataReader` and/or `DataWriter` and the capabilities the endpoint supports. Destination writes must require the complete non-null identity tuple when a route declares identity fields; never silently weaken a composite key.
 
-- Import `sanka_extensions.data` and the extension's own third-party driver dependencies. Never import `sanka`, `sanka.runtime`, or another extension.
+- Import `sanka_extensions.app` and the extension's own third-party driver dependencies. Never import `sanka`, `sanka.runtime`, or another extension.
 - Keep the SDK free of drivers and runtime dependencies except its typed compatibility package and every source file marked `SPDX-License-Identifier: Apache-2.0`.
 - Export `EXTENSION`. Retain `CONNECTOR = EXTENSION` for existing Python callers;
   new package entry points target `EXTENSION`.

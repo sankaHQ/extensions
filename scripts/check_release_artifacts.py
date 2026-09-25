@@ -59,14 +59,6 @@ CATALOG: dict[str, Any] = {
             "id": "sanka/drf-to-flask",
             "manifest": "packages/sanka-extension-drf-to-flask/extension.json",
         },
-        {"id": "sanka/markdown", "manifest": "packages/sanka-extension-markdown/extension.json"},
-        {"id": "sanka/csv", "manifest": "packages/sanka-extension-csv/extension.json"},
-        {"id": "sanka/sqlite", "manifest": "packages/sanka-extension-sqlite/extension.json"},
-        {"id": "sanka/postgres", "manifest": "packages/sanka-extension-postgres/extension.json"},
-        {
-            "id": "sanka/clickhouse",
-            "manifest": "packages/sanka-extension-clickhouse/extension.json",
-        },
     ],
 }
 MIGRATION_MANIFEST: dict[str, Any] = {
@@ -94,78 +86,6 @@ MIGRATION_MANIFEST: dict[str, Any] = {
     "targets": ["fastapi"],
     "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
 }
-DATA_MANIFESTS: dict[str, dict[str, Any]] = {
-    "sanka-extension-markdown": {
-        "schema_version": "sanka-extension-manifest/v2",
-        "kind": "connector",
-        "id": "sanka/markdown",
-        "version": "0.1.0a15",
-        "distribution": {
-            "name": "sanka-extension-markdown",
-            "version": "0.1.0a15",
-            "entry_point": "markdown",
-        },
-        "protocol_version": "sanka-connector/v1",
-        "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
-        "providers": [{"name": "markdown", "roles": ["source"]}],
-    },
-    "sanka-extension-csv": {
-        "schema_version": "sanka-extension-manifest/v2",
-        "kind": "connector",
-        "id": "sanka/csv",
-        "version": "0.1.0a15",
-        "distribution": {
-            "name": "sanka-extension-csv",
-            "version": "0.1.0a15",
-            "entry_point": "csv",
-        },
-        "protocol_version": "sanka-connector/v1",
-        "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
-        "providers": [{"name": "csv", "roles": ["source"]}],
-    },
-    "sanka-extension-sqlite": {
-        "schema_version": "sanka-extension-manifest/v2",
-        "kind": "connector",
-        "id": "sanka/sqlite",
-        "version": "0.1.0a15",
-        "distribution": {
-            "name": "sanka-extension-sqlite",
-            "version": "0.1.0a15",
-            "entry_point": "sqlite",
-        },
-        "protocol_version": "sanka-connector/v1",
-        "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
-        "providers": [{"name": "sqlite", "roles": ["source", "destination"]}],
-    },
-    "sanka-extension-postgres": {
-        "schema_version": "sanka-extension-manifest/v2",
-        "kind": "connector",
-        "id": "sanka/postgres",
-        "version": "0.1.0a15",
-        "distribution": {
-            "name": "sanka-extension-postgres",
-            "version": "0.1.0a15",
-            "entry_point": "postgres",
-        },
-        "protocol_version": "sanka-connector/v1",
-        "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
-        "providers": [{"name": "postgres", "roles": ["source", "destination"]}],
-    },
-    "sanka-extension-clickhouse": {
-        "schema_version": "sanka-extension-manifest/v2",
-        "kind": "connector",
-        "id": "sanka/clickhouse",
-        "version": "0.1.0a15",
-        "distribution": {
-            "name": "sanka-extension-clickhouse",
-            "version": "0.1.0a15",
-            "entry_point": "clickhouse",
-        },
-        "protocol_version": "sanka-connector/v1",
-        "runtime": {"sanka_cli": ">=0.2.0,<0.4"},
-        "providers": [{"name": "clickhouse", "roles": ["destination"]}],
-    },
-}
 FLASK_MANIFEST = {
     **MIGRATION_MANIFEST,
     "id": "sanka/drf-to-flask",
@@ -181,14 +101,6 @@ FLASK_MANIFEST = {
 MANIFESTS = {
     "sanka-extension-drf-to-fastapi": MIGRATION_MANIFEST,
     "sanka-extension-drf-to-flask": FLASK_MANIFEST,
-    **DATA_MANIFESTS,
-}
-DATA_ENTRY_POINTS = {
-    "sanka-extension-markdown": {"markdown": "sanka_extension_markdown:EXTENSION"},
-    "sanka-extension-csv": {"csv": "sanka_extension_csv:EXTENSION"},
-    "sanka-extension-sqlite": {"sqlite": "sanka_extension_sqlite:EXTENSION"},
-    "sanka-extension-postgres": {"postgres": "sanka_extension_postgres:EXTENSION"},
-    "sanka-extension-clickhouse": {"clickhouse": "sanka_extension_clickhouse:EXTENSION"},
 }
 REQUIRED_PACKAGE_FILES = {
     "sanka-extension-drf-to-fastapi": {
@@ -363,12 +275,6 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
         elif name in {"sanka-connector-sdk", "sanka-drf-replay", "sanka-code-migration"}:
             if requirements or entries:
                 errors.append(f"{name} SDK wheel must have no dependencies or entry points")
-        elif name in DATA_ENTRY_POINTS:
-            data_entries = _entry_points(entries, "sanka.connectors")
-            if "sanka-extension-sdk==0.1.0a4" not in requirements:
-                errors.append(f"{name} wheel does not depend on the exact Extension SDK")
-            if data_entries != DATA_ENTRY_POINTS[name]:
-                errors.append(f"{name} wheel has no exact data extension entry point")
         elif name in {"sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask"}:
             missing = REQUIRED_PACKAGE_FILES[name] - members
             if missing:

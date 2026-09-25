@@ -24,26 +24,6 @@
     {
       "id": "sanka/drf-to-flask",
       "manifest": "packages/sanka-extension-drf-to-flask/extension.json"
-    },
-    {
-      "id": "sanka/markdown",
-      "manifest": "packages/sanka-extension-markdown/extension.json"
-    },
-    {
-      "id": "sanka/csv",
-      "manifest": "packages/sanka-extension-csv/extension.json"
-    },
-    {
-      "id": "sanka/sqlite",
-      "manifest": "packages/sanka-extension-sqlite/extension.json"
-    },
-    {
-      "id": "sanka/postgres",
-      "manifest": "packages/sanka-extension-postgres/extension.json"
-    },
-    {
-      "id": "sanka/clickhouse",
-      "manifest": "packages/sanka-extension-clickhouse/extension.json"
     }
   ]
 }

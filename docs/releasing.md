@@ -1,19 +1,18 @@
 # Releasing Sanka extension packages
 
-## Data extension package names: a33
+## Retire local application data packages: a33
 
-`extensions-v0.1.0a33` builds `sanka-extension-{clickhouse,csv,markdown,postgres,sqlite}`
-at `0.1.0a15`. Their `sanka/<name>` IDs and data-access protocol remain stable.
-The former `sanka-connector-*` releases and locked marketplace snapshots remain
-immutable. The new wheels include compatibility Python imports for the published
-`sanka_connector_*` paths; the SDK compatibility wheel is still pinned to a12.
+`extensions-v0.1.0a33` removes the five application data packages from the
+current catalog and repository. The release bundle contains only the six
+already published wheels used by the remaining code extensions. Their bytes and
+manifest URLs stay pinned. Previously published data wheels and existing project
+locks remain immutable; a new catalog snapshot no longer offers them for install.
 
-Build the exact candidate with `make update-marketplace-hashes`, review the five
-new wheel hashes and manifests, then run `make check build-release`. After the
-reviewed merge, create the a33 tag and run `publish.yml`. Verify a clean install
-of each new wheel and an old locked project's readback before advancing the CLI's
-official catalog revision. A catalog refresh must present the new distribution as
-an update; the project lock changes only on an explicit `sanka extension add`.
+The canonical SDK namespace changes to `sanka_extensions.app` in a separately
+versioned a8 candidate. Publish that SDK before updating the shared runtime's
+embedded SDK provenance. Run `make check build-release` on the reviewed source,
+then verify the a33 catalog contains only current code extensions before a
+separately authorized publication.
 
 ## FastAPI Swagger choice: a32
 
@@ -64,10 +63,9 @@ gate complete merely because the marketplace release succeeds.
 ## Preparation and review
 
 Use the repository uv workspace and focused checks while editing. Regenerate
-manifest hashes only after wheel changes; the CLI 0.3 compatibility update
-reuses the reviewed a31 Data/Code wheel bytes. Finish code review, then run `make check build-release`
-as the final broad gate. The build verifies all 194 wheel filenames, locked
-third-party hashes, package versions, dependency and entry-point boundaries, and
+manifest hashes only after wheel changes. Finish code review, then run
+`make check build-release` as the final broad gate. The build verifies the six
+pinned wheel filenames, package versions, dependency and entry-point boundaries, and
 manifest URLs and hashes. The builder resumes interrupted downloads by
 reusing published wheels only when their locked size and SHA-256 match. The a31
 implementing wheels are pinned to their published bytes; source changes require new

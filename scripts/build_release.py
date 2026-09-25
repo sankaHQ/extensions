@@ -16,13 +16,7 @@ from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_DEPENDENCY_WHEEL_BYTES = 128 * 1024 * 1024
-MARKETPLACE_PACKAGES: tuple[str, ...] = (
-    "sanka-extension-markdown",
-    "sanka-extension-csv",
-    "sanka-extension-sqlite",
-    "sanka-extension-postgres",
-    "sanka-extension-clickhouse",
-)
+MARKETPLACE_PACKAGES: tuple[str, ...] = ()
 LOCAL_WHEELS = (
     "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
     "sanka_code_migration-0.1.0a3-py3-none-any.whl",
@@ -30,24 +24,8 @@ LOCAL_WHEELS = (
     "sanka_extension_drf_to_fastapi-0.1.0a18-py3-none-any.whl",
     "sanka_extension_drf_to_flask-0.1.0a12-py3-none-any.whl",
     "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-    "sanka_extension_markdown-0.1.0a15-py3-none-any.whl",
-    "sanka_extension_csv-0.1.0a15-py3-none-any.whl",
-    "sanka_extension_sqlite-0.1.0a15-py3-none-any.whl",
-    "sanka_extension_postgres-0.1.0a15-py3-none-any.whl",
-    "sanka_extension_clickhouse-0.1.0a15-py3-none-any.whl",
 )
-DEPENDENCIES = (
-    "backports-zstd",
-    "certifi",
-    "clickhouse-connect",
-    "lz4",
-    "psycopg",
-    "psycopg-binary",
-    "pyyaml",
-    "tzdata",
-    "typing-extensions",
-    "urllib3",
-)
+DEPENDENCIES: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -200,11 +178,9 @@ def _prepare_output(output_dir: Path, *, root: Path = ROOT) -> Path:
     if not relative.parts or relative.parts[0] not in {"dist", "release"}:
         raise ValueError("release output directory must be repository-owned")
     output_dir.mkdir(parents=True, exist_ok=True)
-    pinned = {wheel.name for wheel in PINNED_LOCAL_WHEELS}
-    for name in LOCAL_WHEELS:
-        if name in pinned:
-            continue
-        (output_dir / name).unlink(missing_ok=True)
+    for wheel in output_dir.glob("*.whl"):
+        if wheel.name not in MARKETPLACE_WHEELS:
+            wheel.unlink()
     return output_dir
 
 

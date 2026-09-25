@@ -46,9 +46,15 @@ def catalog_document(root: Path) -> str:
         "An endpoint can be a database, a file or a directory of files.",
         "Readers supply migration sources; writers supply migration destinations.",
         "",
-        "| Extension | Data endpoint type | Reads | Writes |",
-        "| --- | --- | --- | --- |",
-        *data_rows,
+        *(
+            [
+                "| Extension | Data endpoint type | Reads | Writes |",
+                "| --- | --- | --- | --- |",
+                *data_rows,
+            ]
+            if data_rows
+            else ["No application data extensions are currently offered in this marketplace."]
+        ),
         "",
         "## Workflow",
         "",

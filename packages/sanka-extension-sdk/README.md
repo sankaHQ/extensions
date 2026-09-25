@@ -2,25 +2,22 @@
 
 Apache-2.0 interfaces for building Sanka Extensions with Python 3.12+.
 
-```bash
-python -m pip install \
-  https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a19/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
-  https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a19/sanka_extension_sdk-0.1.0a3-py3-none-any.whl
-```
-
-This installs released SDK `0.1.0a3` with Blueprint v2. The Flow generator protocol
-in this checkout is an unpublished `0.1.0a4` candidate; use the repository uv
-workspace to develop it.
+The a8 SDK candidate in this checkout introduces `sanka_extensions.app`.
+Build and install it with the [SDK guide](../../docs/sdk.md); the published a7
+wheel does not provide this interface.
 
 ```python
-from sanka_extensions.data import ExtensionRegistration, DataReader, DataWriter
+from sanka_extensions.app import ExtensionRegistration, DataReader, DataWriter
 from sanka_extensions.code import ExtensionRequest, ExtensionResponse
 from sanka_extensions import flow
 
 crm = flow.create(type="crm", parameters={"language": "ja"})
 ```
 
-`data` defines typed data access, records, capabilities, credentials, and registration. `flow` defines unresolved business-construction requests. `code` defines validated lifecycle requests and responses for application conversion. They share one SDK and retain distinct contracts.
+`app` defines typed application data access, records, capabilities, credentials,
+and registration. `flow` defines unresolved business-construction requests. `code`
+defines validated lifecycle requests and responses for application conversion.
+They share one SDK and retain distinct contracts.
 
 Flow definitions are immutable and serialize with `flow.encode_definition`;
 `flow.decode_definition` rejects unsupported schemas and weakened policies.

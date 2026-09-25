@@ -34,52 +34,10 @@ LOCAL_MANIFEST_WHEELS = {
         "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
         "sanka_extension_drf_to_fastapi-0.1.0a18-py3-none-any.whl",
     ),
-    "sanka-extension-markdown": (
-        "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-        "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_extension_markdown-0.1.0a15-py3-none-any.whl",
-    ),
-    "sanka-extension-csv": (
-        "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-        "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_extension_csv-0.1.0a15-py3-none-any.whl",
-    ),
-    "sanka-extension-sqlite": (
-        "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-        "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_extension_sqlite-0.1.0a15-py3-none-any.whl",
-    ),
-    "sanka-extension-postgres": (
-        "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-        "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_extension_postgres-0.1.0a15-py3-none-any.whl",
-    ),
-    "sanka-extension-clickhouse": (
-        "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-        "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-        "sanka_extension_clickhouse-0.1.0a15-py3-none-any.whl",
-    ),
 }
 MANIFEST_DEPENDENCIES = {
     "sanka-extension-drf-to-flask": (),
     "sanka-extension-drf-to-fastapi": (),
-    "sanka-extension-markdown": ("pyyaml",),
-    "sanka-extension-csv": (),
-    "sanka-extension-sqlite": (),
-    "sanka-extension-postgres": (
-        "psycopg",
-        "psycopg-binary",
-        "typing-extensions",
-        "tzdata",
-    ),
-    "sanka-extension-clickhouse": (
-        "backports-zstd",
-        "certifi",
-        "clickhouse-connect",
-        "lz4",
-        "tzdata",
-        "urllib3",
-    ),
 }
 MANIFEST_WHEELS = {
     package: local
@@ -91,13 +49,7 @@ MANIFEST_WHEELS = {
     for package, local in LOCAL_MANIFEST_WHEELS.items()
 }
 MANIFESTS = {package: ROOT / "packages" / package / "extension.json" for package in MANIFEST_WHEELS}
-UPDATED_MANIFESTS = {
-    "sanka-extension-markdown",
-    "sanka-extension-csv",
-    "sanka-extension-sqlite",
-    "sanka-extension-postgres",
-    "sanka-extension-clickhouse",
-}
+UPDATED_MANIFESTS: set[str] = set()
 
 
 def _wheel_hash(path: Path) -> str:
