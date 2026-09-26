@@ -42,6 +42,37 @@ uv run pytest
 Run extension integration tests only when their documented environment variable
 is configured. They must skip cleanly otherwise.
 
+## Tests
+
+Follow the workspace `test-audit` skill.
+
+- Before adding a test, state in the PR which real bug it catches and why no
+  existing test at a stronger boundary already catches it. No answer, no test.
+- One owner per behaviour. Extension behaviour is owned by a test through its
+  published interface (registration, readers and writers, the
+  `sanka-extension/v1` lifecycle) against real inputs. Unit tests are for pure
+  logic with real branching: parsers, mappers, converters. Share one contract
+  suite across converters instead of copying it per package.
+- Never write a test that reads source, workflow, Makefile, manifest, doc or
+  config files as text and asserts on the text; asserts a constant, label,
+  error wording or URL literal verbatim; only asserts that a mock was called;
+  asserts `hasattr`/`callable`/`isinstance`; asserts that an entry point or
+  extension exists or is registered; or computes the expected value with the
+  code under test.
+- Do not write unit tests after the code to cover a diff. A regression test must
+  fail on the pre-fix code; say so in the PR.
+- Test lines added in a PR may not exceed non-test lines added unless the PR
+  explains why (bug reproduction, new pure module, table-driven cases).
+- Extend a table or `parametrize` row instead of copying a test. Split or trim a
+  test file above 1,500 lines before adding anything to it.
+- Fix a unit test slower than 0.5 s. Never add sleeps, real timers or real
+  network waits.
+- When a behaviour-preserving refactor breaks tests, delete or rewrite them at
+  the owning boundary. Do not edit assertions to match the new implementation.
+- No meta-tests that require other tests, docs listings or registrations to exist.
+- Deleting a low-value test is a valid change on its own. Report test and
+  non-test line counts separately in the PR.
+
 ## Releases
 
 Publish an SDK before packages that implement its interface. All AI-authored
