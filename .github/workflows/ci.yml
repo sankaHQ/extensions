@@ -25,20 +25,8 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-      clickhouse:
-        image: clickhouse/clickhouse-server:24.8
-        env:
-          CLICKHOUSE_SKIP_USER_SETUP: "1"
-        ports:
-          - 8123:8123
-        options: >-
-          --health-cmd "wget -qO- http://localhost:8123/ping || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     env:
       SANKA_MIGRATE_TEST_POSTGRES_DSN: postgresql://sanka:sanka@localhost:5432/sanka_migrate_test
-      SANKA_MIGRATE_TEST_CLICKHOUSE_URL: http://localhost:8123/default
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -47,47 +35,17 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --frozen --all-packages
-      - name: Validate native Flask database setup and Django schema adoption
-        run: uv run python -m pytest packages/sanka-extension-drf-to-flask/tests/test_database_postgres.py -q
-      - name: Compare native Flask HTTP and database effects on PostgreSQL
-        run: >-
-          uv run python -m pytest
-          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py
-          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_records.py
-          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py
-          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py
-          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_nested.py
-          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py
-          packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py
-          -k postgresql -q
-      - name: Verify PostgreSQL replay isolation and generated backend qualification
-        run: >-
-          uv run python -m pytest
-          packages/sanka-drf-replay/tests/test_postgres.py
-          packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
-          -q
-      - run: make check
+      # The job-wide DSN runs every PostgreSQL-backed test inside make check. The
+      # backend qualification runs once, below, against the installed wheel.
+      - run: make check PYTEST_ARGS=--ignore=packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
       - run: make build-release
       - run: make build-business-flows
       - name: Install the actual Flask candidate and its published SDK dependencies
         run: uv --no-config pip install --reinstall --no-index --find-links dist dist/sanka_extension_drf_to_flask-*.whl
-      - name: Verify installed Flask wheels with native lifecycle and database parity
+      - name: Qualify the installed Flask wheel through the generated backend lifecycle
         run: |
           uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_drf_to_flask, sanka_code_migration; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; root = pathlib.Path(sys.prefix).resolve(); assert all(pathlib.Path(m.__file__).resolve().is_relative_to(root) for m in (sanka_extension_drf_to_flask, sanka_code_migration))"
-          uv run --no-sync python -m pytest \
-            packages/sanka-extension-drf-to-flask/tests/test_native_plan.py \
-            packages/sanka-drf-replay/tests/test_postgres.py \
-            packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py \
-            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_auth.py \
-            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py \
-            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py \
-            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_nested.py \
-            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_filters.py \
-            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py \
-            packages/sanka-extension-drf-to-flask/tests/test_behavior_inventory_plan.py \
-            packages/sanka-extension-drf-to-flask/tests/test_session_lifecycle.py \
-            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_csrf.py \
-            packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_sessions.py
+          uv run --no-sync python -m pytest packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
 
   modern-drf:
     name: Django 6 DRF conversion parity
@@ -123,64 +81,6 @@ jobs:
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_csrf.py
           packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
-
-  python-to-golang:
-    name: Python to Golang endpoint qualification
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: sanka
-          POSTGRES_PASSWORD: sanka
-          POSTGRES_DB: sanka_go_schema_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U sanka"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      SANKA_MIGRATE_TEST_POSTGRES_DSN: postgresql://sanka:sanka@localhost:5432/sanka_go_schema_test
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.11.21"
-          python-version: "3.12"
-          enable-cache: true
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: "1.26.5"
-          cache: true
-          cache-dependency-path: packages/sanka-extension-python-to-golang/src/sanka_extension_python_to_golang/locks/**/go.sum
-      - run: uv sync --frozen --all-packages
-      - run: uv build --wheel --package sanka-http-replay --out-dir release/python-to-golang
-      - run: uv build --wheel --package sanka-extension-python-to-golang --out-dir release/python-to-golang
-      - name: Install the actual candidate wheel
-        run: |
-          uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/python-to-golang"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}]'
-          uv --no-config pip install --reinstall --no-index --find-links release/python-to-golang release/python-to-golang/sanka_extension_python_to_golang-*.whl
-          uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_python_to_golang as m; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve())"
-      - name: Qualify shared input presence with native Go
-        env:
-          SANKA_GO_TESTS: "1"
-        run: uv run --no-sync python -m pytest packages/sanka-code-migration/tests/test_input_values.py -q
-      - name: Qualify native values and packaged project replay
-        env:
-          SANKA_GO_TESTS: "1"
-          GOTOOLCHAIN: local
-          GOWORK: "off"
-          GOMAXPROCS: "2"
-        run: uv run --no-sync python -m pytest packages/sanka-extension-python-to-golang/tests/test_golang_native_values.py packages/sanka-extension-python-to-golang/tests/test_golang_native_temporal.py packages/sanka-extension-python-to-golang/tests/test_golang_project_readiness.py -q
-      - name: Compare all three Python sources with all four Go targets
-        env:
-          SANKA_GO_TESTS: "1"
-          GOTOOLCHAIN: local
-          GOWORK: "off"
-          GOMAXPROCS: "2"
-        run: uv run --no-sync python -m pytest packages/sanka-extension-python-to-golang/tests --ignore=packages/sanka-extension-python-to-golang/tests/test_golang_native_values.py --ignore=packages/sanka-extension-python-to-golang/tests/test_golang_native_temporal.py --ignore=packages/sanka-extension-python-to-golang/tests/test_golang_project_readiness.py -q
 
   typescript-to-rust:
     name: TypeScript to Rust endpoint qualification

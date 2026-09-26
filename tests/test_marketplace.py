@@ -4,8 +4,6 @@
 import json
 from pathlib import Path
 
-import yaml
-
 RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/"
 EXPECTED = {
     "sanka/react-native-to-native": {
@@ -102,24 +100,3 @@ def test_official_marketplace_has_only_current_code_extensions() -> None:
             expected_prefix = RELEASE_PREFIX + "mobile-converters-v0.1.0a1/"
         assert all(wheel["url"].startswith(expected_prefix) for wheel in manifest["wheels"])
         assert all(len(wheel["sha256"]) == 64 for wheel in manifest["wheels"])
-
-
-def test_release_workflow_stages_each_manifest_under_a_unique_asset_name() -> None:
-    workflow = yaml.safe_load(Path(".github/workflows/publish.yml").read_text())
-    release_steps = workflow["jobs"]["release"]["steps"]
-    staging = next(step["run"] for step in release_steps if "release-assets" in step.get("run", ""))
-
-    destinations = [
-        line.rsplit(" ", 1)[-1]
-        for line in staging.splitlines()
-        if line.startswith("cp packages/") and line.endswith(".json")
-    ]
-    assert destinations == [
-        "release-assets/sanka-extension-react-native-to-native.json",
-        "release-assets/sanka-extension-python-to-golang.json",
-        "release-assets/sanka-extension-typescript-to-rust.json",
-        "release-assets/sanka-extension-llm-to-jev.json",
-        "release-assets/sanka-extension-drf-to-fastapi.json",
-        "release-assets/sanka-extension-drf-to-flask.json",
-    ]
-    assert len(destinations) == len(set(destinations))

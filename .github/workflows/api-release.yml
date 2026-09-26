@@ -96,10 +96,12 @@ jobs:
           --examples release/examples --release release/api-converters
           --target ${{ matrix.target }} --report release/${{ matrix.target }}-acceptance.json
       - name: Install qualification fixtures
-        if: matrix.target == 'go'
+        if: matrix.target == 'go' && github.event_name != 'pull_request'
         run: uv sync --frozen --all-packages
+      # The installed-CLI corpus (64 cells, ~45 min) gates main and the tagged
+      # release; pull requests run the Go suite in python-to-golang.yml instead.
       - name: Qualify packaged Go backends through the installed CLI
-        if: matrix.target == 'go'
+        if: matrix.target == 'go' && github.event_name != 'pull_request'
         env:
           SANKA_GO_CLI_TESTS: "1"
           SANKA_GO_TESTS: "1"

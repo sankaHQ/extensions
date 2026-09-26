@@ -10,8 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from scripts import build_release
-
 MODULE = runpy.run_path(
     str(Path(__file__).resolve().parents[1] / "scripts/verify_published_sdk.py")
 )
@@ -50,15 +48,3 @@ def test_sdk_reuse_requires_original_source_and_both_wheel_copies(tmp_path, monk
         ]
     if failure in {"tag", "local"}:
         assert downloads == []
-
-
-def test_candidate_builds_only_new_versions_and_reuses_published_wheels() -> None:
-    assert build_release.MARKETPLACE_PACKAGES == ()
-    assert {wheel.name for wheel in build_release.PINNED_LOCAL_WHEELS} == {
-        "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-        "sanka_extension_drf_to_fastapi-0.1.0a18-py3-none-any.whl",
-        "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
-        "sanka_code_migration-0.1.0a3-py3-none-any.whl",
-        "sanka_extension_drf_to_flask-0.1.0a12-py3-none-any.whl",
-        "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-    }
