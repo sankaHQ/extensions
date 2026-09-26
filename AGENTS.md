@@ -44,10 +44,13 @@ is configured. They must skip cleanly otherwise.
 
 ## Tests
 
-Follow the workspace `test-audit` skill.
+Use the `test-audit` skill from the sanka-project workspace when it is
+available; in a standalone checkout the rules below are complete on their own.
 
-- Before adding a test, state in the PR which real bug it catches and why no
-  existing test at a stronger boundary already catches it. No answer, no test.
+- Before adding a test, state in the PR which failure it catches (for new
+  behaviour: the specified behaviour not holding) and why no existing test at a
+  stronger boundary already catches it. Tests for new behaviour go at the single
+  boundary that owns it; a test that cannot name a failure is not added.
 - One owner per behaviour. Extension behaviour is owned by a test through its
   published interface (registration, readers and writers, the
   `sanka-extension/v1` lifecycle) against real inputs. Unit tests are for pure
@@ -59,6 +62,9 @@ Follow the workspace `test-audit` skill.
   asserts `hasattr`/`callable`/`isinstance`; asserts that an entry point or
   extension exists or is registered; or computes the expected value with the
   code under test.
+- Documented compatibility contracts are the exception to the literal rule:
+  published identifiers, compatibility imports, error codes and retained URLs
+  are asserted exactly, once, at their owning boundary.
 - Do not write unit tests after the code to cover a diff. A regression test must
   fail on the pre-fix code; say so in the PR.
 - Test lines added in a PR may not exceed non-test lines added unless the PR
