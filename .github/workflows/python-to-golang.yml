@@ -1,0 +1,82 @@
+name: Python to Golang
+
+# The Go qualification only exercises the Go converter, its replay helper and the
+# shared input contract, so pull requests that touch none of them skip it. Every
+# push to main still runs all of it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - packages/sanka-extension-python-to-golang/**
+      - packages/sanka-http-replay/**
+      - packages/sanka-code-migration/**
+      - scripts/build_release.py
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/python-to-golang.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-to-golang:
+    name: Python to Golang endpoint qualification (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # tests/conftest.py keeps this target's cells and an even share of the
+        # target-independent tests, so the four shards run every test once.
+        target: [fiber, chi, mux, gin]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sanka
+          POSTGRES_PASSWORD: sanka
+          POSTGRES_DB: sanka_go_schema_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sanka"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SANKA_MIGRATE_TEST_POSTGRES_DSN: postgresql://sanka:sanka@localhost:5432/sanka_go_schema_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          enable-cache: true
+      # Caches both GOMODCACHE and GOCACHE (~/.cache/go-build).
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26.5"
+          cache: true
+          cache-dependency-path: packages/sanka-extension-python-to-golang/src/sanka_extension_python_to_golang/locks/**/go.sum
+      - run: uv sync --frozen --all-packages
+      - run: uv build --wheel --package sanka-http-replay --out-dir release/python-to-golang
+      - run: uv build --wheel --package sanka-extension-python-to-golang --out-dir release/python-to-golang
+      - name: Install the actual candidate wheel
+        run: |
+          uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/python-to-golang"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}]'
+          uv --no-config pip install --reinstall --no-index --find-links release/python-to-golang release/python-to-golang/sanka_extension_python_to_golang-*.whl
+          uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_python_to_golang as m; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve())"
+      - name: Qualify shared input presence with native Go
+        if: matrix.target == 'fiber'
+        env:
+          SANKA_GO_TESTS: "1"
+        run: uv run --no-sync python -m pytest packages/sanka-code-migration/tests/test_input_values.py -q
+      - name: Compare all three Python sources with the ${{ matrix.target }} Go target
+        env:
+          SANKA_GO_TESTS: "1"
+          SANKA_GO_TARGET_SHARD: ${{ matrix.target }}
+          GOTOOLCHAIN: local
+          GOWORK: "off"
+          GOMAXPROCS: "2"
+        run: uv run --no-sync python -m pytest -n 4 packages/sanka-extension-python-to-golang/tests -q

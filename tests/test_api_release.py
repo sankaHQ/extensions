@@ -91,7 +91,7 @@ def test_release_gates_packaged_go_database_cli_corpus() -> None:
         for step in job["steps"]
         if step.get("name") == "Qualify packaged Go backends through the installed CLI"
     )
-    assert step["if"] == "matrix.target == 'go'"
+    assert step["if"] == "matrix.target == 'go' && github.event_name != 'pull_request'"
     assert step["env"]["SANKA_GO_CLI_TESTS"] == "1"
     assert step["env"]["SANKA_GO_TESTS"] == "1"
     assert "test_golang_cli.py" in step["run"]

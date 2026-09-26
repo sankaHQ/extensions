@@ -16,11 +16,13 @@ It does not publish React Native, Compose, Jev, or a replacement SDK.
 
 ## Qualification before publication
 
-The `api-release.yml` pull-request jobs build six wheels, check the two
-manifests and scoped catalog, and exercise the pinned `sanka-examples` revision
-`e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.0.
-The Go job also runs packaged DRF, Flask and FastAPI fixtures against PostgreSQL
-across Fiber, chi, mux and Gin. Its installed-CLI cases include the three-revision
+The `api-release.yml` jobs build six wheels, check the two manifests and scoped
+catalog, and exercise the pinned `sanka-examples` revision
+`e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.0 on every pull
+request. On `main` and on the release tag, the Go job also runs packaged DRF, Flask
+and FastAPI fixtures against PostgreSQL across Fiber, chi, mux and Gin; pull
+requests run the Go converter suite in `python-to-golang.yml` instead. Its
+installed-CLI cases include the three-revision
 FastAPI/Alembic fixture, so scan, plan, apply, test and verify exercise the
 candidate wheel and generated migrations. The same job checks a source-Alembic
 to target-Goose row transfer, including its refusal paths. Selected original
