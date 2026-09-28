@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Superseded PR commits can stop; every main/tag run keeps its own group.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -35,9 +40,20 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --frozen --all-packages
-      # The job-wide DSN runs every PostgreSQL-backed test inside make check. The
-      # backend qualification runs once, below, against the installed wheel.
-      - run: make check PYTEST_ARGS=--ignore=packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
+      # Dedicated jobs own the complete Rust, mobile and TypeScript-parser suites
+      # against installed wheels. Keep only their candidate-SDK protocol checks here.
+      # Flask backend qualification runs once below against its installed wheel.
+      - run: >-
+          make check PYTEST_ARGS="--durations=15
+          --ignore=packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
+          --ignore=packages/sanka-extension-typescript-to-rust/tests
+          --ignore=packages/sanka-extension-react-native-to-native/tests
+          --ignore=packages/sanka-ts-capture/tests"
+      - name: Check Rust and mobile subprocess compatibility with the candidate SDK
+        run: >-
+          uv run python -m pytest
+          packages/sanka-extension-typescript-to-rust/tests/test_typescript_to_rust.py::test_subprocess_protocol
+          packages/sanka-extension-react-native-to-native/tests/test_react_native_to_native.py::test_subprocess_protocol
       - run: make build-release
       - run: make build-business-flows
       - name: Install the actual Flask candidate and its published SDK dependencies

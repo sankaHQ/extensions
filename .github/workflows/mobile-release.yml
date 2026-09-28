@@ -6,6 +6,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Superseded PR commits can stop; every main/tag run keeps its own group.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
