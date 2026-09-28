@@ -18,16 +18,20 @@ It does not publish React Native, Compose, Jev, or a replacement SDK.
 
 The `api-release.yml` jobs build six wheels, check the two manifests and scoped
 catalog, and exercise the pinned `sanka-examples` revision
-`e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.0 on every pull
-request. On `main` and on the release tag, the Go job also runs packaged DRF, Flask
-and FastAPI fixtures against PostgreSQL across Fiber, chi, mux and Gin; pull
-requests run the Go converter suite in `python-to-golang.yml` instead. Its
-installed-CLI cases include the three-revision
-FastAPI/Alembic fixture, so scan, plan, apply, test and verify exercise the
-candidate wheel and generated migrations. The same job checks a source-Alembic
-to target-Goose row transfer, including its refusal paths. Selected original
-tests run against disposable PostgreSQL databases. This does not qualify an
-application cutover.
+`e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.2 on every pull
+request, main push and release tag.
+
+Only the publication tag also runs the installed-CLI PostgreSQL corpus: all 17
+source profiles on Fiber, plus complete DRF, Flask and FastAPI projects on chi,
+mux and Gin (26 cases instead of 68). Each case still checks all five CLI
+commands, deterministic plans, rejected unreviewed apply, source preservation,
+and HTTP/database parity. This samples source/router combinations at the CLI
+boundary; native Go qualification retains all four routers, including async,
+browser-header, Alembic, existing-row transfer and original-source-test checks.
+Those native tests run in `python-to-golang.yml` on PRs and main rather than
+being repeated inside the release job. The installed-CLI corpus is not repeated
+on main immediately before the same source is tagged. No application cutover is
+qualified by these fixture tests.
 
 ```bash
 uv sync --frozen --all-packages
