@@ -66,7 +66,7 @@ def test_publication_requires_landed_tag_and_both_consumer_jobs() -> None:
     assert "workflow_dispatch" in jobs["publish"]["if"]
     assert "github.ref_type == 'tag'" in jobs["publish"]["if"]
     guard = jobs["build"]["steps"][1]["run"]
-    assert "api-converters-v0.1.0a8" in guard
+    assert "api-converters-v0.1.0a9" in guard
     assert 'git merge-base --is-ancestor "$GITHUB_SHA" origin/main' in guard
     assert jobs["qualify"]["strategy"]["matrix"]["target"] == ["go", "rust"]
     cli_step = next(
@@ -74,7 +74,7 @@ def test_publication_requires_landed_tag_and_both_consumer_jobs() -> None:
         for step in jobs["qualify"]["steps"]
         if step.get("name", "").startswith("Verify public CLI")
     )
-    assert cli_step["env"]["SANKA_API_RELEASE_CLI_VERSION"] == "0.3.0"
+    assert cli_step["env"]["SANKA_API_RELEASE_CLI_VERSION"] == "0.3.2"
     assert jobs["publish"]["permissions"] == {"contents": "write"}
 
 

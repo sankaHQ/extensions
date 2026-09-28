@@ -47,6 +47,58 @@ def test_gadget_public_scan_serializes_model_ordering(tmp_path):
     assert scanned.data["models"][0]["ordering"] == ["id"]
 
 
+@pytest.mark.parametrize("renderer", ["JSONRenderer", "BrowsableAPIRenderer", "custom.Renderer"])
+def test_explicit_project_renderer(tmp_path, renderer):
+    config = gadget_project(tmp_path)
+    settings = tmp_path / "crud_config/settings.py"
+    settings.write_text(
+        settings.read_text().replace(
+            '"UNAUTHENTICATED_USER": None,',
+            f'"UNAUTHENTICATED_USER": None, "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.{renderer}"],',
+        )
+    )
+    assert bool(capture(tmp_path, config)["gaps"]) == (renderer != "JSONRenderer")
+
+
+@pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="requires Go toolchain")
+@pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
+def test_project_accept_header_negotiation(tmp_path, target):
+    config = gadget_project(tmp_path)
+    config["target_framework"] = target
+    output = tmp_path / "generated"
+    for name, content in render(capture(tmp_path, config)).items():
+        path = output / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    (output / "accept_test.go").write_text("""package backend
+import ("context"; "testing")
+func TestAcceptHeaders(t *testing.T) {
+    cases:=[]struct{header string; accepted bool}{
+        {"",true},{"*/*",true},{"application/json",true},
+        {"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",true},
+        {"text/html, application/*;q=0.5",true},
+        {"application/json;indent=4",true},{"application/json;q=0",true},
+        {"text/html",false},{"application/xml",false},
+        {"application/jsonp",false},{"text/application/json",false},
+        {"application/json;profile=unsupported",false},
+    }
+    for _, c:=range cases {
+        status,_:=drfRequest(context.Background(),nil,"GET","/not-a-route/",nil,c.header,"","","")
+        want:=406;if c.accepted {want=404}
+        if status!=want {t.Errorf("Accept %q: got %d, want %d",c.header,status,want)}
+    }
+}
+""")
+    result = subprocess.run(
+        ["go", "test", "-run", "TestAcceptHeaders", "./..."],
+        cwd=output,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def authenticated_project(tmp_path):
     from test_golang_jwt import JWT_BODY
 
