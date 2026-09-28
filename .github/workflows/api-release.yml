@@ -96,12 +96,12 @@ jobs:
           --examples release/examples --release release/api-converters
           --target ${{ matrix.target }} --report release/${{ matrix.target }}-acceptance.json
       - name: Install qualification fixtures
-        if: matrix.target == 'go' && github.event_name != 'pull_request'
+        if: matrix.target == 'go' && github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
         run: uv sync --frozen --all-packages
-      # The installed-CLI corpus (68 cells) gates main and the tagged
-      # release; pull requests run the Go suite in python-to-golang.yml instead.
+      # Run the 26 installed-CLI cases once, on the publication tag.
+      # PRs and main already run native router/DB/source-test qualification.
       - name: Qualify packaged Go backends through the installed CLI
-        if: matrix.target == 'go' && github.event_name != 'pull_request'
+        if: matrix.target == 'go' && github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
         env:
           SANKA_GO_CLI_TESTS: "1"
           SANKA_GO_TESTS: "1"
@@ -109,14 +109,6 @@ jobs:
         run: >-
           uv run python -m pytest
           packages/sanka-extension-python-to-golang/tests/test_golang_cli.py
-          packages/sanka-extension-python-to-golang/tests/test_golang_project_readiness.py::test_packaged_original_tests_are_opt_in_qualification
-          packages/sanka-extension-python-to-golang/tests/test_golang_project_readiness.py::test_original_database_tests_are_isolated
-          packages/sanka-extension-python-to-golang/tests/test_golang_project_readiness.py::test_src_database_project_review_and_replay[fiber-flask]
-          packages/sanka-extension-python-to-golang/tests/test_golang_reads.py::test_database_read_lifecycle[fiber-fastapi]
-          packages/sanka-extension-python-to-golang/tests/test_golang_fastapi_migrations.py
-          packages/sanka-extension-python-to-golang/tests/test_golang_drf_project.py::test_gadget_original_tests_are_opt_in_qualification
-          packages/sanka-extension-python-to-golang/tests/test_golang_drf_project.py::test_postgres_original_tests_use_disposable_database
-          packages/sanka-extension-python-to-golang/tests/test_golang_drf_project.py::test_copy_existing_from_django_postgres_schema
           -q
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()

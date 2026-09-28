@@ -35,6 +35,15 @@ PROJECT_SOURCES = (
     "fastapi-alembic",
 )
 
+# Source lowering is shared by routers. Native qualification covers the full
+# cross-product; the installed CLI needs every source plus each router adapter.
+CLI_CASES = [
+    (target, source)
+    for target in ("fiber", "chi", "mux", "gin")
+    for source in PROJECT_SOURCES
+    if target == "fiber" or source in ("drf-complete", "flask-complete", "fastapi-complete")
+]
+
 
 def hashes(root):
     return {
@@ -87,7 +96,7 @@ def installed_cli(tmp_path_factory):
         report["candidate"] = candidate.report
         report["outcome"] = (
             "passed"
-            if len(report["cases"]) == len(PROJECT_SOURCES) * 4
+            if {(c["target"], c["source"]) for c in report["cases"]} == set(CLI_CASES)
             and all(c["outcome"] == "passed" for c in report["cases"])
             else "failed"
         )
@@ -274,8 +283,7 @@ app = create_app()
     }
 
 
-@pytest.mark.parametrize("framework", PROJECT_SOURCES)
-@pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
+@pytest.mark.parametrize("target,framework", CLI_CASES)
 def test_installed_cli_database_lifecycle(tmp_path, installed_cli, framework, target):
     import psycopg
     from psycopg import sql
