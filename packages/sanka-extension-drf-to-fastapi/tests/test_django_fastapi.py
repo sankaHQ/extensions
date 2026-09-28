@@ -170,7 +170,22 @@ def test_five_command_drf_to_fastapi_lifecycle(
         json.dumps(unsupported.to_dict()),
         encoding="utf-8",
     )
-    assert main(["plan", str(drf_project), "--to", "fastapi", "--strategy", "compatibility"]) == 0
+    # A changed retained contract requires a fresh output instead of replacing the receipt.
+    assert (
+        main(
+            [
+                "plan",
+                str(drf_project),
+                "--to",
+                "fastapi",
+                "--strategy",
+                "compatibility",
+                "--output",
+                ".sanka/output/unsupported",
+            ]
+        )
+        == 0
+    )
     unsupported_plan_output = capsys.readouterr().out
     assert "Needs adaptation\n  1 endpoints" in unsupported_plan_output
     unsupported_plan = load_fastapi_plan(drf_project)

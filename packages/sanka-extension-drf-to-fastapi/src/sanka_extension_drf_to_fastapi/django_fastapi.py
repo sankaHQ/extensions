@@ -34,9 +34,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import asdict
 from dataclasses import replace as replace_dataclass
 from pathlib import Path
 from typing import Any, cast
+
+from sanka_code_migration.endpoints import check_apply, generated_scope, plan_scope, record_apply
 
 from sanka_code_migration.drf.scan import (  # isort: skip
     _KNOWN_SAFE_MIDDLEWARE as _KNOWN_SAFE_MIDDLEWARE,
@@ -342,6 +345,7 @@ def plan_fastapi(
     generation_mode: str = "minimal",
     package_manager: str | None = None,
     swagger_ui: bool | None = None,
+    selected_endpoints: Any = None,
 ) -> FrameworkPlan:
     if swagger_ui is not None and not isinstance(swagger_ui, bool):
         raise FrameworkMigrationError("swagger_ui must be a boolean")
@@ -359,6 +363,30 @@ def plan_fastapi(
     selected_package_manager = package_manager or "uv"
     root_path = Path(root).resolve()
     scan = load_framework_scan(root_path, artifact_dir=artifact_dir)
+    output_path = _resolve_output(root_path, output)
+    scope = plan_scope(
+        [asdict(route) for route in scan.routes],
+        selected_endpoints,
+        artifacts=_artifact_path(root_path, artifact_dir, PLAN_FILE).parent,
+        output=output_path,
+        target="fastapi",
+        context={
+            "strategy": strategy,
+            "orm": sql_engine,
+            "generation": generation_mode,
+            "capture": {
+                key: value
+                for key, value in scan.hash_payload().items()
+                if key not in {"routes", "source", "scan_hash", "test_files"}
+            },
+        },
+    )
+    scan = replace_dataclass(
+        scan, routes=tuple(route for route in scan.routes if route.key in scope["effective_ids"])
+    )
+    if scope["retained_ids"]:
+        generation_mode = "update"
+
     if strategy == NATIVE_STRATEGY:
         routes = tuple(
             _plan_native_route(route, middleware=scan.middleware) for route in scan.routes
@@ -507,8 +535,18 @@ def plan_fastapi(
         omissions.append("drf-removal")
     if any(not route.automatic for route in routes):
         omissions.append("manual-route-adaptations")
+    generated_scope(
+        scope,
+        [
+            route.key
+            for route in routes
+            if route.automatic and route.strategy != ROUTE_STRATEGY_DROPPED_ALIAS
+        ],
+        explicit=selected_endpoints is not None,
+    )
     plan = FrameworkPlan(
         schema_version=4,
+        endpoint_scope=scope,
         source_framework=scan.framework,
         target_framework="fastapi",
         mode=strategy,
@@ -656,6 +694,13 @@ def apply_fastapi_plan(
         )
     if output_path == root_path:
         raise FrameworkMigrationError("generated output cannot overwrite the source root")
+    previous_receipt = None
+    if plan.endpoint_scope:
+        previous_receipt = check_apply(
+            _artifact_path(root_path, artifact_dir, PLAN_FILE).parent,
+            plan.endpoint_scope,
+            plan.plan_hash,
+        )
     updating = plan.generation_mode == "update"
     if not updating and output_path.exists() and any(output_path.iterdir()) and not force:
         raise FrameworkMigrationError(
@@ -697,6 +742,16 @@ def apply_fastapi_plan(
             )
             output_path.mkdir(parents=True, exist_ok=True)
             actions = {item.path: item.action for item in plan.file_operations}
+            if previous_receipt:
+                for source in (path for path in staged.rglob("*") if path.is_file()):
+                    relative = str(source.relative_to(staged))
+                    destination = output_path / relative
+                    if any(path.is_symlink() for path in (destination, *destination.parents)):
+                        raise FrameworkMigrationError("Generated paths cannot follow symlinks")
+                    if destination.exists() and relative not in previous_receipt["files"]:
+                        raise FrameworkMigrationError(
+                            f"New generated file would replace an unowned file: {relative}"
+                        )
             for source in sorted(path for path in staged.rglob("*") if path.is_file()):
                 relative = str(source.relative_to(staged))
                 if actions.get(relative) == "unchanged":
@@ -713,6 +768,23 @@ def apply_fastapi_plan(
             layout=layout,
             source_root=relative_source,
             sql_engine=engine,
+        )
+    if plan.endpoint_scope:
+        manifest = _read_json(output_path / GENERATED_MANIFEST, label="generated target manifest")
+        names = set(manifest["generated_file_hashes"]) | {GENERATED_MANIFEST}
+        names.update(
+            str(p.relative_to(output_path))
+            for p in (
+                output_path / PROJECT_MANIFEST,
+                output_path / "app/generated" / GENERATED_MANIFEST,
+            )
+            if p.is_file()
+        )
+        record_apply(
+            _artifact_path(root_path, artifact_dir, PLAN_FILE).parent,
+            plan.endpoint_scope,
+            sorted(names),
+            plan.plan_hash,
         )
     return output_path, count
 
@@ -1600,6 +1672,7 @@ def verify_fastapi_migration(
             output_path,
             manifest,
             cases=_load_verification_cases(root_path, cases),
+            endpoint_scope=plan.endpoint_scope,
             target_python=(
                 generated_environment.python if generated_environment is not None else None
             ),
@@ -1749,6 +1822,7 @@ def _probe_read_only_routes(
     *,
     cases: list[dict[str, Any]],
     target_python: Path | None,
+    endpoint_scope: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     _bootstrap_django(root, str(manifest["settings_module"]))
     _bind_source_database()
@@ -1774,9 +1848,24 @@ def _probe_read_only_routes(
         source_type = source_response["content_type"]
         target_type = target_response["content_type"]
         bodies_match = _response_bodies_match(source_body, target_body, source_type, target_type)
+        # A partial candidate must advertise its selected methods, not omitted source routes.
+        source_headers = dict(source_response["headers"])
+        omitted = {
+            key.split(" ", 1)[0]
+            for key in (endpoint_scope or {}).get("omitted_ids", [])
+            if key.split(" ", 1)[1] == case["path"]
+        }
+        if "GET" in omitted:
+            omitted.add("HEAD")
+        if omitted:
+            source_headers["allow"] = ", ".join(
+                method.strip()
+                for method in source_headers.get("allow", "").split(",")
+                if method.strip() and method.strip() not in omitted
+            )
         compared_headers = ("allow", "location", "www-authenticate")
         headers_match = all(
-            source_response["headers"].get(header, "") == target_response["headers"].get(header, "")
+            source_headers.get(header, "") == target_response["headers"].get(header, "")
             for header in compared_headers
         )
         ok = (
@@ -1795,6 +1884,7 @@ def _probe_read_only_routes(
                 "source_content_type": source_type,
                 "target_content_type": target_type,
                 "headers_match": headers_match,
+                **({"omitted_methods": sorted(omitted)} if omitted else {}),
             }
         )
     return results

@@ -90,6 +90,7 @@ class FrameworkPlan:
     file_operations: tuple[FileOperation, ...] = ()
     capabilities: tuple[str, ...] = ()
     omissions: tuple[str, ...] = ()
+    endpoint_scope: dict[str, Any] = field(default_factory=dict)
     plan_hash: str = field(default="")
 
     @property
@@ -138,6 +139,8 @@ class FrameworkPlan:
     def hash_payload(self) -> dict[str, Any]:
         payload = asdict(self)
         payload.pop("plan_hash", None)
+        if not self.endpoint_scope:
+            payload.pop("endpoint_scope", None)
         if self.swagger_ui:
             payload.pop("swagger_ui")  # Keep hashes of existing default-on plans valid.
         if self.schema_version < 2:
@@ -202,5 +205,6 @@ class FrameworkPlan:
             ),
             capabilities=tuple(str(item) for item in payload.get("capabilities", ())),
             omissions=tuple(str(item) for item in payload.get("omissions", ())),
+            endpoint_scope=dict(payload.get("endpoint_scope") or {}),
             plan_hash=str(payload.get("plan_hash", "")),
         )

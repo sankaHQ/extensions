@@ -125,12 +125,20 @@ def main() -> int:
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
                 errors.append("Jev converter requires its isolated executable")
         if package.name == GO_EXTENSION_NAME:
-            allowed_modules += ("sanka_extension_sdk", "sanka_extensions", "sanka_http_replay")
+            allowed_modules += (
+                "sanka_extension_sdk",
+                "sanka_extensions",
+                "sanka_http_replay",
+                "sanka_code_migration",
+            )
             if project.get("dependencies") != [
+                "sanka-code-migration==0.1.0a4",
                 "sanka-extension-sdk==0.1.0a4",
                 "sanka-http-replay==0.1.0a2",
             ]:
-                errors.append("Python to Golang depends only on SDK a4 and HTTP replay a2")
+                errors.append(
+                    "Python to Golang requires the pinned SDK, replay and migration helpers"
+                )
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
                 errors.append("Python to Golang requires its isolated executable")
         if package.name == RN_EXTENSION_NAME:
@@ -151,15 +159,17 @@ def main() -> int:
                 "sanka_extensions",
                 "sanka_ts_capture",
                 "sanka_http_replay",
+                "sanka_code_migration",
             )
             if project.get("dependencies") != [
+                "sanka-code-migration==0.1.0a4",
                 "sanka-extension-sdk==0.1.0a4",
                 "sanka-ts-capture==0.1.0a1",
                 "sanka-http-replay==0.1.0a2",
             ]:
                 errors.append(
                     "TypeScript to Rust depends only on the published SDK a4, the TypeScript "
-                    "capture helper and the HTTP replay contract"
+                    "capture, replay and migration helpers"
                 )
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
                 errors.append("TypeScript to Rust requires its isolated executable")
@@ -174,7 +184,7 @@ def main() -> int:
             if project.get("dependencies") != [
                 expected_dependency,
                 "sanka-drf-replay==0.1.0a4",
-                "sanka-code-migration==0.1.0a3",
+                "sanka-code-migration==0.1.0a4",
             ]:
                 errors.append(f"{package.name} must depend exactly on {expected_dependency}")
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
