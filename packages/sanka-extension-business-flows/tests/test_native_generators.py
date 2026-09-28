@@ -94,30 +94,32 @@ def test_recipe_generates_reviewed_settings_roles_and_fixed_policies(case):
     assert resolve_parameters(case["recipe_id"], case["input"]) == original_receipt_parameters
 
 
-@pytest.mark.parametrize("case", CASES, ids=lambda case: case["recipe_id"])
-def test_recipe_round_trips_in_isolated_installed_package_outside_repository(case, tmp_path):
+def test_recipes_round_trip_in_isolated_installed_package_outside_repository(tmp_path):
     # Exercise the candidate generator in an isolated process without modifying
     # the published a1 executable, manifest or discovery capabilities.
     script = """
 import json, sys
 from sanka_extension_business_flows.native_generator import generate_native
 from sanka_extensions.flow import BlueprintRequest
-request = BlueprintRequest.from_dict(json.load(sys.stdin))
-print(json.dumps(generate_native(request).to_dict()))
+requests = [BlueprintRequest.from_dict(item) for item in json.load(sys.stdin)]
+print(json.dumps([generate_native(request).to_dict() for request in requests]))
 """
-    selected = request(case)
+    # Import the installed package once; each recipe still has an independent
+    # request/response and its own reviewed fixture test above.
+    selected = [request(case) for case in CASES]
     result = subprocess.run(
         [sys.executable, "-I", "-c", script],
-        input=json.dumps(selected.to_dict()),
+        input=json.dumps([item.to_dict() for item in selected]),
         text=True,
         capture_output=True,
         cwd=tmp_path,
         timeout=20,
         check=True,
     )
-    parsed = BlueprintResponse.from_dict(json.loads(result.stdout))
-    parsed.validate_for(selected)
-    assert parsed.to_dict() == generate_native(selected).to_dict()
+    for item, payload in zip(selected, json.loads(result.stdout), strict=True):
+        parsed = BlueprintResponse.from_dict(payload)
+        parsed.validate_for(item)
+        assert parsed.to_dict() == generate_native(item).to_dict()
     assert result.stderr == ""
 
 

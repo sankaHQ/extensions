@@ -122,12 +122,23 @@ compilation, source parity and tampering failures. Two subprocess checks also
 exercise Rust/mobile against the candidate SDK in the general job; the full
 installed-wheel suites use the published SDK.
 
-Flask backend qualification runs against its installed wheel. Django 6 parity
-and both SQLite/PostgreSQL fixtures remain separate compatibility checks. Public
-CLI acceptance remains separate from native extension tests because it tests
-installation and CLI transport. Local `make check` still discovers every suite;
-CI-only exclusions do not change local defaults. Superseded PR runs cancel, while
-main and release runs remain independent.
+Flask backend qualification runs against its installed wheel. Django 6 retains
+all source capture, HTTP/database parity and source rejection cases; 34 pure
+runtime/parser cases run only in the general check. Both SQLite and PostgreSQL
+fixtures remain covered. API/mobile release validators run in their release
+workflows instead of repeating in general CI.
+
+DRF-to-FastAPI and DRF-to-Flask replay tests run their complete passing baselines,
+then only affected requests for mutation controls. FastAPI auth/nested generation
+assertions share the parity test's candidate. Business Flow checks all 27 recipe
+round trips in one isolated process, retaining each recipe's independent expected
+configuration, capability rejection and identity tests. SDK and Jev trust-boundary
+cases remain intact; reducing test count alone is not a reason to remove them.
+
+Public CLI acceptance remains separate from native extension tests because it
+tests installation and CLI transport. Local `make check` still discovers every
+suite; CI-only exclusions do not change local defaults. Superseded PR runs cancel,
+while main and release runs remain independent.
 
 
 ## Contributing

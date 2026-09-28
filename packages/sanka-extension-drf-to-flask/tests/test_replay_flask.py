@@ -9,7 +9,9 @@ import pytest
 from test_lifecycle import call, project
 
 
-def test_flask_replay_and_mutation_controls(tmp_path: Path) -> None:
+def test_flask_replay_and_mutation_controls(tmp_path: Path, monkeypatch) -> None:
+    # Same-size mutations can share an mtime second; never reuse their bytecode.
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
     project(tmp_path)
     with (tmp_path / "settings.py").open("a") as handle:
         handle.write(
@@ -81,7 +83,9 @@ def echo():
     assert invalid_coverage["outcome"] == "error", invalid_coverage
     assert invalid_coverage["data"]["summary"]["source_expectation_mismatches"] == 1
     assert "expected 201" in invalid_coverage["data"]["failures"][0]["message"]
-    (tmp_path / "scenarios.json").write_text(json.dumps(scenarios))
+    # One request exercises every mutated dimension; the four JSON body shapes
+    # have already passed above. Keep the header-bearing request as the control.
+    (tmp_path / "scenarios.json").write_text(json.dumps([scenarios[0]]))
     for before, after, dimension in [
         ('"flag": True', '"flag": 1', "body_mismatches"),
         ('"X-Check": "yes"', '"X-Check": "no"', "header_mismatches"),
@@ -96,7 +100,7 @@ def echo():
         assert broken["data"]["summary"][dimension] > 0, broken
         assert broken["data"]["failures"]
     (candidate / "target_app.py").write_text(code + "\nimport rest_framework\n")
-    assert call(tmp_path, "verify", config)["data"]["summary"]["non_native"] == 4
+    assert call(tmp_path, "verify", config)["data"]["summary"]["non_native"] == 1
     # Deliberately malformed input reaches the source and candidate as identical bytes.
     (tmp_path / "scenarios.json").write_text(
         json.dumps(

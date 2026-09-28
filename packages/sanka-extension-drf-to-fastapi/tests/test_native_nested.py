@@ -174,29 +174,6 @@ def _generate(project: Path) -> Path:
     return project / ".sanka" / "output" / "fastapi"
 
 
-def test_nested_fixture_generates_sql_nested_output(nested_project: Path) -> None:
-    output = _generate(nested_project)
-    manifest = json.loads((output / "sanka-manifest.json").read_text(encoding="utf-8"))
-    assert not manifest.get("has_user_logic")
-    resource = manifest["resources"][0]
-    assert resource["create"]["style"] == "nested"
-    assert resource["update_drops"] == ["entries"]
-    assert resource["db_table"]
-    entries_field = next(f for f in resource["fields"] if f["name"] == "entries")
-    assert entries_field["kind"] == "nested_many"
-    assert entries_field["child"]["model_class"] == "ListingItem"
-    assert entries_field["attname"] == "listing_id"
-    assert entries_field["child"]["db_table"]
-    code_field = next(f for f in resource["fields"] if f["name"] == "code")
-    assert code_field["unique"] is True
-    assert "already exists" in code_field["unique_message"]
-    assert not (output / "sanka_user_logic.py").exists()
-    runtime_text = (output / "sanka_native.py").read_text(encoding="utf-8")
-    assert "rest_framework" not in runtime_text
-    assert "django.setup" not in runtime_text
-    assert (output / "models.py").is_file()
-
-
 def test_bench_candidate_preserves_django_carryover(nested_project: Path) -> None:
     _generate(nested_project)
     applied = _run_cli(
@@ -226,6 +203,26 @@ def test_bench_candidate_preserves_django_carryover(nested_project: Path) -> Non
 
 def test_nested_native_output_matches_drf(nested_project: Path, tmp_path: Path) -> None:
     output = _generate(nested_project)
+    manifest = json.loads((output / "sanka-manifest.json").read_text(encoding="utf-8"))
+    assert not manifest.get("has_user_logic")
+    resource = manifest["resources"][0]
+    assert resource["create"]["style"] == "nested"
+    assert resource["update_drops"] == ["entries"]
+    assert resource["db_table"]
+    entries_field = next(f for f in resource["fields"] if f["name"] == "entries")
+    assert entries_field["kind"] == "nested_many"
+    assert entries_field["child"]["model_class"] == "ListingItem"
+    assert entries_field["attname"] == "listing_id"
+    assert entries_field["child"]["db_table"]
+    code_field = next(f for f in resource["fields"] if f["name"] == "code")
+    assert code_field["unique"] is True
+    assert "already exists" in code_field["unique_message"]
+    assert not (output / "sanka_user_logic.py").exists()
+    runtime_text = (output / "sanka_native.py").read_text(encoding="utf-8")
+    assert "rest_framework" not in runtime_text
+    assert "django.setup" not in runtime_text
+    assert (output / "models.py").is_file()
+
     source = _run_probe("source", nested_project, tmp_path / "source.sqlite3")
     native = _run_probe("native", nested_project, tmp_path / "native.sqlite3", output=output)
     for index, (left, right) in enumerate(zip(source["results"], native["results"], strict=True)):

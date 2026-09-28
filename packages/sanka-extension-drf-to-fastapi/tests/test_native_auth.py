@@ -138,7 +138,7 @@ def _generate(project: Path) -> Path:
     return project / ".sanka" / "output" / "fastapi"
 
 
-def test_auth_fixture_generates_native_output(auth_project: Path) -> None:
+def test_auth_native_output_matches_drf(auth_project: Path, tmp_path: Path) -> None:
     output = _generate(auth_project)
     manifest = json.loads((output / "sanka-manifest.json").read_text(encoding="utf-8"))
     resource = manifest["resources"][0]
@@ -158,9 +158,6 @@ def test_auth_fixture_generates_native_output(auth_project: Path) -> None:
     assert "import django" not in runtime_text
     assert not (output / "sanka_settings.py").exists()
 
-
-def test_auth_native_output_matches_drf(auth_project: Path, tmp_path: Path) -> None:
-    output = _generate(auth_project)
     source = _run_probe("source", auth_project, tmp_path / "source.sqlite3")
     native = _run_probe("native", auth_project, tmp_path / "native.sqlite3", output=output)
     for index, (left, right) in enumerate(zip(source["results"], native["results"], strict=True)):

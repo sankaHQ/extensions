@@ -42,13 +42,16 @@ jobs:
       - run: uv sync --frozen --all-packages
       # Dedicated jobs own the complete Rust, mobile and TypeScript-parser suites
       # against installed wheels. Keep only their candidate-SDK protocol checks here.
+      # API/mobile release workflows own their release-validator suites.
       # Flask backend qualification runs once below against its installed wheel.
       - run: >-
           make check PYTEST_ARGS="--durations=15
           --ignore=packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
           --ignore=packages/sanka-extension-typescript-to-rust/tests
           --ignore=packages/sanka-extension-react-native-to-native/tests
-          --ignore=packages/sanka-ts-capture/tests"
+          --ignore=packages/sanka-ts-capture/tests
+          --ignore=tests/test_api_release.py
+          --ignore=tests/test_mobile_release.py"
       - name: Check Rust and mobile subprocess compatibility with the candidate SDK
         run: >-
           uv run python -m pytest
@@ -78,6 +81,8 @@ jobs:
         run: uv pip install 'django==6.0.6' 'djangorestframework==3.17.1'
       - name: Compare real source and generated HTTP responses and database effects
         run: uv run --no-sync python -m pytest packages/sanka-extension-drf-to-fastapi/tests/test_big_integer.py packages/sanka-extension-drf-to-fastapi/tests/test_generic_views.py packages/sanka-extension-drf-to-fastapi/tests/test_uuid_boolean.py packages/sanka-extension-drf-to-fastapi/tests/test_access_contracts.py
+      # General CI owns source-version-independent runtime/parser checks.
+      # Keep all real capture, HTTP, database and rejection cases on Django 6.
       - name: Compare standalone Flask contracts against the modern DRF source
         run: >-
           uv run --no-sync python -m pytest
@@ -97,6 +102,18 @@ jobs:
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_requests.py
           packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_csrf.py
           packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py::test_search_ordering_and_repeated_params_use_drf_last_value
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py::test_declared_filter_is_sql_backed_and_unknown_lookup_fails_closed
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py::test_page_number_count_links_duplicates_and_invalid_pages
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py::test_limit_offset_uses_defaults_for_invalid_values_and_keeps_count
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_listing.py::test_cursor_pages_ties_forward_reverse_and_invalid_cursor
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_access.py::test_membership_scope_and_permission_preserve_parent_lookup_order
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_access.py::test_unknown_access_semantics_fail_qualification
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_access.py::test_membership_and_related_preview_serialization
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_access.py::test_parent_duplicate_creator_membership_and_member_actions_are_atomic
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py::test_unknown_response_statements_remain_gaps
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_response_overrides.py::test_nonstock_method_call_or_binding_remains_a_gap
+          --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_datetime.py::test_only_representable_named_timezones_are_native
 
   typescript-to-rust:
     name: TypeScript to Rust endpoint qualification
