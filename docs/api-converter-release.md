@@ -1,22 +1,20 @@
-# Python-to-Go 0.1.0a8 release
+# Backend endpoint selection release
 
-Version 0.1.0a8 lowers bounded FastAPI Alembic `add_column` operations after
-`create_table`: nullable columns without defaults and non-null string, Boolean,
-or integer columns with static server defaults. Each downgrade must reverse the
-additions. PostgreSQL qualification checks an existing row backfilled by Alembic,
-the corresponding generated Goose revision, source-to-Go transfer, HTTP parity,
-and rollback across Fiber, chi, mux, and Gin. It needs a new wheel, manifest,
-and release tag. Do not replace the published a7 asset.
+The a10 API bundle adds reviewed endpoint selection and incremental apply receipts
+for Python-to-Go 0.1.0a10 and TypeScript-to-Rust 0.1.0a3. Both use the shared
+sanka-code-migration 0.1.0a4 wheel. Existing SDK, HTTP replay and TypeScript capture
+wheels remain byte-identical. DRF-to-Flask a13 and DRF-to-FastAPI a19 ship through
+the separate extensions-v0.1.0a34 marketplace release on the same reviewed commit.
 
-The a8 bundle keeps TypeScript-to-Rust and HTTP replay at 0.1.0a2, TypeScript
-capture at 0.1.0a1, and the pinned SDK wheels. The Rust manifest continues to
-reference the published a2 release. The a8 tag carries byte-identical copies
-of those unchanged wheels for local qualification and the Go manifest's closure.
-It does not publish React Native, Compose, Jev, or a replacement SDK.
+Explicit `selected_endpoints` limits generated HTTP routes. Successful apply plus
+matching owned file hashes locks existing endpoints during cumulative planning.
+Edited generated files block automatic regeneration; unowned files are retained.
+Required shared models, authentication and schema remain. Verification is separate
+and does not turn a passing subset into an application-wide parity claim.
 
 ## Qualification before publication
 
-The `api-release.yml` jobs build six wheels, check the two manifests and scoped
+The `api-release.yml` jobs build seven wheels, check the two manifests and scoped
 catalog, and exercise the pinned `sanka-examples` revision
 `e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.2 on every pull
 request, main push and release tag.
@@ -39,18 +37,18 @@ uv run python scripts/build_api_release.py
 uv run python -m pytest tests/test_api_release.py tests/test_marketplace.py -q
 ```
 
-`--write-manifests` intentionally updates the Go manifest after source changes.
+`--write-manifests` intentionally updates both API manifests after source changes.
 Review its wheel digest before committing. CI only validates checked-in bytes.
 
 ## Publication gate
 
 After this change lands, tag its
-reviewed merge commit `api-converters-v0.1.0a8` and dispatch
+reviewed merge commit `api-converters-v0.1.0a10` and dispatch
 `api-release.yml` on that tag. The dispatch job requires the tag to be on
-`main` and installs published CLI 0.3.0 for both pinned example qualifications
+`main` and installs published CLI 0.3.2 for both pinned example qualifications
 before GitHub publishes any assets. Do not publish from a pull-request build.
 
-The release contains six wheels, two manifests, the scoped catalog and three
+The release contains seven wheels, two manifests, the scoped catalog and three
 acceptance reports. After publication, download the assets into a new
 directory and validate their exact hashes:
 

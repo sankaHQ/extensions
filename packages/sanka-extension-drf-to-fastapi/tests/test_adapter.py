@@ -223,6 +223,7 @@ def test_apply_allows_reviewed_default_output_when_request_omits_output(tmp_path
         generation_mode="minimal",
         sql_engine="django",
         needs_adaptation_routes=0,
+        endpoint_scope={},
     )
     with (
         patch.object(adapter, "load_fastapi_plan", return_value=plan),

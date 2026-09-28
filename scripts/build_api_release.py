@@ -20,18 +20,21 @@ if __package__ in {None, ""}:
 from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel  # noqa: E402
 from scripts.check_release_artifacts import _entry_points, _wheel_metadata  # noqa: E402
 
-VERSION = "0.1.0a9"
+VERSION = "0.1.0a10"
 TAG = f"api-converters-v{VERSION}"
 PREFIX = f"https://github.com/sankaHQ/extensions/releases/download/{TAG}/"
-RUST_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a2/"
+RUST_PREFIX = PREFIX
 PACKAGES = (
     "sanka-extension-python-to-golang",
     "sanka-extension-typescript-to-rust",
     "sanka-ts-capture",
     "sanka-http-replay",
+    "sanka-code-migration",
 )
 VERSIONS = dict.fromkeys(PACKAGES, "0.1.0a2")
 VERSIONS[PACKAGES[0]] = VERSION
+VERSIONS[PACKAGES[1]] = "0.1.0a3"
+VERSIONS["sanka-code-migration"] = "0.1.0a4"
 VERSIONS["sanka-ts-capture"] = "0.1.0a1"
 SDK = tuple(
     w
@@ -39,14 +42,20 @@ SDK = tuple(
     if w.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}
 )
 DEPENDENCIES = {
-    PACKAGES[0]: ["sanka-extension-sdk==0.1.0a4", "sanka-http-replay==0.1.0a2"],
+    PACKAGES[0]: [
+        "sanka-extension-sdk==0.1.0a4",
+        "sanka-http-replay==0.1.0a2",
+        "sanka-code-migration==0.1.0a4",
+    ],
     PACKAGES[1]: [
         "sanka-extension-sdk==0.1.0a4",
         "sanka-http-replay==0.1.0a2",
+        "sanka-code-migration==0.1.0a4",
         "sanka-ts-capture==0.1.0a1",
     ],
     PACKAGES[2]: [],
     PACKAGES[3]: [],
+    PACKAGES[4]: [],
 }
 TS_DIGEST = "3ae902c92cc44dace175c0e69e13a4b0899f6983c6121d76b9ab8dd5795e7675"
 CATALOG = {
@@ -68,7 +77,9 @@ def wheel_name(package: str) -> str:
 
 
 def closure(package: str) -> list[str]:
-    own = [package, *PACKAGES[2:]] if package == PACKAGES[1] else [package, PACKAGES[3]]
+    own = (
+        [package, *PACKAGES[2:]] if package == PACKAGES[1] else [package, PACKAGES[3], PACKAGES[4]]
+    )
     return [*(wheel_name(p) for p in own), *(w.name for w in SDK)]
 
 
@@ -119,7 +130,7 @@ def validate(output: Path, root: Path = ROOT) -> None:
         if (
             metadata["Name"] != package
             or metadata["Version"] != VERSIONS[package]
-            or requirements != DEPENDENCIES[package]
+            or requirements != sorted(DEPENDENCIES[package])
             or _entry_points(entries, "console_scripts")
             != (expected_entry if package in PACKAGES[:2] else {})
         ):
@@ -173,8 +184,11 @@ def build(output: Path, *, write_manifests: bool = False) -> None:
                 "--wheel",
                 "--package",
                 package,
-                "--build-constraint",
-                str(ROOT / "scripts/api-build-constraints.txt"),
+                *(
+                    ["--build-constraint", str(ROOT / "scripts/api-build-constraints.txt")]
+                    if package != "sanka-code-migration"
+                    else []
+                ),
                 "--out-dir",
                 str(output),
                 "--no-create-gitignore",
@@ -186,7 +200,7 @@ def build(output: Path, *, write_manifests: bool = False) -> None:
     for wheel in SDK:
         download_locked_wheel(output, wheel)
     for package in PACKAGES[:2]:
-        if write_manifests and package == PACKAGES[0]:
+        if write_manifests:
             directory = ROOT / "packages" / package
             data = json.loads((directory / "extension.template.json").read_text())
             data["wheels"] = [
@@ -209,7 +223,7 @@ def main() -> None:
         validate(args.output_dir)
     else:
         build(args.output_dir, write_manifests=args.write_manifests)
-    print(f"Validated {TAG}: six wheels, two manifests and scoped catalog")
+    print(f"Validated {TAG}: seven wheels, two manifests and scoped catalog")
 
 
 if __name__ == "__main__":

@@ -210,6 +210,7 @@ type drfQuery struct {
 }
 type drfView struct { Path string `json:"path"`; Serializer drfSerializer `json:"serializer"`; Query drfQuery `json:"query"`; ReadOnly bool `json:"read_only"`; Authentication string `json:"authentication"`; Scope map[string]string `json:"scope"`; Actions []struct { Name string `json:"name"`; Kind string `json:"kind"` } `json:"actions"` }
 type drfContract struct {
+    Routes []struct { Method string `json:"method"`; Path string `json:"path"` } `json:"routes"`
     Models []drfModel `json:"models"`
     Project struct { Views []drfView `json:"views"`; Database struct { Engine string `json:"engine"` } `json:"database"` } `json:"drf_project"`
 }
@@ -525,6 +526,13 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
         }
     }
     if view==nil { return 404,map[string]string{"detail":"Not found."} }
+    routePath:=path;if detail { routePath=view.Path+":id/" }
+    selectedPath,selectedMethod:=false,false
+    for _,route:=range drfSchema.Routes {
+        if route.Path==routePath { selectedPath=true;if route.Method==method || method=="HEAD" && route.Method=="GET" { selectedMethod=true } }
+    }
+    if !selectedPath { return 404,map[string]string{"detail":"Not found."} }
+    if !selectedMethod { return 405,map[string]string{"detail":fmt.Sprintf(`Method "%s" not allowed.`,method)} }
     AUTHORIZATION_CHECK
     actualMethod:=method;if method=="HEAD" { actualMethod="GET" }
     allowed:=action!="" && actualMethod=="GET" || action=="" && (actualMethod=="GET" || !view.ReadOnly && (actualMethod=="POST" && !detail || detail && (actualMethod=="PUT" || actualMethod=="PATCH" || actualMethod=="DELETE")))

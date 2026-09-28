@@ -6,11 +6,12 @@ from __future__ import annotations
 import hashlib
 import json
 import tomllib
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
 from sanka_code_migration.drf.model import FrameworkScan, SerializerIR
+from sanka_code_migration.endpoints import plan_scope
 from sanka_code_migration.ir import (
     BackendIR,
     EffectiveInputs,
@@ -158,7 +159,7 @@ def capture(root: Path, config: dict[str, Any]) -> dict[str, Any]:
 
 
 def plan_native(
-    root: Path, output: Path, scan: dict[str, Any], config: dict[str, Any]
+    root: Path, output: Path, scan: dict[str, Any], config: dict[str, Any], *, artifacts: Path
 ) -> dict[str, Any]:
     from .sqlalchemy import qualify_routes, render_sqlalchemy
 
@@ -170,6 +171,27 @@ def plan_native(
     if scan.get("backend_capture_hash") != _capture_hash(scan):
         raise ValueError("native backend capture hash does not match; scan again")
     backend = FrameworkScan.from_dict(scan["backend_scan"])
+    scope = plan_scope(
+        [asdict(route) for route in backend.routes],
+        config.get("selected_endpoints"),
+        artifacts=artifacts,
+        output=output,
+        target="flask-sqlalchemy",
+        context={
+            "schema": scan["database_schema"],
+            "backend": {
+                key: value
+                for key, value in backend.hash_payload().items()
+                if key not in {"routes", "source", "scan_hash", "test_files"}
+            },
+            "overrides": scan["sqlalchemy_overrides"],
+            "profile": {key: config.get(key) for key in sorted(PROFILE_KEYS)},
+        },
+    )
+    backend = replace(
+        backend,
+        routes=tuple(route for route in backend.routes if route.key in scope["effective_ids"]),
+    )
     if scan.get("behavior_inventory"):
         raise ValueError(
             "backend behavior requires explicit migration: "
@@ -298,6 +320,7 @@ def plan_native(
         "target": "flask",
         "mode": "native",
         "orm": "sqlalchemy",
+        "endpoint_scope": scope,
         "output": str(output),
         "native_eligible_routes": len(routes),
         "native_routes": len(routes),

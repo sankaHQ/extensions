@@ -10,6 +10,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
+from sanka_code_migration.endpoints import check_selection
+
 from sanka_drf_replay.replay import (
     DEFAULT_DB_ENV,
     DEFAULT_ENTRYPOINT,
@@ -155,6 +157,7 @@ def _handle_plan(request: ExtensionRequest) -> ExtensionResponse:
         generation_mode=_string(request.configuration, "generation"),
         package_manager=_string(request.configuration, "package_manager"),
         swagger_ui=swagger_ui,
+        selected_endpoints=request.configuration.get("selected_endpoints"),
     )
     return success_response(
         request,
@@ -188,6 +191,8 @@ def _handle_apply(request: ExtensionRequest) -> ExtensionResponse:
             details={"current": plan.plan_hash, "reviewed": extension_plan_hash},
         )
 
+    if plan.endpoint_scope:
+        check_selection(configuration.get("selected_endpoints"), plan.endpoint_scope)
     minimum = _number(configuration, "min_readiness", 50.0)
     if not 0 <= minimum <= 100:
         return failure_response(

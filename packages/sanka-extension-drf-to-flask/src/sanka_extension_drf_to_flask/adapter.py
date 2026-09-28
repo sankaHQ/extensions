@@ -25,6 +25,15 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+from sanka_code_migration.endpoints import (
+    apply_files,
+    check_selection,
+    endpoint_id,
+    generated_scope,
+    plan_scope,
+    scoped_routes,
+)
+
 from sanka_drf_replay.replay import (
     DEFAULT_IGNORED_TABLES,
     ReplayError,
@@ -538,7 +547,9 @@ def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
             "title": "Not Found",
             "details": "The requested resource was not found on this server.",
         },
-        "source_hash": _source_hash(root),
+        "source_hash": _source_hash(
+            root, exclude=_within(root, str(config.get("output") or ".sanka/output/flask"))
+        ),
         "routes": routes,
         "append_slash": bool(
             "django.middleware.common.CommonMiddleware" in settings.MIDDLEWARE
@@ -922,7 +933,9 @@ def _reviewed_plan(request: ExtensionRequest) -> tuple[dict[str, Any], str]:
     ):
         raise ValueError("apply requires the current reviewed core and extension plan hashes")
     _require_captured_settings(config, plan)
-    output = _within(root, plan["output"]) if request.command == "test" else None
+    if plan.get("endpoint_scope"):
+        check_selection(config.get("selected_endpoints"), plan["endpoint_scope"])
+    output = _within(root, plan["output"])
     if plan["source_hash"] != _source_hash(root, exclude=output):
         raise ValueError("source changed after plan; scan and review again")
     return plan, digest
@@ -1032,11 +1045,45 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 raise ValueError("Django compatibility mode supports minimal generation")
             scan = json.loads((artifacts / "scan.json").read_text())
             _require_captured_settings(config, scan)
-            if scan["source_hash"] != _source_hash(root):
+            if scan["source_hash"] != _source_hash(
+                root, exclude=_within(root, str(config.get("output") or ".sanka/output/flask"))
+            ):
                 raise ValueError("source changed after scan; scan again")
             output = _within(root, str(config.get("output") or ".sanka/output/flask"))
-            if output.exists():
-                raise ValueError("output already exists; preserve repairs")
+            scope = (
+                plan_scope(
+                    scan["routes"],
+                    config.get("selected_endpoints"),
+                    artifacts=artifacts,
+                    output=output,
+                    target="flask",
+                    context={
+                        k: v
+                        for k, v in scan.items()
+                        if k
+                        not in {
+                            "routes",
+                            "source_hash",
+                            "backend_scan",
+                            "backend_capture_hash",
+                            "source_dependency_digest",
+                        }
+                    },
+                )
+                if config.get("orm") != "sqlalchemy"
+                else None
+            )
+            if scope is not None:
+                scan["routes"] = scoped_routes(scan["routes"], scope)
+                generated_scope(
+                    scope,
+                    [
+                        endpoint_id(route)
+                        for route in scan["routes"]
+                        if route["classification"] == "native"
+                    ],
+                    explicit=config.get("selected_endpoints") is not None,
+                )
             eligible = len(scan["routes"])
             native = sum(r["classification"] == "native" for r in scan["routes"])
             data = {
@@ -1049,11 +1096,12 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 "readiness": native / eligible if eligible else 0.0,
                 "needs_adaptation_routes": eligible - native,
                 "files": _render(scan) if config.get("orm") != "sqlalchemy" else {},
+                "endpoint_scope": scope,
             }
             if config.get("orm") == "sqlalchemy":
                 from .planning import plan_native
 
-                data = plan_native(root, output, scan, config)
+                data = plan_native(root, output, scan, config, artifacts=artifacts)
             data["plan_hash"] = _hash(data)
             artifact = artifacts / "plan-flask.json"
             _write_json(artifact, data)
@@ -1086,7 +1134,18 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             output = _within(root, str(config.get("bench_candidate") or plan["output"]))
             if config.get("bench_candidate"):
                 output = _within(root, str(output / "overlay"))
-            _apply(root, output, plan["files"], standalone=plan.get("orm") == "sqlalchemy")
+            if config.get("bench_candidate"):
+                _apply(root, output, plan["files"], standalone=plan.get("orm") == "sqlalchemy")
+            else:
+                scope = plan["endpoint_scope"]
+                requested = config.get("selected_endpoints")
+                check_selection(requested, scope)
+                for name, content in plan["files"].items():
+                    if plan.get("orm") != "sqlalchemy" and (root / name).exists():
+                        raise ValueError(f"Generated file conflicts with source: {name}")
+                    if name.endswith(".py"):
+                        compile(content, name, "exec")
+                apply_files(artifacts, scope, plan["files"], digest)
             data = {
                 "output": str(output),
                 "plan_hash": digest,

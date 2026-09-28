@@ -4,10 +4,9 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import tempfile
 from pathlib import Path
+
+from sanka_code_migration.endpoints import apply_files, check_selection, plan_scope, scoped_routes
 
 from sanka_extensions.code import (
     ExtensionRequest,
@@ -42,18 +41,40 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
         if request.command in {"test", "verify"}:
             # Never leave a previous passing report after a failed rerun.
             _safe(root, artifacts / f"{request.command}.json").unlink(missing_ok=True)
-        config = configuration(request.configuration)
+        config = configuration(
+            {k: v for k, v in request.configuration.items() if k != "selected_endpoints"}
+        )
         captured = capture(root, config)
         if request.command == "scan":
             data = captured
             name = "scan.json"
         elif request.command in {"plan", "apply", "test", "verify"}:
+            scope = (
+                plan_scope(
+                    captured["routes"],
+                    request.configuration.get("selected_endpoints"),
+                    artifacts=artifacts,
+                    output=_safe(root, artifacts / "golang"),
+                    target=config["target_framework"],
+                    context={
+                        k: v
+                        for k, v in captured.items()
+                        if k not in {"routes", "source_digest", "source_inventory", "gaps"}
+                    },
+                )
+                if request.command == "plan"
+                else json.loads(_safe(root, artifacts / "plan.json").read_text())["endpoint_scope"]
+            )
+            requested = request.configuration.get("selected_endpoints")
+            check_selection(requested, scope)
+            captured["routes"] = scoped_routes(captured["routes"], scope)
             generated = render(captured) if not captured["gaps"] else {}
             data = {
                 "schema": "sanka.python-to-golang.plan/v1",
                 "extension_version": VERSION,
                 "capture": captured,
                 "files": generated,
+                "endpoint_scope": scope,
             }
             plan_hash = digest(data)
             data["plan_hash"] = plan_hash
@@ -105,20 +126,7 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 if not saved.is_file() or json.loads(saved.read_text()) != data:
                     raise ValueError("saved plan differs; plan and review again")
                 output = _safe(root, artifacts / "golang")
-                if output.exists():
-                    raise ValueError("output already exists; preserve repairs")
-                staging = Path(tempfile.mkdtemp(prefix=".golang-", dir=artifacts))
-                try:
-                    for filename, content in generated.items():
-                        destination = staging / filename
-                        destination.parent.mkdir(parents=True, exist_ok=True)
-                        destination.write_text(content)
-                    # mkdir reserves the destination without replacing concurrent work.
-                    output.mkdir()
-                    for source in staging.iterdir():
-                        os.rename(source, output / source.name)
-                finally:
-                    shutil.rmtree(staging)
+                apply_files(artifacts, scope, generated, plan_hash)
                 return success_response(
                     request,
                     data={"output": str(output), "plan_hash": plan_hash, "complete_backend": False},
@@ -140,7 +148,7 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             artifacts=[str(destination)],
             limitations=["Experimental endpoint contract only; not a complete backend migration."],
         )
-    except (ValueError, OSError, SyntaxError) as error:
+    except (ValueError, OSError, SyntaxError, KeyError, TypeError) as error:
         return failure_response(
             request, code="SANKA_EXTENSION_EXECUTION_FAILED", message=str(error)
         )

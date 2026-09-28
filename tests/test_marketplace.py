@@ -20,7 +20,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-python-to-golang",
-            "version": "0.1.0a9",
+            "version": "0.1.0a10",
             "executable": "sanka-extension-python-to-golang",
         },
     },
@@ -29,7 +29,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-typescript-to-rust",
-            "version": "0.1.0a2",
+            "version": "0.1.0a3",
             "executable": "sanka-extension-typescript-to-rust",
         },
     },
@@ -47,7 +47,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-flask",
-            "version": "0.1.0a12",
+            "version": "0.1.0a13",
             "executable": "sanka-extension-drf-to-flask",
         },
     },
@@ -56,7 +56,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-fastapi",
-            "version": "0.1.0a18",
+            "version": "0.1.0a19",
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },
@@ -87,15 +87,15 @@ def test_official_marketplace_has_only_current_code_extensions() -> None:
         assert manifest["wheels"]
         expected_prefix = RELEASE_PREFIX
         if item["id"] == "sanka/drf-to-flask":
-            expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a31/"
+            expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a34/"
         if item["id"] == "sanka/drf-to-fastapi":
-            expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a32/"
+            expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a34/"
         if item["id"] == "sanka/llm-to-jev":
             expected_prefix = RELEASE_PREFIX + "llm-to-jev-v0.1.0a1/"
         if item["id"] == "sanka/python-to-golang":
-            expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a9/"
+            expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a10/"
         if item["id"] == "sanka/typescript-to-rust":
-            expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a2/"
+            expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a10/"
         if item["id"] == "sanka/react-native-to-native":
             expected_prefix = RELEASE_PREFIX + "mobile-converters-v0.1.0a1/"
         assert all(wheel["url"].startswith(expected_prefix) for wheel in manifest["wheels"])
