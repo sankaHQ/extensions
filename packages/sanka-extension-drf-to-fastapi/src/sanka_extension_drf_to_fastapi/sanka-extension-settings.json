@@ -1,0 +1,143 @@
+{
+  "schema_version": "sanka-extension-settings/v1",
+  "display": {
+    "name": {
+      "en": "DRF to FastAPI",
+      "ja": "DRF から FastAPI"
+    },
+    "description": {
+      "en": "Async, OpenAPI built in",
+      "ja": "非同期、OpenAPI 組み込み"
+    }
+  },
+  "settings": [
+    {
+      "id": "output",
+      "stage": "plan",
+      "type": "path",
+      "default": "fastapi-app",
+      "label": {
+        "en": "Output directory (inside this project)",
+        "ja": "出力ディレクトリ（プロジェクト内）"
+      }
+    },
+    {
+      "id": "generation",
+      "stage": "plan",
+      "type": "choice",
+      "default": "minimal",
+      "label": {
+        "en": "Generation layout",
+        "ja": "生成レイアウト"
+      },
+      "choices": [
+        {
+          "value": "minimal",
+          "label": {
+            "en": "Minimal — compact application",
+            "ja": "最小 — コンパクトなアプリケーション"
+          }
+        },
+        {
+          "value": "full",
+          "label": {
+            "en": "Full — application, config and tests",
+            "ja": "フル — アプリケーション、設定、テスト"
+          }
+        },
+        {
+          "value": "update",
+          "label": {
+            "en": "Update — existing generated project",
+            "ja": "更新 — 生成済みプロジェクト"
+          }
+        }
+      ]
+    },
+    {
+      "id": "strategy",
+      "stage": "plan",
+      "type": "choice",
+      "default": "native",
+      "label": {
+        "en": "Strategy",
+        "ja": "移行方式"
+      },
+      "description": {
+        "en": "Compatibility keeps a Django bridge for routes it cannot port.",
+        "ja": "互換モードは移植できないルートに Django ブリッジを残します。"
+      },
+      "choices": [
+        {
+          "value": "native",
+          "label": {
+            "en": "Native — generated target implementation",
+            "ja": "ネイティブ — 生成したターゲット実装"
+          }
+        },
+        {
+          "value": "compatibility",
+          "label": {
+            "en": "Compatibility — retain Django bridge",
+            "ja": "互換 — Django ブリッジを保持"
+          }
+        }
+      ]
+    },
+    {
+      "id": "package_manager",
+      "stage": "plan",
+      "type": "choice",
+      "default": "uv",
+      "label": {
+        "en": "Generated project's package manager",
+        "ja": "生成プロジェクトのパッケージマネージャー"
+      },
+      "choices": [
+        {
+          "value": "uv",
+          "label": {
+            "en": "uv — manage generated environment",
+            "ja": "uv — 生成環境を管理"
+          }
+        },
+        {
+          "value": "pip",
+          "label": {
+            "en": "pip — install generated requirements",
+            "ja": "pip — 生成した requirements をインストール"
+          }
+        }
+      ]
+    },
+    {
+      "id": "swagger_ui",
+      "stage": "plan",
+      "type": "boolean",
+      "default": true,
+      "label": {
+        "en": "Swagger UI at /docs",
+        "ja": "/docs の Swagger UI"
+      },
+      "description": {
+        "en": "OpenAPI and ReDoc stay available either way.",
+        "ja": "OpenAPI と ReDoc はどちらの場合も利用できます。"
+      }
+    },
+    {
+      "id": "settings_module",
+      "stage": "plan",
+      "type": "text",
+      "optional": true,
+      "advanced": true,
+      "label": {
+        "en": "Django settings module",
+        "ja": "Django 設定モジュール"
+      },
+      "description": {
+        "en": "Inferred from manage.py when empty.",
+        "ja": "空の場合は manage.py から推定します。"
+      }
+    }
+  ]
+}

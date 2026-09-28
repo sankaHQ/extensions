@@ -1,5 +1,19 @@
 # Releasing Sanka extension packages
 
+## Plan settings declarations: a35
+
+`extensions-v0.1.0a35` advances `sanka-extension-drf-to-fastapi` to `0.1.0a20` and
+`sanka-extension-drf-to-flask` to `0.1.0a14`. Each wheel adds
+`sanka-extension-settings.json` ([extension-settings.md](extension-settings.md)), which
+declares its Plan settings for the Sanka CLI TUI and Sanka Code. Converter behavior is
+unchanged. The other marketplace wheels are byte-identical to their published versions.
+
+Run `make check build-release`, then the private converter regression for the exact
+reviewed merge SHA. After its success, confirm that the a35 tag and release are absent,
+create the immutable `extensions-v0.1.0a35` tag at that merge, and dispatch
+`publish.yml`. Verify the published a20 and a14 wheel and manifest hashes, and that
+each wheel contains its settings file, before advancing the CLI catalog pin.
+
 ## Retire local application data packages: a33
 
 `extensions-v0.1.0a33` removes the five application data packages from the

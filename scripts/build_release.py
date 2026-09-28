@@ -25,8 +25,8 @@ LOCAL_WHEELS = (
     "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
     "sanka_code_migration-0.1.0a4-py3-none-any.whl",
     "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-    "sanka_extension_drf_to_fastapi-0.1.0a19-py3-none-any.whl",
-    "sanka_extension_drf_to_flask-0.1.0a13-py3-none-any.whl",
+    "sanka_extension_drf_to_fastapi-0.1.0a20-py3-none-any.whl",
+    "sanka_extension_drf_to_flask-0.1.0a14-py3-none-any.whl",
     "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
 )
 DEPENDENCIES: tuple[str, ...] = ()

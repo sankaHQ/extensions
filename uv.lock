@@ -1048,7 +1048,7 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 
 [[package]]
 name = "sanka-extension-drf-to-fastapi"
-version = "0.1.0a19"
+version = "0.1.0a20"
 source = { editable = "packages/sanka-extension-drf-to-fastapi" }
 dependencies = [
     { name = "sanka-code-migration" },
@@ -1065,7 +1065,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-extension-drf-to-flask"
-version = "0.1.0a13"
+version = "0.1.0a14"
 source = { editable = "packages/sanka-extension-drf-to-flask" }
 dependencies = [
     { name = "sanka-code-migration" },

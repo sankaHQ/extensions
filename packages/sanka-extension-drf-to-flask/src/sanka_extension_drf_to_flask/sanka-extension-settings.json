@@ -1,0 +1,115 @@
+{
+  "schema_version": "sanka-extension-settings/v1",
+  "display": {
+    "name": {
+      "en": "DRF to Flask",
+      "ja": "DRF から Flask"
+    },
+    "description": {
+      "en": "Sync",
+      "ja": "同期"
+    }
+  },
+  "settings": [
+    {
+      "id": "output",
+      "stage": "plan",
+      "type": "path",
+      "default": ".sanka/output/flask",
+      "label": {
+        "en": "Output directory (inside this project)",
+        "ja": "出力ディレクトリ（プロジェクト内）"
+      }
+    },
+    {
+      "id": "orm",
+      "stage": "plan",
+      "type": "choice",
+      "default": "django",
+      "label": {
+        "en": "ORM",
+        "ja": "ORM"
+      },
+      "description": {
+        "en": "SQLAlchemy generates standalone models and needs a uv environment.",
+        "ja": "SQLAlchemy は独立したモデルを生成し、uv 環境が必要です。"
+      },
+      "choices": [
+        {
+          "value": "django",
+          "label": {
+            "en": "Django ORM — keep source models",
+            "ja": "Django ORM — 移行元のモデルを使用"
+          }
+        },
+        {
+          "value": "sqlalchemy",
+          "label": {
+            "en": "SQLAlchemy — standalone models",
+            "ja": "SQLAlchemy — 独立したモデル"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generation",
+      "stage": "plan",
+      "type": "choice",
+      "default": "minimal",
+      "label": {
+        "en": "Generation layout",
+        "ja": "生成レイアウト"
+      },
+      "when": {
+        "orm": "sqlalchemy"
+      },
+      "choices": [
+        {
+          "value": "minimal",
+          "label": {
+            "en": "Minimal — compact application",
+            "ja": "最小 — コンパクトなアプリケーション"
+          }
+        },
+        {
+          "value": "full",
+          "label": {
+            "en": "Full — application, config and tests",
+            "ja": "フル — アプリケーション、設定、テスト"
+          }
+        }
+      ]
+    },
+    {
+      "id": "min_readiness",
+      "stage": "plan",
+      "type": "integer",
+      "default": 0,
+      "minimum": 0,
+      "maximum": 100,
+      "label": {
+        "en": "Minimum readiness (%)",
+        "ja": "最低移行準備度（%）"
+      },
+      "description": {
+        "en": "The plan fails when a smaller share of routes is native.",
+        "ja": "ネイティブ対応ルートの割合がこれを下回るとプランは失敗します。"
+      }
+    },
+    {
+      "id": "settings_module",
+      "stage": "plan",
+      "type": "text",
+      "optional": true,
+      "advanced": true,
+      "label": {
+        "en": "Django settings module",
+        "ja": "Django 設定モジュール"
+      },
+      "description": {
+        "en": "Inferred from manage.py when empty.",
+        "ja": "空の場合は manage.py から推定します。"
+      }
+    }
+  ]
+}
