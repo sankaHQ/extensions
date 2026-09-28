@@ -113,6 +113,23 @@ manifest diff and validate again. Releases are documented in
 [AGENTS.md](AGENTS.md). Converter changes also pass the converter benchmark gate
 described in [converter-regression.md](docs/converter-regression.md).
 
+### CI test ownership
+
+The general check runs the SDK, shared Python helpers, DRF converters, Go and Jev
+unit/contract suites. Rust, React Native and the TypeScript parser run their
+complete suites once in the dedicated installed-wheel jobs, including native
+compilation, source parity and tampering failures. Two subprocess checks also
+exercise Rust/mobile against the candidate SDK in the general job; the full
+installed-wheel suites use the published SDK.
+
+Flask backend qualification runs against its installed wheel. Django 6 parity
+and both SQLite/PostgreSQL fixtures remain separate compatibility checks. Public
+CLI acceptance remains separate from native extension tests because it tests
+installation and CLI transport. Local `make check` still discovers every suite;
+CI-only exclusions do not change local defaults. Superseded PR runs cancel, while
+main and release runs remain independent.
+
+
 ## Contributing
 
 Open or reuse an issue first, agree on scope for substantial changes, and keep

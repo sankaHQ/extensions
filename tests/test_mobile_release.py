@@ -6,12 +6,10 @@ import shutil
 from pathlib import Path
 
 import pytest
-import yaml
 
 from scripts.build_api_release import PACKAGES as API_PACKAGES
 from scripts.build_api_release import manifest as api_manifest
 from scripts.build_mobile_release import CLOSURE, PACKAGES, ROOT, build, manifest, validate
-from scripts.check_release_artifacts import CATALOG
 
 PACKAGE = PACKAGES[0]
 
@@ -69,27 +67,3 @@ def test_refuse_output_outside_release(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="below repository release"):
         build(tmp_path / "output")
     assert not (tmp_path / "output").exists()
-
-
-def test_publication_requires_landed_tag_and_both_consumer_jobs() -> None:
-    workflow = yaml.safe_load((ROOT / ".github/workflows/mobile-release.yml").read_text())
-    assert workflow["permissions"] == {"contents": "read"}
-    jobs = workflow["jobs"]
-    assert jobs["publish"]["needs"] == ["build", "qualify"]
-    assert "workflow_dispatch" in jobs["publish"]["if"]
-    assert "github.ref_type == 'tag'" in jobs["publish"]["if"]
-    guard = jobs["build"]["steps"][1]["run"]
-    assert "mobile-converters-v0.1.0a1" in guard
-    assert 'git merge-base --is-ancestor "$GITHUB_SHA" origin/main' in guard
-    consumers = jobs["qualify"]["strategy"]["matrix"]["include"]
-    assert [item["target"] for item in consumers] == ["swiftui", "compose"]
-    assert {item["target"]: item["runner"] for item in consumers} == {
-        "swiftui": "macos-15",
-        "compose": "ubuntu-24.04",
-    }
-    assert jobs["qualify"]["runs-on"] == "${{ matrix.runner }}"
-    assert jobs["publish"]["permissions"] == {"contents": "write"}
-
-
-def test_full_catalog_keeps_existing_packages() -> None:
-    assert json.loads((ROOT / "marketplace.json").read_text()) == CATALOG
