@@ -515,9 +515,12 @@ def test_replay_matches_the_generated_native_app_and_flags_a_regression(tmp_path
     )
     regressed = replay(
         project,
+        # Recheck the changed response and one unaffected control. The complete
+        # CRUD and edge-probe corpus already passed immediately above.
         [
             replay_module._validated_request(item, item["id"], require_id=True)
             for item in CRUD_SCENARIOS
+            if item["id"] in {"create", "create-invalid"}
         ],
         settings_module="crud_config.settings",
         candidate_root=output,
