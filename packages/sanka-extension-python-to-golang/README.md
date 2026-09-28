@@ -1319,3 +1319,12 @@ router root/OPTIONS/format suffixes, framework-specific malformed-JSON and
 unhandled-error bodies, host validation, arbitrary middleware, unrecognized
 validators and full application cutover remain outside it. Passing fixture replay
 does not qualify those paths or production deployment.
+
+### Browser requests (0.1.0a9)
+
+The DRF project generator accepts JSON-compatible Accept media ranges, including
+`application/*` and wildcards inside normal browser headers. Unsupported formats
+still return 406. API-only source projects may explicitly set
+`DEFAULT_RENDERER_CLASSES` to `["rest_framework.renderers.JSONRenderer"]`; other
+explicit renderer configurations remain unsupported. This avoids requiring Django
+browsable-API HTML templates and does not generate an HTML interface.

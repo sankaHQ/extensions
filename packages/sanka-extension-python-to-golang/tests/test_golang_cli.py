@@ -21,6 +21,7 @@ PROJECT_SOURCES = (
     "fastapi",
     "fastapi-async",
     "drf-project",
+    "drf-json",
     "drf-multiapp",
     "drf-crossapp",
     "drf-postgresql",
@@ -94,6 +95,26 @@ def installed_cli(tmp_path_factory):
 
 
 def cli_project(root, framework, target):
+    if framework == "drf-json":
+        from test_golang_drf_project import gadget_project
+
+        config = gadget_project(root) | {"target_framework": target}
+        settings = root / "crud_config/settings.py"
+        settings.write_text(
+            settings.read_text().replace(
+                '"UNAUTHENTICATED_USER": None,',
+                '"UNAUTHENTICATED_USER": None, "DEFAULT_RENDERER_CLASSES": '
+                '["rest_framework.renderers.JSONRenderer"],',
+            )
+        )
+        scenario = root / "sanka-verify.json"
+        document = json.loads(scenario.read_text())
+        for case in document["scenarios"]:
+            case["headers"] = {
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            }
+        scenario.write_text(json.dumps(document))
+        return config
     if framework == "fastapi-alembic":
         from test_golang_fastapi_migrations import project
         from test_golang_relational_writes import backend_source, scenarios

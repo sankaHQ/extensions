@@ -152,6 +152,7 @@ import (
     "fmt"
     "math"
     "math/big"
+    "mime"
     "net/url"
     "sort"
     "strconv"
@@ -496,8 +497,21 @@ func drfList(ctx context.Context, tx pgx.Tx, view drfView, address, where string
     return map[string]any{"count":count,"next":next,"previous":previous,"results":rows},nil
 }
 
+func drfAcceptsJSON(accept string) bool {
+    if strings.TrimSpace(accept)=="" { return true }
+    for _, item := range strings.Split(accept, ",") {
+        media, params, err := mime.ParseMediaType(strings.TrimSpace(item))
+        if err!=nil || (media!="application/json" && media!="application/*" && media!="*/*") { continue }
+        // DRF ignores quality weights; JSONRenderer also supports indent.
+        supported:=true
+        for name:=range params { if name!="q" && name!="indent" { supported=false } }
+        if supported { return true }
+    }
+    return false
+}
+
 func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []byte,accept,contentType,authorization,cookie string, requestURL ...string) (int,any) {
-    if accept!="" && accept!="*/*" && !strings.Contains(accept,"application/json") { return 406,map[string]string{"detail":"Could not satisfy the request Accept header."} }
+    if !drfAcceptsJSON(accept) { return 406,map[string]string{"detail":"Could not satisfy the request Accept header."} }
     AUTHORIZATION_GUARD
     var view *drfView;id:=int64(0);detail:=false;action:=""
     for i:=range drfSchema.Project.Views {

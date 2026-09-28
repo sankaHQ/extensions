@@ -115,10 +115,14 @@ if __name__ == "__main__":
     rest = _literal(values["REST_FRAMEWORK"])
     if (
         not isinstance(rest, dict)
-        or set(rest) - {"UNAUTHENTICATED_USER", "PAGE_SIZE"}
+        or set(rest) - {"UNAUTHENTICATED_USER", "PAGE_SIZE", "DEFAULT_RENDERER_CLASSES"}
         or rest.get("UNAUTHENTICATED_USER", False) is not None
     ):
         raise ValueError("DRF settings require separate capture")
+    if "DEFAULT_RENDERER_CLASSES" in rest and rest["DEFAULT_RENDERER_CLASSES"] != [
+        "rest_framework.renderers.JSONRenderer"
+    ]:
+        raise ValueError("only an explicit JSONRenderer list is qualified")
     page_size = rest.get("PAGE_SIZE")
     if page_size is not None and (type(page_size) is not int or not 0 < page_size <= 1000):
         raise ValueError("PAGE_SIZE must be a positive integer up to 1000")
