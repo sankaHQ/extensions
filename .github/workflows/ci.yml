@@ -35,6 +35,7 @@ jobs:
 
   check:
     needs: changes
+    if: always()
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -54,6 +55,9 @@ jobs:
       AFFECTED_PYTEST_ARGS: ${{ needs.changes.outputs.pytest_args }}
       SANKA_MIGRATE_TEST_POSTGRES_DSN: postgresql://sanka:sanka@localhost:5432/sanka_migrate_test
     steps:
+      - name: Require successful test selection
+        if: needs.changes.result != 'success'
+        run: exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
