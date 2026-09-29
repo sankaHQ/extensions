@@ -2,6 +2,7 @@
 """Optional CI sharding of the Go qualification by router target."""
 
 import os
+import uuid
 import zlib
 from pathlib import Path
 
@@ -33,3 +34,23 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     if deselected:
         config.hook.pytest_deselected(items=deselected)
         items[:] = selected
+
+
+@pytest.fixture
+def verify_database_names(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Names of the temporary source-test databases this test's own run generates.
+
+    Shards run several workers against one PostgreSQL server, so a test cannot compare
+    whole-server database lists before and after: another worker's temporary database
+    would count as a leak. Checking the names generated here is exact and race-free.
+    """
+    names: list[str] = []
+    real = uuid.uuid4
+
+    def recording() -> uuid.UUID:
+        value = real()
+        names.append("sanka_verify_" + value.hex)
+        return value
+
+    monkeypatch.setattr(uuid, "uuid4", recording)
+    return names

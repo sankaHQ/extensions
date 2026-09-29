@@ -1309,7 +1309,9 @@ def test_gadget_original_tests_are_opt_in_qualification(
 
 
 @pytest.mark.parametrize("failing_test", [False, True])
-def test_postgres_original_tests_use_disposable_database(tmp_path, monkeypatch, failing_test):
+def test_postgres_original_tests_use_disposable_database(
+    tmp_path, monkeypatch, failing_test, verify_database_names
+):
     dsn = os.getenv("SANKA_MIGRATE_TEST_POSTGRES_DSN")
     if os.getenv("SANKA_GO_TESTS") != "1" or not dsn:
         pytest.skip("requires native Go and isolated PostgreSQL fixture")
@@ -1344,9 +1346,6 @@ def test_postgres_original_tests_use_disposable_database(tmp_path, monkeypatch, 
         path.write_text(contents)
     schema = "original_tests_" + uuid.uuid4().hex
     with psycopg.connect(dsn, autocommit=True) as admin:
-        before = admin.execute(
-            "SELECT datname FROM pg_database WHERE datname LIKE 'sanka_verify_%'"
-        ).fetchall()
         admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
         try:
             monkeypatch.setenv("SANKA_GO_TARGET_TEST_DATABASE_URL", schema_dsn(dsn, schema))
@@ -1359,10 +1358,11 @@ def test_postgres_original_tests_use_disposable_database(tmp_path, monkeypatch, 
             assert report["original_tests"]["modules"] == ["orders.tests"]
             assert report["original_tests"]["tests_run"] == 3
             assert report["original_tests"]["ok"] is not failing_test
-            after = admin.execute(
-                "SELECT datname FROM pg_database WHERE datname LIKE 'sanka_verify_%'"
+            leaked = admin.execute(
+                "SELECT datname FROM pg_database WHERE datname = ANY(%s)",
+                (verify_database_names,),
             ).fetchall()
-            assert after == before
+            assert leaked == []
         finally:
             admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 

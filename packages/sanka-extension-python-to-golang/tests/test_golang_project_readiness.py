@@ -119,7 +119,7 @@ def test_packaged_original_tests_are_opt_in_qualification(
 @pytest.mark.parametrize("framework", ["flask", "fastapi"])
 @pytest.mark.parametrize("test_result", ["pass", "fail"])
 def test_original_database_tests_are_isolated(
-    tmp_path: Path, framework: str, test_result: str
+    tmp_path: Path, framework: str, test_result: str, verify_database_names: list[str]
 ) -> None:
     import psycopg
     from test_golang_schema import schema_dsn
@@ -150,12 +150,13 @@ def test_original_database_tests_are_isolated(
         "postgresql://", "postgresql+psycopg://", 1
     )
     with psycopg.connect(dsn, autocommit=True) as admin:
-        before = set(admin.execute("SELECT datname FROM pg_database").fetchall())
         result = _run_original_pytest_tests(
             root, source_copy, tmp_path, captured, sys.executable, source_url
         )
-        after = set(admin.execute("SELECT datname FROM pg_database").fetchall())
-    assert after == before
+        leaked = admin.execute(
+            "SELECT datname FROM pg_database WHERE datname = ANY(%s)", (verify_database_names,)
+        ).fetchall()
+    assert leaked == []
     assert result["tests_run"] == 1
     assert result["ok"] is (test_result == "pass")
     if test_result == "fail":
