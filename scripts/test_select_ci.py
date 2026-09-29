@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-from select_ci import affected
+from scripts.select_ci import affected
 
 
 def test_changes_include_transitive_consumers_and_fail_closed() -> None:
