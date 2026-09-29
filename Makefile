@@ -25,7 +25,7 @@ check: typescript-bundle
 	uv run python scripts/check_terminology.py
 	uv run python scripts/check_catalog_docs.py
 	uv run python -m pytest -n $(TEST_WORKERS) $(PYTEST_ARGS)
-	uv run python -m pytest scripts/test_update_marketplace_hashes.py scripts/test_sdk_candidate.py -q
+	uv run python -m pytest scripts/test_update_marketplace_hashes.py scripts/test_sdk_candidate.py scripts/test_select_ci.py -q
 
 .PHONY: build-release build-business-flows
 

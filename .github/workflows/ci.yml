@@ -14,7 +14,27 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      pytest_args: ${{ steps.select.outputs.pytest_args }}
+      drf: ${{ steps.select.outputs.drf }}
+      rust: ${{ steps.select.outputs.rust }}
+      mobile: ${{ steps.select.outputs.mobile }}
+      flask: ${{ steps.select.outputs.flask }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select affected packages and consumers
+        id: select
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/select_ci.py
+
   check:
+    needs: changes
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -31,6 +51,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      AFFECTED_PYTEST_ARGS: ${{ needs.changes.outputs.pytest_args }}
       SANKA_MIGRATE_TEST_POSTGRES_DSN: postgresql://sanka:sanka@localhost:5432/sanka_migrate_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,7 +66,7 @@ jobs:
       # API/mobile release workflows own their release-validator suites.
       # Flask backend qualification runs once below against its installed wheel.
       - run: >-
-          make check PYTEST_ARGS="--durations=15
+          make check PYTEST_ARGS="$AFFECTED_PYTEST_ARGS --durations=15
           --ignore=packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
           --ignore=packages/sanka-extension-typescript-to-rust/tests
           --ignore=packages/sanka-extension-react-native-to-native/tests
@@ -60,13 +81,17 @@ jobs:
       - run: make build-release
       - run: make build-business-flows
       - name: Install the actual Flask candidate and its published SDK dependencies
+        if: needs.changes.outputs.flask == 'true'
         run: uv --no-config pip install --reinstall --no-index --find-links dist dist/sanka_extension_drf_to_flask-*.whl
       - name: Qualify the installed Flask wheel through the generated backend lifecycle
+        if: needs.changes.outputs.flask == 'true'
         run: |
           uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_drf_to_flask, sanka_code_migration; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; root = pathlib.Path(sys.prefix).resolve(); assert all(pathlib.Path(m.__file__).resolve().is_relative_to(root) for m in (sanka_extension_drf_to_flask, sanka_code_migration))"
           uv run --no-sync python -m pytest packages/sanka-extension-drf-to-flask/tests/test_backend_qualification.py
 
   modern-drf:
+    needs: changes
+    if: needs.changes.outputs.drf == 'true'
     name: Django 6 DRF conversion parity
     runs-on: ubuntu-latest
     steps:
@@ -116,6 +141,8 @@ jobs:
           --deselect=packages/sanka-extension-drf-to-flask/tests/test_sqlalchemy_datetime.py::test_only_representable_named_timezones_are_native
 
   typescript-to-rust:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     name: TypeScript to Rust endpoint qualification
     runs-on: ubuntu-latest
     services:
@@ -169,6 +196,8 @@ jobs:
         run: uv run --no-sync python -m pytest packages/sanka-ts-capture/tests packages/sanka-extension-typescript-to-rust/tests -q
 
   react-native-to-native:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
     name: React Native to SwiftUI structural parity
     runs-on: macos-15
     steps:
