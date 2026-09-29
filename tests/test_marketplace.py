@@ -47,7 +47,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-flask",
-            "version": "0.1.0a13",
+            "version": "0.1.0a14",
             "executable": "sanka-extension-drf-to-flask",
         },
     },
@@ -56,7 +56,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-drf-to-fastapi",
-            "version": "0.1.0a19",
+            "version": "0.1.0a20",
             "executable": "sanka-extension-drf-to-fastapi",
         },
     },
@@ -87,9 +87,9 @@ def test_official_marketplace_has_only_current_code_extensions() -> None:
         assert manifest["wheels"]
         expected_prefix = RELEASE_PREFIX
         if item["id"] == "sanka/drf-to-flask":
-            expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a34/"
+            expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a35/"
         if item["id"] == "sanka/drf-to-fastapi":
-            expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a34/"
+            expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a35/"
         if item["id"] == "sanka/llm-to-jev":
             expected_prefix = RELEASE_PREFIX + "llm-to-jev-v0.1.0a1/"
         if item["id"] == "sanka/python-to-golang":
