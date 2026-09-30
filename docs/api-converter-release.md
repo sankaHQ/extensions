@@ -1,10 +1,10 @@
-# Backend endpoint selection release
+# Go Plan settings release
 
-The a10 API bundle adds reviewed endpoint selection and incremental apply receipts
-for Python-to-Go 0.1.0a10 and TypeScript-to-Rust 0.1.0a3. Both use the shared
+The a11 API bundle adds extension-owned Plan settings for Python-to-Go 0.1.0a11.
+TypeScript-to-Rust remains 0.1.0a3. Both use the shared
 sanka-code-migration 0.1.0a4 wheel. Existing SDK, HTTP replay and TypeScript capture
-wheels remain byte-identical. DRF-to-Flask a13 and DRF-to-FastAPI a19 ship through
-the separate extensions-v0.1.0a34 marketplace release on the same reviewed commit.
+wheels remain byte-identical. DRF-to-Flask a14 and DRF-to-FastAPI a20 remain on
+the separately published extensions-v0.1.0a35 marketplace release.
 
 Explicit `selected_endpoints` limits generated HTTP routes. Successful apply plus
 matching owned file hashes locks existing endpoints during cumulative planning.
@@ -43,7 +43,7 @@ Review its wheel digest before committing. CI only validates checked-in bytes.
 ## Publication gate
 
 After this change lands, tag its
-reviewed merge commit `api-converters-v0.1.0a10` and dispatch
+reviewed merge commit `api-converters-v0.1.0a11` and dispatch
 `api-release.yml` on that tag. The dispatch job requires the tag to be on
 `main` and installs published CLI 0.3.2 for both pinned example qualifications
 before GitHub publishes any assets. Do not publish from a pull-request build.

@@ -33,3 +33,10 @@ Advanced. `when` shows a setting only while other settings hold the given values
 The file declares what the extension accepts, not hosting policy. Sanka Code decides
 separately which settings are editable, fixed or hidden in the cloud.
 `tests/test_extension_settings.py` validates every shipped file.
+
+Python-to-Go a11 declares its source framework, source entrypoint and
+optional PostgreSQL conversion settings. Schema mode and models file appear only
+when PostgreSQL is selected. Output remains inside the artifact directory; the Go router is selected in the TUI target list. There
+is no generation-layout setting. Changing these values requires a new reviewed
+plan. CLI versions that support settings declarations read it from the installed wheel.
+Public CLI 0.3.3 keeps its built-in form; it does not read this declaration.

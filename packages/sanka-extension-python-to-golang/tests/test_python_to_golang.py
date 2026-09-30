@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -64,7 +65,7 @@ def request(root: Path, framework: str = "flask", target: str = "fiber") -> Exte
         str(root),
         str(root / ".sanka" / "go"),
         "sanka/python-to-golang",
-        "0.1.0a10",
+        "0.1.0a11",
         "0" * 64,
         {},
         {"source_framework": framework, "target_framework": target},
@@ -140,6 +141,27 @@ def test_unknown_behavior_blocks(tmp_path: Path, addition: str) -> None:
     plan = handle(request(tmp_path))
     assert plan.outcome == "success"
     assert plan.data["files"] == {}
+
+
+@pytest.mark.parametrize("target", TARGETS)
+def test_declared_plan_settings_generate_the_selected_router(tmp_path: Path, target: str) -> None:
+    document = json.loads(
+        resources.files("sanka_extension_python_to_golang")
+        .joinpath("sanka-extension-settings.json")
+        .read_text("utf-8")
+    )
+    defaults = {item["id"]: item["default"] for item in document["settings"]}
+    config = {
+        item["id"]: defaults[item["id"]]
+        for item in document["settings"]
+        if all(defaults.get(key) == value for key, value in item.get("when", {}).items())
+    }
+    config["target"] = target
+    (tmp_path / config["source_file"]).write_text(source(config["source_framework"]))
+    plan = handle(dataclasses.replace(request(tmp_path), configuration=config))
+    assert plan.outcome == "success", plan.error
+    assert plan.data["capture"]["configuration"]["target_framework"] == target
+    assert plan.data["files"]
 
 
 def test_profiles_and_source_boundaries(tmp_path: Path) -> None:
