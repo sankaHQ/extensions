@@ -4,6 +4,7 @@
 import dataclasses
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,10 @@ from test_python_to_golang import request
 
 @pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="requires Go toolchain")
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
-def test_partial_then_cumulative_go_http(tmp_path: Path, target: str):
+def test_partial_then_cumulative_go_http(
+    tmp_path: Path, target: str, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("SANKA_GO_SOURCE_PYTHON", sys.executable)
     (tmp_path / "app.py").write_text("""from flask import Flask, jsonify
 app = Flask(__name__)
 @app.get("/one")
@@ -58,6 +62,10 @@ def two():
             + dispatch
             + '; if status != want { t.Fatalf("%s: got %d want %d",path,status,want) } } }'
         )
+        for stage in ("test", "verify"):
+            report = handle(dataclasses.replace(req, command=stage))
+            assert report.outcome == "success", report.error
+            assert report.data["ok"]
         result = subprocess.run(
             ["go", "test", "-mod=readonly", "-p=2", "-run", "^TestSelection$", "."],
             cwd=output,
@@ -67,3 +75,10 @@ def two():
             timeout=180,
         )
         assert result.returncode == 0, result.stdout + result.stderr
+        if len(selected) == 1:
+            source = tmp_path / "app.py"
+            original = source.read_text()
+            source.write_text(original.replace('"value": 2', '"value": 3'))
+            rejected = handle(dataclasses.replace(req, command="verify"))
+            assert rejected.outcome == "error"
+            source.write_text(original)

@@ -2,11 +2,11 @@
   "schema_version": "sanka-extension-manifest/v2",
   "kind": "migration",
   "id": "sanka/python-to-golang",
-  "version": "0.1.0a11",
+  "version": "0.1.0a12",
   "protocol_version": "sanka-extension/v1",
   "distribution": {
     "name": "sanka-extension-python-to-golang",
-    "version": "0.1.0a11",
+    "version": "0.1.0a12",
     "executable": "sanka-extension-python-to-golang"
   },
   "commands": [
@@ -49,28 +49,28 @@
   },
   "wheels": [
     {
-      "name": "sanka_extension_python_to_golang-0.1.0a11-py3-none-any.whl",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a11/sanka_extension_python_to_golang-0.1.0a11-py3-none-any.whl",
-      "sha256": "2423b4791d0e72dc9eb65ee2588d615b5370474e2574b7990c5ad314c8bc6a8f"
+      "name": "sanka_extension_python_to_golang-0.1.0a12-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a12/sanka_extension_python_to_golang-0.1.0a12-py3-none-any.whl",
+      "sha256": "e030355c0944fc12e6a36ebb4c4ee6d293b2f1b98d951709e762beb81abe30ec"
     },
     {
       "name": "sanka_http_replay-0.1.0a2-py3-none-any.whl",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a11/sanka_http_replay-0.1.0a2-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a12/sanka_http_replay-0.1.0a2-py3-none-any.whl",
       "sha256": "df9e62cd4fec94a4b2c454a5273efa2abfa8e56032e6d7a2e0a1491adad995b4"
     },
     {
       "name": "sanka_code_migration-0.1.0a4-py3-none-any.whl",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a11/sanka_code_migration-0.1.0a4-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a12/sanka_code_migration-0.1.0a4-py3-none-any.whl",
       "sha256": "a5f0bc3022ff3533db4ca8d9df813a6021f8c04a7ab9d03d3495cc0cd9bab12d"
     },
     {
       "name": "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a11/sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a12/sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
       "sha256": "f1a6655095ab81e549137e1d9604492bda2a31677d674c6359b0a39a2da96307"
     },
     {
       "name": "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
-      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a11/sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
+      "url": "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a12/sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
       "sha256": "34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e"
     }
   ]
