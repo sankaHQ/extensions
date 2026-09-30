@@ -23,7 +23,7 @@ from sanka_http_replay import (
     validate_scenarios,
 )
 
-from .capture import canonical, capture, digest
+from .capture import canonical, digest, recapture
 from .render import render
 from .replay import (
     SOURCE_PROBE,
@@ -377,7 +377,7 @@ def replay_writes(
     for name in ("go.mod", "go.sum", "contract.json"):
         if snapshot.get(name) != expected[name].encode():
             raise ValueError(f"candidate {name} differs from the applied plan")
-    if capture(root, config) != captured:
+    if recapture(root, captured) != captured:
         raise ValueError("source changed before replay")
     files = {
         name: (root / name).read_bytes()
@@ -541,7 +541,7 @@ def replay_writes(
             result["denied_writes_unchanged"] = unchanged
             result["ok"] = result["ok"] and result["security_headers"]["ok"] and unchanged
         if (
-            capture(root, config) != captured
+            recapture(root, captured) != captured
             or _snapshot(output) != snapshot
             or (scenario_path.read_bytes() if scenario_path.exists() else None) != scenario_bytes
         ):

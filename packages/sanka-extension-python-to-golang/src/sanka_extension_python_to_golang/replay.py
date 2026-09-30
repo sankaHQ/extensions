@@ -16,7 +16,7 @@ from textwrap import indent
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from .capture import canonical, capture, digest
+from .capture import canonical, digest, recapture
 from .render import render
 from .security import compare_headers, header_probe, security_cases, security_environment
 from .toolchain import ensure_go
@@ -493,7 +493,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
     model_bytes = (
         (root / config["models_file"]).read_bytes() if config["database_layer"] == "pgx" else None
     )
-    if capture(root, config) != captured:
+    if recapture(root, captured) != captured:
         raise ValueError("source changed before replay")
     cases = [
         (path, route["status"]) for route in captured["routes"] for path in request_paths(route)
@@ -644,7 +644,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
                 "read-only GET responses against explicitly supplied fixtures; "
                 "no schema or data writes to those fixtures"
             )
-        if capture(root, config) != captured:
+        if recapture(root, captured) != captured:
             raise ValueError("source changed during replay; discard observations")
         if _snapshot(output) != snapshot:
             raise ValueError("candidate changed during replay; discard observations")

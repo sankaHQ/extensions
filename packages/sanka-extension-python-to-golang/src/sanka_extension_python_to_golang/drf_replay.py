@@ -188,7 +188,7 @@ def _authenticated_groups(
 def replay_project(
     root: Path, output: Path, captured: dict[str, Any], command: str
 ) -> dict[str, Any]:
-    from .capture import canonical, capture, digest
+    from .capture import canonical, digest, recapture
     from .render import render
     from .replay import _run, _snapshot, _source_python
     from .toolchain import ensure_go
@@ -247,7 +247,7 @@ def replay_project(
     for name in ("go.mod", "go.sum", "contract.json"):
         if snapshot.get(name) != expected[name].encode():
             raise ValueError("candidate differs from the applied plan: " + name)
-    if capture(root, captured["configuration"]) != captured:
+    if recapture(root, captured) != captured:
         raise ValueError("source changed before replay")
     source_python = _source_python() if command == "verify" else None
     auth_env: dict[str, str] = {}
@@ -325,7 +325,7 @@ def replay_project(
             )
         comparison = compare(cases, target, actual)
         failures.extend(dict(step, group=index) for step in comparison["steps"] if step["problems"])
-    if capture(root, captured["configuration"]) != captured or _snapshot(output) != snapshot:
+    if recapture(root, captured) != captured or _snapshot(output) != snapshot:
         raise ValueError("source or generated files changed during replay")
     report = {
         "ok": not failures,

@@ -14,6 +14,8 @@ from pathlib import Path, PurePosixPath
 from textwrap import indent
 from typing import Any
 
+from sanka_code_migration.endpoints import endpoint_id, scoped_routes
+
 from .application import normalize_application
 from .async_persistence import normalize_async_persistence, normalize_workflow_calls
 from .models import capture_models
@@ -34,7 +36,7 @@ from .values import (
 
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
-VERSION = "0.1.0a11"
+VERSION = "0.1.0a12"
 MAX_SOURCE_BYTES = 256 * 1024 * 1024
 MAX_SOURCE_FILES = 20_000
 GAP_PATH_SAMPLES = 8
@@ -1519,6 +1521,15 @@ return Response({response})
                 write["immutable_primary"] = True
             return {"status": status, "write": write}
     raise ValueError("write handler is outside the qualified DRF recipe")
+
+
+def recapture(root: Path, reviewed: dict[str, Any]) -> dict[str, Any]:
+    """Refresh the whole source contract, retaining the reviewed HTTP subset."""
+    refreshed = capture(root, reviewed["configuration"])
+    refreshed["routes"] = scoped_routes(
+        refreshed["routes"], {"effective_ids": [endpoint_id(route) for route in reviewed["routes"]]}
+    )
+    return refreshed
 
 
 def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
