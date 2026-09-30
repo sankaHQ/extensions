@@ -83,7 +83,12 @@ def settings_errors(document: object) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    "package", ["sanka_extension_drf_to_fastapi", "sanka_extension_drf_to_flask"]
+    "package",
+    [
+        "sanka_extension_drf_to_fastapi",
+        "sanka_extension_drf_to_flask",
+        "sanka_extension_python_to_golang",
+    ],
 )
 def test_shipped_settings_follow_the_declared_format(package):
     document = json.loads(resources.files(package).joinpath(SETTINGS_FILE).read_text("utf-8"))

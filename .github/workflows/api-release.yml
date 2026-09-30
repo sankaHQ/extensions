@@ -26,7 +26,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a10
+          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a11
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
@@ -144,7 +144,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "Python-to-Go converter 0.1.0a9" \
-            --notes "Experimental Python-to-Go 0.1.0a9 qualified with published Sanka CLI 0.3.2. Fixes browser Accept header negotiation for DRF projects and supports explicit JSONRenderer configuration, with installed-wheel regression checks across all four Go routers. Includes the unchanged Rust 0.1.0a2 converter and helper wheels. No arbitrary-application or production-cutover claim."
+            --title "Python-to-Go converter 0.1.0a11" \
+            --notes "Experimental Python-to-Go 0.1.0a11 adds extension-owned Plan settings for source framework, entrypoint and PostgreSQL conversion. Qualified through the installed public CLI and all four native Go routers. Includes the unchanged Rust 0.1.0a3 converter and helper wheels. No arbitrary-application or production-cutover claim."
         env:
           GH_TOKEN: ${{ github.token }}

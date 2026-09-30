@@ -1,0 +1,127 @@
+{
+  "schema_version": "sanka-extension-settings/v1",
+  "display": {
+    "name": {
+      "en": "Python to Go",
+      "ja": "Python から Go"
+    },
+    "description": {
+      "en": "Choose the Go router in the target list; configure the source and database here.",
+      "ja": "ターゲット一覧で Go ルーターを選び、ここで移行元とデータベースを設定します。"
+    }
+  },
+  "settings": [
+    {
+      "id": "source_framework",
+      "stage": "plan",
+      "type": "choice",
+      "default": "drf",
+      "label": {
+        "en": "Source framework",
+        "ja": "移行元フレームワーク"
+      },
+      "choices": [
+        {
+          "value": "drf",
+          "label": {
+            "en": "Django REST Framework",
+            "ja": "Django REST Framework"
+          }
+        },
+        {
+          "value": "fastapi",
+          "label": {
+            "en": "FastAPI",
+            "ja": "FastAPI"
+          }
+        },
+        {
+          "value": "flask",
+          "label": {
+            "en": "Flask",
+            "ja": "Flask"
+          }
+        }
+      ]
+    },
+    {
+      "id": "source_file",
+      "stage": "plan",
+      "type": "path",
+      "default": "app.py",
+      "label": {
+        "en": "Python entrypoint (relative to this project)",
+        "ja": "Python エントリーポイント（プロジェクトからの相対パス）"
+      }
+    },
+    {
+      "id": "database_layer",
+      "stage": "plan",
+      "type": "choice",
+      "default": "none",
+      "label": {
+        "en": "Database support",
+        "ja": "データベース対応"
+      },
+      "choices": [
+        {
+          "value": "none",
+          "label": {
+            "en": "No database conversion",
+            "ja": "データベース変換なし"
+          }
+        },
+        {
+          "value": "pgx",
+          "label": {
+            "en": "PostgreSQL — pgx and Goose",
+            "ja": "PostgreSQL — pgx と Goose"
+          }
+        }
+      ]
+    },
+    {
+      "id": "schema_mode",
+      "stage": "plan",
+      "type": "choice",
+      "default": "empty",
+      "label": {
+        "en": "Destination schema",
+        "ja": "移行先スキーマ"
+      },
+      "choices": [
+        {
+          "value": "empty",
+          "label": {
+            "en": "Empty — generate reviewed schema migrations",
+            "ja": "空 — 確認したスキーマ移行を生成"
+          }
+        },
+        {
+          "value": "adopt-existing",
+          "label": {
+            "en": "Existing — validate schema before transfer",
+            "ja": "既存 — 転送前にスキーマを検証"
+          }
+        }
+      ],
+      "when": {
+        "database_layer": "pgx"
+      }
+    },
+    {
+      "id": "models_file",
+      "stage": "plan",
+      "type": "path",
+      "default": "models.py",
+      "label": {
+        "en": "Python models file (relative to this project)",
+        "ja": "Python モデルファイル（プロジェクトからの相対パス）"
+      },
+      "advanced": true,
+      "when": {
+        "database_layer": "pgx"
+      }
+    }
+  ]
+}
