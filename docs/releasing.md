@@ -1,5 +1,26 @@
 # Releasing Sanka extension packages
 
+## SQLite and DRF replay fixes: a36 / API a13
+
+`extensions-v0.1.0a36` publishes DRF-to-Flask `0.1.0a15`, DRF-to-FastAPI
+`0.1.0a21` and DRF replay `0.1.0a5`. Flask preserves the source missing-object
+response; shared replay keeps FastAPI PostgreSQL URLs in its native driver format.
+Both converters depend on the new replay wheel. SDK and code-migration wheels
+retain their published bytes.
+
+`api-converters-v0.1.0a13` publishes Python-to-Go `0.1.0a13`: bounded
+SQLite → SQLite, SQLite → PostgreSQL and PostgreSQL → PostgreSQL migrations,
+explicit existing-row transfer, rollback and numeric ordering on all four routers.
+PostgreSQL → SQLite remains unsupported. Other API wheels retain their versions
+and bytes. See [API release qualification](api-converter-release.md).
+
+Run `make update-marketplace-hashes`, build the API bundle with
+`--write-manifests`, review the hashes, then run the maintained checks and strict
+artifact validators. Publish only absent immutable tags on the reviewed merge.
+Verify clean downloaded bundles and installed public lifecycles before advancing
+the CLI official catalog pin. Existing project locks remain unchanged until an
+explicit extension upgrade.
+
 ## Plan settings declarations: a35
 
 `extensions-v0.1.0a35` advances `sanka-extension-drf-to-fastapi` to `0.1.0a20` and

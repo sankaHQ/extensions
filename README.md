@@ -19,15 +19,15 @@ sources and destinations those capabilities read from and write to.
 | --- | --- |
 | `sanka/drf-to-fastapi` | Converts a Django REST Framework app to native async FastAPI ([guide](https://sanka.com/docs/developers/migrate/django-to-fastapi/)) |
 | `sanka/drf-to-flask` | Converts a Django REST Framework app to Flask ([guide](https://sanka.com/docs/developers/migrate/django-to-flask/)) |
+| `sanka/python-to-golang` | Converts supported DRF, FastAPI and Flask APIs to Go, including SQLite and PostgreSQL ([guide](https://sanka.com/docs/developers/migrate/python-to-golang/)) |
 
 The generated [catalog](docs/catalog.md) is the authoritative list, with roles
 and versions checked against `marketplace.json` and each manifest. Experimental
-converters are published as scoped prereleases outside the default catalog:
-`sanka/python-to-golang` and `sanka/typescript-to-rust`
-([`api-converters-v0.1.0a1`](docs/api-converter-release.md)) and
+converters also appear in the official catalog. Go and Rust use the scoped
+[API converter release](docs/api-converter-release.md), and
 `sanka/react-native-to-native`
 ([`mobile-converters-v0.1.0a1`](docs/mobile-converter-release.md)); each package
-README shows how to pin them.
+README describes its supported scenarios and how to pin an older release.
 
 ## Install
 
@@ -36,6 +36,11 @@ uv tool install --python 3.12 sanka-cli      # the CLI, if you do not have it ye
 sanka extension add sanka/drf-to-fastapi     # this marketplace is preconfigured and trusted
 sanka extension list
 ```
+
+Commands use the CLI by default. Add `--tui` or run `sanka tui` for the optional
+interactive interface. Both use the same Plan configuration and endpoint scope.
+The Go SQLite example needs no container; PostgreSQL examples need a disposable
+database. See the [Go package README](packages/sanka-extension-python-to-golang/README.md).
 
 Each extension is an immutable GitHub release wheel. Before anything runs, the
 CLI checks the manifest, the release URL, the SHA-256 digest and the CLI
