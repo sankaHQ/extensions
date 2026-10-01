@@ -82,6 +82,11 @@ contracts without changing versions or manifests. PR and main CI use this mode; 
 SDK bytes remain pinned. Candidate success is not publication approval: the default
 build and publication workflow still require every reviewed manifest hash to match.
 
+API converter changes use `uv run python scripts/build_api_release.py --candidate`
+in PR and main CI. This refreshes hashes only in the private output bundle; reviewed
+source manifests and published SDK pins stay unchanged. Publication dispatches and
+the default build remain strict and require coordinated new versions and assets.
+
 Use the repository uv workspace and focused checks while editing. Regenerate
 manifest hashes only after wheel changes. Finish code review, then run
 `make check build-release` as the final broad gate. The build verifies the six

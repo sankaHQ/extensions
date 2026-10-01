@@ -203,7 +203,17 @@ def test_source_to_go_postgres_replay(
     from sanka_extension_python_to_golang.replay import replay
 
     model = project(tmp_path, evolution=True)
-    (tmp_path / "sanka-verify.json").write_text(json.dumps({"scenarios": scenarios()}))
+    cases = scenarios() + [
+        {
+            "id": f"numeric-order-{index}",
+            "method": "POST",
+            "path": "/widgets",
+            "body": {"name": f"numeric-order-{index}", "parent_id": 3, "enabled": True},
+            "expected_status": 201,
+        }
+        for index in range(8)
+    ]
+    (tmp_path / "sanka-verify.json").write_text(json.dumps({"scenarios": cases}))
     output = generate(
         tmp_path,
         "fastapi",
@@ -232,6 +242,10 @@ def test_source_to_go_postgres_replay(
             report = replay(tmp_path, output, captured, "verify")
             assert report["ok"], report["steps"]
             assert report["candidate"] == report["source"]
+            for observations in (report["source"], report["candidate"]):
+                assert [row["id"] for row in observations[-1]["tables"]["widgets"]] == [
+                    str(value) for value in range(4, 13)
+                ]
             indexes = [
                 admin.execute(
                     "SELECT tablename,indexname FROM pg_indexes "

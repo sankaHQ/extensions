@@ -157,10 +157,11 @@ def test_declared_plan_settings_generate_the_selected_router(tmp_path: Path, tar
         if all(defaults.get(key) == value for key, value in item.get("when", {}).items())
     }
     config["target"] = target
-    (tmp_path / config["source_file"]).write_text(source(config["source_framework"]))
+    (tmp_path / "app.py").write_text(source("flask"))
     plan = handle(dataclasses.replace(request(tmp_path), configuration=config))
     assert plan.outcome == "success", plan.error
     assert plan.data["capture"]["configuration"]["target_framework"] == target
+    assert plan.data["capture"]["configuration"]["source_framework"] == "flask"
     assert plan.data["files"]
 
 

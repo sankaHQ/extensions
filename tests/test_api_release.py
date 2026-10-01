@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fail closed on release closure, immutable identity and publication scope drift."""
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
 
 import pytest
 
-from scripts.build_api_release import PACKAGES, ROOT, build, manifest, validate
+from scripts.build_api_release import PACKAGES, ROOT, SDK, build, manifest, validate, wheel_name
 from scripts.check_release_artifacts import CATALOG
 
 
@@ -59,3 +60,26 @@ def test_refuse_output_outside_release(tmp_path: Path) -> None:
 
 def test_full_catalog_keeps_existing_packages() -> None:
     assert json.loads((ROOT / "marketplace.json").read_text()) == CATALOG
+
+
+def test_candidate_hashes_preserve_source_contracts_and_published_sdk_pins(
+    snapshot: Path, tmp_path: Path
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    for package in PACKAGES:
+        (bundle / wheel_name(package)).write_bytes(b"unreleased source wheel")
+    expected = hashlib.sha256(b"unreleased source wheel").hexdigest()
+    sdk_names = {wheel.name for wheel in SDK}
+    for package in PACKAGES[:2]:
+        path = snapshot / "packages" / package / "extension.json"
+        before = path.read_bytes()
+        reviewed = manifest(package, snapshot)
+        candidate = manifest(package, snapshot, candidate=bundle)
+        assert candidate | {"wheels": []} == reviewed | {"wheels": []}
+        for original, wheel in zip(reviewed["wheels"], candidate["wheels"], strict=True):
+            assert wheel["sha256"] == (
+                original["sha256"] if wheel["name"] in sdk_names else expected
+            )
+            assert wheel | {"sha256": ""} == original | {"sha256": ""}
+        assert path.read_bytes() == before

@@ -16,7 +16,10 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
     from .render import DRF_HELPERS, MODULES, QUERY_SOURCE, _runtime
 
     target = captured["configuration"]["target_framework"]
-    lock = files("sanka_extension_python_to_golang").joinpath("locks", target + "-postgresql")
+    target_sqlite = captured["configuration"]["database_layer"] == "sqlite"
+    lock = files("sanka_extension_python_to_golang").joinpath(
+        "locks", target + ("-sqlite" if target_sqlite else "-postgresql")
+    )
     result = {
         "contract.json": canonical(captured) + "\n",
         "go.mod": lock.joinpath("go.mod").read_text(),
@@ -28,10 +31,9 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
         **_runtime(target, True, True),
     }
     sqlite = captured["drf_project"]["database"]["engine"] == "sqlite"
-    if not sqlite:
-        from .drf_transfer import TRANSFER_SCRIPT
+    from .sqlite_transfer import render_transfer
 
-        result["tools/transfer_existing.py"] = TRANSFER_SCRIPT
+    result.update(render_transfer(captured))
     adopting = captured["configuration"]["schema_mode"] == "adopt-existing"
     authenticated = captured["drf_project"].get("authentication") == "jwt-hs256-roles"
     if authenticated:
@@ -56,7 +58,7 @@ def render_project(captured: dict[str, Any]) -> dict[str, str]:
         if sqlite:
             counters += f"INSERT INTO migration_identity VALUES ('{model['table']}', 0);\n"
         for field in model["fields"]:
-            if field.get("kind") == "PositiveIntegerField" and not adopting:
+            if field.get("kind") == "PositiveIntegerField" and not adopting and not target_sqlite:
                 counters += f'ALTER TABLE "{model["table"]}" ADD CHECK ("{field["name"]}" >= 0);\n'
     result["migrations/00001_initial.sql"] = migration.replace(
         "-- +goose Down",
@@ -138,6 +140,13 @@ import ({http_import} "{MODULES[target]}"; "github.com/jackc/pgx/v5/pgxpool")
             "\"SELECT nextval(pg_get_serial_sequence($1, 'id'))\"",
         )
     result["drf.go"] = code + DRF_HELPERS
+    if target_sqlite:
+        from .sqlite import adapt_files
+
+        result["drf.go"] = result["drf.go"].replace(
+            'text=="true" || text=="t"', 'text=="true" || text=="t" || text=="1"'
+        )
+        result = adapt_files(result)
     return result
 
 
@@ -366,7 +375,7 @@ func drfValidate(raw []byte, schema drfSerializer, partial bool) (map[string]any
 }
 
 func drfRows(ctx context.Context, tx pgx.Tx, schema drfSerializer, where string, args ...any) ([]map[string]any,error) {
-    return drfQueryRows(ctx,tx,schema,where," ORDER BY id",args...)
+    return drfQueryRows(ctx,tx,schema,where," ORDER BY "+quoted(drfModelFor(schema.Model).Table)+".id",args...)
 }
 func drfQueryRows(ctx context.Context, tx pgx.Tx, schema drfSerializer, where, tail string, args ...any) ([]map[string]any,error) {
     model:=drfModelFor(schema.Model)
@@ -469,7 +478,7 @@ func drfList(ctx context.Context, tx pgx.Tx, view drfView, address, where string
     };if len(requested)>0 { ordering=requested }
     terms:=[]string{};model:=drfModelFor(view.Serializer.Model)
     for _,field:=range ordering {
-        name:=strings.TrimPrefix(field,"-");term:=quoted(name)
+        name:=strings.TrimPrefix(field,"-");term:=quoted(model.Table)+"."+quoted(name)
         if drfSchema.Project.Database.Engine=="sqlite" { for _,f:=range model.Fields { if f.Name==name && f.GoType=="string" { term+=` COLLATE "C"` } } }
         if strings.HasPrefix(field,"-") { term+=" DESC" };terms=append(terms,term)
     };tail:=" ORDER BY "+strings.Join(terms,",")

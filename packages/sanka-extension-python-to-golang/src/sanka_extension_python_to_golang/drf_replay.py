@@ -194,9 +194,10 @@ def replay_project(
     from .toolchain import ensure_go
 
     groups = scenario_groups(root, captured)
+    sqlite = captured["configuration"]["database_layer"] == "sqlite"
     dsn = os.environ.get("SANKA_GO_TARGET_TEST_DATABASE_URL", "")
     url = urlsplit(dsn)
-    if (
+    if not sqlite and (
         url.scheme not in {"postgres", "postgresql"}
         or not url.hostname
         or not url.path.strip("/")
@@ -261,6 +262,8 @@ def replay_project(
     original_tests = None
     with tempfile.TemporaryDirectory(prefix="sanka-drf-go-") as directory:
         workspace = Path(directory)
+        if sqlite:
+            dsn = (workspace / "target.sqlite3").as_uri()
         candidate, source = workspace / "candidate", workspace / "source"
         candidate.mkdir()
         source.mkdir()
@@ -333,7 +336,9 @@ def replay_project(
         "failures": failures,
         "scenarios": groups,
         "candidate_digest": digest({k: hashlib.sha256(v).hexdigest() for k, v in snapshot.items()}),
-        "database": "isolated PostgreSQL source and target"
+        "database": "isolated SQLite source and SQLite target"
+        if sqlite
+        else "isolated PostgreSQL source and target"
         if postgres
         else "isolated SQLite source and PostgreSQL target",
     }
@@ -595,7 +600,7 @@ func TestConventionalDRFReplay(t *testing.T) {
             snapshots:=map[string]any{};sequences:=map[string]any{}
             for _,model:=range drfSchema.Models {
                 columns:=[]string{};for _,f:=range model.Fields { columns=append(columns,quoted(f.Name)+"::text") }
-                rows,err:=pool.Query(ctx,"SELECT "+strings.Join(columns,",")+" FROM "+quoted(model.Table)+" ORDER BY id");if err!=nil { t.Fatal(err) }
+                rows,err:=pool.Query(ctx,"SELECT "+strings.Join(columns,",")+" FROM "+quoted(model.Table)+" ORDER BY "+quoted(model.Table)+".id");if err!=nil { t.Fatal(err) }
                 records:=[]map[string]any{}
                 for rows.Next() {
                     values,err:=rows.Values();if err!=nil { t.Fatal(err) };record:=map[string]any{}
@@ -624,4 +629,12 @@ func TestConventionalDRFReplay(t *testing.T) {
             'var value int64;if err:=pool.QueryRow(ctx,"SELECT value FROM migration_identity WHERE table_name=$1",model.Table).Scan(&value);err!=nil { t.Fatal(err) }\n                sequences[model.Table]=[]any{strconv.FormatInt(value,10),value!=0}',
             'var sequence string;if err:=pool.QueryRow(ctx,"SELECT pg_get_serial_sequence($1, \'id\')",model.Table).Scan(&sequence);err!=nil { t.Fatal(err) };var value int64;var called bool;if err:=pool.QueryRow(ctx,"SELECT last_value,is_called FROM "+sequence).Scan(&value,&called);err!=nil { t.Fatal(err) };sequences[model.Table]=[]any{strconv.FormatInt(value,10),called}',
         )
+    if captured["configuration"]["database_layer"] == "sqlite":
+        from .sqlite import adapt_go
+
+        probe = adapt_go(probe)
+        probe = probe.replace(
+            'if _,err:=pool.Exec(ctx,"TRUNCATE "+strings.Join(tables,",")+" RESTART IDENTITY CASCADE");err!=nil { t.Fatal(err) }',
+            'for i:=len(tables)-1;i>=0;i-- { if _,err:=pool.Exec(ctx,"DELETE FROM "+tables[i]);err!=nil { t.Fatal(err) } };if _,err:=pool.Exec(ctx,"DELETE FROM sqlite_sequence");err!=nil { t.Fatal(err) }',
+        ).replace('text=="t" || text=="true"', 'text=="t" || text=="true" || text=="1"')
     return probe

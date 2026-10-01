@@ -29,6 +29,9 @@ Japanese `label`. `description` is optional. Choices list `value` and `label`; t
 default must be one of them. Integers declare `minimum` and `maximum`. Text and path
 settings may be `optional` with a `null` default. `advanced` places a setting under
 Advanced. `when` shows a setting only while other settings hold the given values.
+An updated CLI also accepts a nonempty list of scalar alternatives, such as
+`"when": {"database_layer": ["pgx", "sqlite"]}`. Consumers must use membership
+for these lists; nested objects/arrays are invalid. This addition is unreleased.
 
 The file declares what the extension accepts, not hosting policy. Sanka Code decides
 separately which settings are editable, fixed or hidden in the cloud.
