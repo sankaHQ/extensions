@@ -1032,7 +1032,7 @@ source = { editable = "packages/sanka-connector-sdk" }
 
 [[package]]
 name = "sanka-drf-replay"
-version = "0.1.0a4"
+version = "0.1.0a5"
 source = { editable = "packages/sanka-drf-replay" }
 
 [[package]]
@@ -1048,7 +1048,7 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 
 [[package]]
 name = "sanka-extension-drf-to-fastapi"
-version = "0.1.0a20"
+version = "0.1.0a21"
 source = { editable = "packages/sanka-extension-drf-to-fastapi" }
 dependencies = [
     { name = "sanka-code-migration" },
@@ -1065,7 +1065,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-extension-drf-to-flask"
-version = "0.1.0a14"
+version = "0.1.0a15"
 source = { editable = "packages/sanka-extension-drf-to-flask" }
 dependencies = [
     { name = "sanka-code-migration" },
@@ -1093,7 +1093,7 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 
 [[package]]
 name = "sanka-extension-python-to-golang"
-version = "0.1.0a12"
+version = "0.1.0a13"
 source = { editable = "packages/sanka-extension-python-to-golang" }
 dependencies = [
     { name = "sanka-code-migration" },

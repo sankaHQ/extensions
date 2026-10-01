@@ -18,16 +18,17 @@ ROOT = Path(__file__).resolve().parents[1]
 MAX_DEPENDENCY_WHEEL_BYTES = 128 * 1024 * 1024
 MARKETPLACE_PACKAGES = (
     "sanka-code-migration",
+    "sanka-drf-replay",
     "sanka-extension-drf-to-fastapi",
     "sanka-extension-drf-to-flask",
 )
-CANDIDATE_PACKAGES = (*MARKETPLACE_PACKAGES, "sanka-drf-replay")
+CANDIDATE_PACKAGES = MARKETPLACE_PACKAGES
 LOCAL_WHEELS = (
-    "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
+    "sanka_drf_replay-0.1.0a5-py3-none-any.whl",
     "sanka_code_migration-0.1.0a4-py3-none-any.whl",
     "sanka_extension_sdk-0.1.0a4-py3-none-any.whl",
-    "sanka_extension_drf_to_fastapi-0.1.0a20-py3-none-any.whl",
-    "sanka_extension_drf_to_flask-0.1.0a14-py3-none-any.whl",
+    "sanka_extension_drf_to_fastapi-0.1.0a21-py3-none-any.whl",
+    "sanka_extension_drf_to_flask-0.1.0a15-py3-none-any.whl",
     "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
 )
 CANDIDATE_WHEELS = {
@@ -90,14 +91,6 @@ PINNED_EXTENSION_SDK = LockedWheel(
 PINNED_LOCAL_WHEELS = (
     PINNED_EXTENSION_SDK,
     # Reuse published dependencies without rebuilding their immutable filenames.
-    LockedWheel(
-        "sanka-drf-replay",
-        "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
-        "https://github.com/sankaHQ/extensions/releases/download/extensions-v0.1.0a31/"
-        "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
-        "a60f2124202efe75b10c5c71e6dd3681a77cdd8fbb3568424bd8c18362e5c2bf",
-        26608,
-    ),
     LockedWheel(
         "sanka-connector-sdk",
         "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",

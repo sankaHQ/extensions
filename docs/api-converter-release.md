@@ -1,10 +1,10 @@
-# Go Plan settings release
+# SQLite Go release
 
-The a11 API bundle adds extension-owned Plan settings for Python-to-Go 0.1.0a11.
+The a13 API bundle publishes SQLite migrations for Python-to-Go 0.1.0a13.
 TypeScript-to-Rust remains 0.1.0a3. Both use the shared
 sanka-code-migration 0.1.0a4 wheel. Existing SDK, HTTP replay and TypeScript capture
-wheels remain byte-identical. DRF-to-Flask a14 and DRF-to-FastAPI a20 remain on
-the separately published extensions-v0.1.0a35 marketplace release.
+wheels remain byte-identical. DRF-to-Flask a15 and DRF-to-FastAPI a21 remain on
+the separately published extensions-v0.1.0a36 marketplace release.
 
 Explicit `selected_endpoints` limits generated HTTP routes. Successful apply plus
 matching owned file hashes locks existing endpoints during cumulative planning.
@@ -16,7 +16,7 @@ and does not turn a passing subset into an application-wide parity claim.
 
 The `api-release.yml` jobs build seven wheels, check the two manifests and scoped
 catalog, and exercise the pinned `sanka-examples` revision
-`e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.2 on every pull
+`e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.4 on every pull
 request, main push and release tag.
 
 Only the publication tag also runs the installed-CLI PostgreSQL corpus: all 17
@@ -43,9 +43,9 @@ Review its wheel digest before committing. CI only validates checked-in bytes.
 ## Publication gate
 
 After this change lands, tag its
-reviewed merge commit `api-converters-v0.1.0a11` and dispatch
+reviewed merge commit `api-converters-v0.1.0a13` and dispatch
 `api-release.yml` on that tag. The dispatch job requires the tag to be on
-`main` and installs published CLI 0.3.2 for both pinned example qualifications
+`main` and installs published CLI 0.3.4 for both pinned example qualifications
 before GitHub publishes any assets. Do not publish from a pull-request build.
 
 The release contains seven wheels, two manifests, the scoped catalog and three

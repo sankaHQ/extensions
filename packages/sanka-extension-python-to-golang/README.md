@@ -3,8 +3,8 @@
 `sanka/python-to-golang` converts captured DRF, Flask, and FastAPI APIs to Fiber
 (the default), chi, Gorilla mux, or Gin. It generates a Go `backend` package and a
 runnable `cmd/api`. Choose `database_layer: "none"` for literal JSON endpoints or
-`"pgx"` for the supported PostgreSQL models, reads, and writes. This branch also
-adds `"sqlite"` for a Go SQLite destination; that profile is unreleased.
+`"pgx"` for the supported PostgreSQL models, reads, and writes, or `"sqlite"`
+for a Go SQLite destination. SQLite needs no Docker or Podman setup.
 
 This is an experimental converter. It handles the source patterns documented below,
 including conventional DRF projects, flat CRUD, and explicit auth and transaction
@@ -36,7 +36,7 @@ sanka extension marketplace upgrade official
 sanka extension upgrade sanka/python-to-golang
 ```
 
-These commands install published artifacts, not this branch's SQLite candidate.
+The a13 release includes the SQLite profile described below.
 The public release check runs pinned examples through Scan, Plan, Apply, Test,
 and Verify and compares source and target HTTP responses. See
 [sanka-examples](https://github.com/sankaHQ/sanka-examples) for that example's
@@ -97,9 +97,9 @@ and disposable fixture databases. See [verification and fixtures](#write-qualifi
 for database checks and [the conventional DRF project profile](#conventional-django-project-profile)
 for `ModelViewSet` projects.
 
-## SQLite profile (unreleased)
+## SQLite profile
 
-The candidate supports SQLite → SQLite, SQLite → PostgreSQL and the existing
+The converter supports SQLite → SQLite, SQLite → PostgreSQL and the existing
 PostgreSQL → PostgreSQL profile. PostgreSQL → SQLite is rejected. SQLite qualifies
 captured integer, boolean and text fields; unsupported value codecs remain Scan
 gaps. SQLAlchemy SQLite auto IDs require `Integer`, because SQLite does not
