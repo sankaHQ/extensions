@@ -76,6 +76,12 @@ gate complete merely because the marketplace release succeeds.
 
 ## Preparation and review
 
+For unreleased source changes, use `make build-release RELEASE_ARGS=--candidate` to
+validate current extension and replay wheels against the same package and dependency
+contracts without changing versions or manifests. PR and main CI use this mode; published
+SDK bytes remain pinned. Candidate success is not publication approval: the default
+build and publication workflow still require every reviewed manifest hash to match.
+
 Use the repository uv workspace and focused checks while editing. Regenerate
 manifest hashes only after wheel changes. Finish code review, then run
 `make check build-release` as the final broad gate. The build verifies the six

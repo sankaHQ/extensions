@@ -21,6 +21,7 @@ MARKETPLACE_PACKAGES = (
     "sanka-extension-drf-to-fastapi",
     "sanka-extension-drf-to-flask",
 )
+CANDIDATE_PACKAGES = (*MARKETPLACE_PACKAGES, "sanka-drf-replay")
 LOCAL_WHEELS = (
     "sanka_drf_replay-0.1.0a4-py3-none-any.whl",
     "sanka_code_migration-0.1.0a4-py3-none-any.whl",
@@ -29,6 +30,11 @@ LOCAL_WHEELS = (
     "sanka_extension_drf_to_flask-0.1.0a14-py3-none-any.whl",
     "sanka_connector_sdk-0.1.0a12-py3-none-any.whl",
 )
+CANDIDATE_WHEELS = {
+    name
+    for name in LOCAL_WHEELS
+    if any(name.startswith(package.replace("-", "_") + "-") for package in CANDIDATE_PACKAGES)
+}
 DEPENDENCIES: tuple[str, ...] = ()
 
 
@@ -163,10 +169,10 @@ def _prepare_output(output_dir: Path, *, root: Path = ROOT) -> Path:
     return output_dir
 
 
-def build(output_dir: Path) -> None:
+def build(output_dir: Path, *, candidate: bool = False) -> None:
     output_dir = _prepare_output(output_dir)
     environment = os.environ | {"SOURCE_DATE_EPOCH": "315532800"}
-    for package in MARKETPLACE_PACKAGES:
+    for package in CANDIDATE_PACKAGES if candidate else MARKETPLACE_PACKAGES:
         subprocess.run(
             [
                 "uv",
@@ -183,6 +189,8 @@ def build(output_dir: Path) -> None:
             check=True,
         )
     for wheel in (*PINNED_LOCAL_WHEELS, *LOCKED_DEPENDENCY_WHEELS):
+        if candidate and wheel.name in CANDIDATE_WHEELS:
+            continue
         download_locked_wheel(output_dir, wheel)
     print(f"Built {len(MARKETPLACE_WHEELS)} marketplace wheels in {output_dir}")
 
@@ -190,8 +198,11 @@ def build(output_dir: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", type=Path, default=ROOT / "release" / "all")
+    parser.add_argument(
+        "--candidate", action="store_true", help="Build unreleased source for PR checks"
+    )
     args = parser.parse_args()
-    build(args.output_dir)
+    build(args.output_dir, candidate=args.candidate)
     return 0
 
 

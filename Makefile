@@ -11,6 +11,7 @@ $(error TEST_WORKERS must be 1, 2, 3, or 4)
 endif
 # Extra pytest arguments; CI uses it to run one lane against the installed wheel.
 PYTEST_ARGS ?=
+RELEASE_ARGS ?=
 
 # sanka-ts-capture needs the pinned TypeScript compiler bundle, which is not
 # committed. The fetch is idempotent and digest-checked; no network when present.
@@ -35,8 +36,8 @@ build-business-flows:
 build-release:
 	uv build --wheel --package sanka-extension-sdk --out-dir release/sdk-candidate --clear --no-create-gitignore
 	uv run python scripts/check_sdk_candidate.py release/sdk-candidate
-	uv run python scripts/build_release.py --output-dir dist
-	uv run python scripts/check_release_artifacts.py dist
+	uv run python scripts/build_release.py --output-dir dist $(RELEASE_ARGS)
+	uv run python scripts/check_release_artifacts.py dist $(RELEASE_ARGS)
 
 .PHONY: update-marketplace-hashes
 
