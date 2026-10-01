@@ -72,15 +72,21 @@ def test_drf_sqlite_lifecycle_http_rows_identity_and_rollback(
     } == original
 
 
-def test_missing_source_framework_is_detected_without_importing_source(tmp_path: Path) -> None:
-    (tmp_path / "app.py").write_text(
-        "from flask import Flask, jsonify\napp = Flask(__name__)\n"
-        '@app.get("/status")\ndef status():\n    return jsonify({"ok": True})\n'
-    )
+@pytest.mark.parametrize("framework", ["drf", "fastapi", "flask"])
+def test_missing_source_framework_is_detected_without_importing_source(
+    tmp_path: Path, framework: str
+) -> None:
+    from test_python_to_golang import source
+
+    (tmp_path / "routes.py").write_text(source(framework))
+    symbol = "urlpatterns" if framework == "drf" else "app"
+    (tmp_path / "app.py").write_text(f"from routes import {symbol}\n")
     base = dataclasses.replace(request(tmp_path), configuration={"target": "chi"})
     planned = handle(base)
     assert planned.outcome == "success", planned.error
-    assert planned.data["capture"]["configuration"]["source_framework"] == "flask"
+    assert planned.data["capture"]["configuration"]["source_framework"] == framework
+    assert planned.data["capture"]["configuration"]["source_file"] == "app.py"
+    assert not planned.data["capture"]["gaps"]
 
 
 @pytest.mark.parametrize("postgres", [False, True])

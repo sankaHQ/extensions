@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .capture import _python_path, source_inventory
+from .routing import project_tree
 
 
 class InputRequired(ValueError):
@@ -208,6 +209,25 @@ def discover(root: Path, raw: dict[str, Any]) -> dict[str, Any]:
                     for node in tree.body
                 )
             ]
+            # Prefer an application re-export over its implementation module.
+            # Reuse capture's bounded import graph; unsafe facades still produce gaps.
+            facades = []
+            imported = set()
+            for name, tree in trees.items():
+                if name in candidates or not any(
+                    isinstance(node, ast.ImportFrom)
+                    and any(alias.name in {"app", "urlpatterns"} for alias in node.names)
+                    for node in tree.body
+                ):
+                    continue
+                try:
+                    _, modules = project_tree(root, name, values.get("models_file", ""))
+                except ValueError:
+                    continue
+                if set(modules) & set(candidates):
+                    facades.append(name)
+                    imported.update(modules)
+            candidates = [name for name in candidates + facades if name not in imported]
         if len(candidates) != 1:
             raise InputRequired(
                 "source_file", "Choose the Python entrypoint; no unique application was detected"
@@ -218,6 +238,9 @@ def discover(root: Path, raw: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("source_file must be a regular project Python file")
     if values.get("source_framework", "auto") == "auto":
         frameworks = {"drf"} if django else _framework(trees[filename])
+        if not frameworks:
+            tree, _ = project_tree(root, filename, values.get("models_file", ""))
+            frameworks = _framework(tree)
         if len(frameworks) != 1:
             raise InputRequired(
                 "source_framework", "Choose drf, fastapi or flask; the entrypoint is ambiguous"
