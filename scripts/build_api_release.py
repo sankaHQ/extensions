@@ -83,7 +83,7 @@ def closure(package: str) -> list[str]:
     return [*(wheel_name(p) for p in own), *(w.name for w in SDK)]
 
 
-def manifest(package: str, root: Path = ROOT) -> dict[str, Any]:
+def manifest(package: str, root: Path = ROOT, *, candidate: Path | None = None) -> dict[str, Any]:
     directory = root / "packages" / package
     result: dict[str, Any] = json.loads((directory / "extension.json").read_text())
     template = json.loads((directory / "extension.template.json").read_text())
@@ -104,10 +104,12 @@ def manifest(package: str, root: Path = ROOT) -> dict[str, Any]:
             or (wheel["name"] in sdk_hashes and sha != sdk_hashes[wheel["name"]])
         ):
             raise ValueError(f"{package}: invalid URL or digest")
+        if candidate is not None and wheel["name"] not in sdk_hashes:
+            wheel["sha256"] = digest(candidate / wheel["name"])
     return result
 
 
-def validate(output: Path, root: Path = ROOT) -> None:
+def validate(output: Path, root: Path = ROOT, *, candidate: bool = False) -> None:
     manifests = {p: manifest(p, root) for p in PACKAGES[:2]}
     names = {wheel_name(p) for p in PACKAGES} | {w.name for w in SDK}
     assets = names | {f"{p}.json" for p in manifests} | {"marketplace.json"}
@@ -118,6 +120,8 @@ def validate(output: Path, root: Path = ROOT) -> None:
     if json.loads((output / "marketplace.json").read_text()) != CATALOG:
         raise ValueError("Scoped release catalog changed")
     for package, data in manifests.items():
+        if candidate:
+            data = manifest(package, root, candidate=output)
         if json.loads((output / f"{package}.json").read_text()) != data:
             raise ValueError("Release manifest differs from reviewed source")
         for wheel in data["wheels"]:
@@ -157,7 +161,7 @@ def validate(output: Path, root: Path = ROOT) -> None:
                     raise ValueError("TypeScript license absent")
 
 
-def build(output: Path, *, write_manifests: bool = False) -> None:
+def build(output: Path, *, write_manifests: bool = False, candidate: bool = False) -> None:
     absolute = output.absolute()
     if any(p.is_symlink() for p in (absolute, *absolute.parents)):
         raise ValueError("Release output must not traverse symlinks")
@@ -208,22 +212,27 @@ def build(output: Path, *, write_manifests: bool = False) -> None:
                 for n in closure(package)
             ]
             (directory / "extension.json").write_text(json.dumps(data, indent=2) + "\n")
-        (output / f"{package}.json").write_text(json.dumps(manifest(package), indent=2) + "\n")
+        (output / f"{package}.json").write_text(
+            json.dumps(manifest(package, candidate=output if candidate else None), indent=2) + "\n"
+        )
     (output / "marketplace.json").write_text(json.dumps(CATALOG, indent=2) + "\n")
-    validate(output)
+    validate(output, candidate=candidate)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "release/api-converters")
     parser.add_argument("--check-only", action="store_true")
-    parser.add_argument("--write-manifests", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--write-manifests", action="store_true")
+    mode.add_argument("--candidate", action="store_true", help="Validate unreleased source for CI")
     args = parser.parse_args()
     if args.check_only:
-        validate(args.output_dir)
+        validate(args.output_dir, candidate=args.candidate)
     else:
-        build(args.output_dir, write_manifests=args.write_manifests)
-    print(f"Validated {TAG}: seven wheels, two manifests and scoped catalog")
+        build(args.output_dir, write_manifests=args.write_manifests, candidate=args.candidate)
+    label = "candidate for " if args.candidate else ""
+    print(f"Validated {label}{TAG}: seven wheels, two manifests and scoped catalog")
 
 
 if __name__ == "__main__":
