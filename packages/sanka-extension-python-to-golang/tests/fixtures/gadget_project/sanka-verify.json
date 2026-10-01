@@ -7,6 +7,17 @@
     {"id": "update", "method": "PATCH", "path": "/api/gadgets/1/", "body": {"quantity": 3}, "expected_status": 200},
     {"id": "list", "method": "GET", "path": "/api/gadgets/", "expected_status": 200},
     {"id": "delete", "method": "DELETE", "path": "/api/gadgets/1/", "expected_status": 204},
-    {"id": "missing", "method": "GET", "path": "/api/gadgets/1/", "expected_status": 404}
+    {"id": "missing", "method": "GET", "path": "/api/gadgets/1/", "expected_status": 404},
+    {"id": "numeric-order-2", "method": "POST", "path": "/api/gadgets/", "body": {"name": "Second", "quantity": 2}, "expected_status": 201},
+    {"id": "numeric-order-3", "method": "POST", "path": "/api/gadgets/", "body": {"name": "Third", "quantity": 3}, "expected_status": 201},
+    {"id": "numeric-order-4", "method": "POST", "path": "/api/gadgets/", "body": {"name": "Fourth", "quantity": 4}, "expected_status": 201},
+    {"id": "numeric-order-5", "method": "POST", "path": "/api/gadgets/", "body": {"name": "Fifth", "quantity": 5}, "expected_status": 201},
+    {"id": "numeric-order-6", "method": "POST", "path": "/api/gadgets/", "body": {"name": "Sixth", "quantity": 6}, "expected_status": 201},
+    {"id": "numeric-order-7", "method": "POST", "path": "/api/gadgets/", "body": {"name": "Seventh", "quantity": 7}, "expected_status": 201},
+    {"id": "numeric-order-8", "method": "POST", "path": "/api/gadgets/", "body": {"name": "Eighth", "quantity": 8}, "expected_status": 201},
+    {"id": "numeric-order-9", "method": "POST", "path": "/api/gadgets/", "body": {"name": "Ninth", "quantity": 9}, "expected_status": 201},
+    {"id": "numeric-order-10", "method": "POST", "path": "/api/gadgets/", "body": {"name": "Tenth", "quantity": 10}, "expected_status": 201},
+    {"id": "numeric-order-11", "method": "POST", "path": "/api/gadgets/", "body": {"name": "Eleventh", "quantity": 11}, "expected_status": 201},
+    {"id": "numeric-order-list", "method": "GET", "path": "/api/gadgets/", "expected_status": 200}
   ]
 }

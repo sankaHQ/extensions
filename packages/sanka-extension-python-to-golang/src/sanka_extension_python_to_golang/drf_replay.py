@@ -600,7 +600,7 @@ func TestConventionalDRFReplay(t *testing.T) {
             snapshots:=map[string]any{};sequences:=map[string]any{}
             for _,model:=range drfSchema.Models {
                 columns:=[]string{};for _,f:=range model.Fields { columns=append(columns,quoted(f.Name)+"::text") }
-                rows,err:=pool.Query(ctx,"SELECT "+strings.Join(columns,",")+" FROM "+quoted(model.Table)+" ORDER BY id");if err!=nil { t.Fatal(err) }
+                rows,err:=pool.Query(ctx,"SELECT "+strings.Join(columns,",")+" FROM "+quoted(model.Table)+" ORDER BY "+quoted(model.Table)+".id");if err!=nil { t.Fatal(err) }
                 records:=[]map[string]any{}
                 for rows.Next() {
                     values,err:=rows.Values();if err!=nil { t.Fatal(err) };record:=map[string]any{}

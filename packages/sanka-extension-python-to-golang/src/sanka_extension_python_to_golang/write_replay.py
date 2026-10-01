@@ -156,7 +156,7 @@ with psycopg.connect(os.environ['DATABASE_URL'].replace('postgresql+psycopg://',
             fields = model['fields']
             primary = next(field for field in fields if field['primary_key'])
             columns = sql.SQL(model['observation_columns']) if 'observation_columns' in model else sql.SQL(',').join(sql.Identifier(field['name']) for field in fields)
-            rows = connection.execute(sql.SQL('SELECT {} FROM {} ORDER BY {}').format(columns, sql.Identifier(model['table']), sql.Identifier(primary['name']))).fetchall()
+            rows = connection.execute(sql.SQL('SELECT {} FROM {} ORDER BY {}').format(columns, sql.Identifier(model['table']), sql.Identifier(model['table'], primary['name']))).fetchall()
             tables[model['table']] = [{field['name']: str(value) if field['go_type'] == 'int64' and value is not None else value for field, value in zip(fields, row)} for row in rows]
             if primary['auto']:
                 sequence = connection.execute('SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid=pg_get_serial_sequence(%s, %s)::regclass', ('"' + model['table'] + '"', primary['name'])).fetchone()
@@ -230,7 +230,7 @@ def write_probe(captured: dict[str, Any]) -> str:
     for model in captured["models"]:
         primary = next(f for f in model["fields"] if f["primary_key"])
         columns = observation_columns(model)
-        query = f'SELECT row_to_json(saved) FROM (SELECT {columns} FROM "{model["table"]}" ORDER BY "{primary["name"]}") saved'
+        query = f'SELECT row_to_json(saved) FROM (SELECT {columns} FROM "{model["table"]}" ORDER BY "{model["table"]}"."{primary["name"]}") saved'
         if sqlite:
             from .sqlite import snapshot_query
 

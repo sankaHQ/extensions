@@ -755,9 +755,7 @@ def _read_helper(index: int, read: dict[str, Any], model: dict[str, Any]) -> str
     )
     if predicate:
         where += (" AND " if where else " WHERE ") + predicate
-    query = (
-        f'SELECT {columns} FROM "{model["table"]}"{where} ORDER BY "{read["order_by"]}" LIMIT $1'
-    )
+    query = f'SELECT {columns} FROM "{model["table"]}"{where} ORDER BY "{model["table"]}"."{read["order_by"]}" LIMIT $1'
     if pagination:
         query += " OFFSET $2"
     signature = ", rawQuery string" if filters or pagination else ""

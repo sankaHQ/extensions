@@ -375,7 +375,7 @@ func drfValidate(raw []byte, schema drfSerializer, partial bool) (map[string]any
 }
 
 func drfRows(ctx context.Context, tx pgx.Tx, schema drfSerializer, where string, args ...any) ([]map[string]any,error) {
-    return drfQueryRows(ctx,tx,schema,where," ORDER BY id",args...)
+    return drfQueryRows(ctx,tx,schema,where," ORDER BY "+quoted(drfModelFor(schema.Model).Table)+".id",args...)
 }
 func drfQueryRows(ctx context.Context, tx pgx.Tx, schema drfSerializer, where, tail string, args ...any) ([]map[string]any,error) {
     model:=drfModelFor(schema.Model)
@@ -478,7 +478,7 @@ func drfList(ctx context.Context, tx pgx.Tx, view drfView, address, where string
     };if len(requested)>0 { ordering=requested }
     terms:=[]string{};model:=drfModelFor(view.Serializer.Model)
     for _,field:=range ordering {
-        name:=strings.TrimPrefix(field,"-");term:=quoted(name)
+        name:=strings.TrimPrefix(field,"-");term:=quoted(model.Table)+"."+quoted(name)
         if drfSchema.Project.Database.Engine=="sqlite" { for _,f:=range model.Fields { if f.Name==name && f.GoType=="string" { term+=` COLLATE "C"` } } }
         if strings.HasPrefix(field,"-") { term+=" DESC" };terms=append(terms,term)
     };tail:=" ORDER BY "+strings.Join(terms,",")
