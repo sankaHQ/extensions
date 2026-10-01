@@ -39,6 +39,9 @@ sanka extension list
 
 Commands use the CLI by default. Add `--tui` or run `sanka tui` for the optional
 interactive interface. Both use the same Plan configuration and endpoint scope.
+Python-to-Go Scan discovers the source framework, entrypoint, models and database.
+Plan selects the Go router, destination database and endpoints; the destination
+defaults to the detected source database. Ambiguous source inputs require a choice.
 The Go SQLite example needs no container; PostgreSQL examples need a disposable
 database. See the [Go package README](packages/sanka-extension-python-to-golang/README.md).
 

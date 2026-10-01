@@ -6,8 +6,8 @@
       "ja": "Python から Go"
     },
     "description": {
-      "en": "Choose the Go router in the target list; configure the source and database here.",
-      "ja": "ターゲット一覧で Go ルーターを選び、ここで移行元とデータベースを設定します。"
+      "en": "Scan detects the source. Choose the Go router in the target list and destination database here.",
+      "ja": "Scan で移行元を検出します。ターゲット一覧で Go ルーターを選び、ここで移行先データベースを設定します。"
     }
   },
   "settings": [
@@ -49,7 +49,8 @@
             "ja": "Flask"
           }
         }
-      ]
+      ],
+      "advanced": true
     },
     {
       "id": "source_file",
@@ -62,20 +63,28 @@
       },
       "optional": true,
       "description": {
-        "en": "Leave empty to detect app.py or one Django URLs module.",
-        "ja": "空欄の場合は app.py または Django の URLs モジュールを検出します。"
-      }
+        "en": "Leave empty to detect the application entrypoint from Django settings or a unique Flask/FastAPI application.",
+        "ja": "空欄の場合は Django の設定、または一意の Flask/FastAPI アプリからエントリーポイントを検出します。"
+      },
+      "advanced": true
     },
     {
       "id": "database_layer",
       "stage": "plan",
       "type": "choice",
-      "default": "none",
+      "default": "auto",
       "label": {
-        "en": "Database support",
-        "ja": "データベース対応"
+        "en": "Destination database",
+        "ja": "移行先データベース"
       },
       "choices": [
+        {
+          "value": "auto",
+          "label": {
+            "en": "Same as detected source",
+            "ja": "検出した移行元と同じ種類"
+          }
+        },
         {
           "value": "none",
           "label": {
@@ -109,11 +118,12 @@
         "ja": "移行元データベース"
       },
       "description": {
-        "en": "Django is detected from settings. For FastAPI/Flask, Auto follows the target dialect; select SQLite for SQLite to PostgreSQL.",
-        "ja": "Djangoは設定から検出します。FastAPI/Flaskの自動検出では移行先と同じ種類を使います。SQLiteからPostgreSQLへの移行ではSQLiteを選択してください。"
+        "en": "Detected from Django settings or SQLAlchemy connection configuration. Override only when the source connection is dynamic.",
+        "ja": "Django の設定または SQLAlchemy の接続設定から検出します。接続設定が動的な場合のみ指定してください。"
       },
       "when": {
         "database_layer": [
+          "auto",
           "pgx",
           "sqlite"
         ]
@@ -140,7 +150,8 @@
             "ja": "PostgreSQL"
           }
         }
-      ]
+      ],
+      "advanced": true
     },
     {
       "id": "schema_mode",
@@ -179,7 +190,7 @@
       "id": "models_file",
       "stage": "plan",
       "type": "path",
-      "default": "models.py",
+      "default": null,
       "label": {
         "en": "Python models file (relative to this project)",
         "ja": "Python モデルファイル（プロジェクトからの相対パス）"
@@ -187,9 +198,15 @@
       "advanced": true,
       "when": {
         "database_layer": [
+          "auto",
           "pgx",
           "sqlite"
         ]
+      },
+      "optional": true,
+      "description": {
+        "en": "Leave empty to detect installed Django model modules or the SQLAlchemy model module.",
+        "ja": "空欄の場合は Django のモデルモジュールまたは SQLAlchemy のモデルモジュールを検出します。"
       }
     }
   ]

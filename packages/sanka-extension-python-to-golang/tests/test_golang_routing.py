@@ -208,7 +208,13 @@ def test_grouped_crud_capture(tmp_path: Path, framework: str, target: str) -> No
     text = {"drf": drf_write_source, "fastapi": fastapi_write_source, "flask": flask_write_source}[
         framework
     ]()
-    output = generate(tmp_path, framework, target, app_source=group_backend(text, framework))
+    (tmp_path / "routes.py").write_text(group_backend(text, framework))
+    facade = (
+        "from routes import urlpatterns\n"
+        if framework == "drf"
+        else "from routes import app, engine\n"
+    )
+    output = generate(tmp_path, framework, target, app_source=facade)
     assert "/api/widgets" in (output / "app.go").read_text()
 
 

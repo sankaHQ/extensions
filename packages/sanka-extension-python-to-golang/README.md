@@ -45,21 +45,28 @@ reproducing an older release.
 
 ## Start with a project
 
-An omitted framework is detected statically from `app.py` or a single Django
-URLs module. Ambiguous projects ask for an explicit entrypoint/framework, without
-importing source code. Point `source_file` at another app entrypoint when needed.
-For a database-backed project, also set
-`models_file` to the model module. For example:
+Scan discovers the source framework, entrypoint, model module and source database
+without importing or executing application code. Conventional Django projects use
+`manage.py`, `ROOT_URLCONF`, installed apps and `DATABASES`; Flask and FastAPI use
+the application constructor, SQLAlchemy models and connection configuration.
 
-```json
-{"source_framework":"drf","target_framework":"fiber","source_file":"shop_config/urls.py","models_file":"orders/models.py","database_layer":"pgx"}
+```bash
+sanka scan . --extension-env SANKA_GO_SOURCE_PYTHON
+sanka plan . --to chi
 ```
 
-For a small Flask app without database code, use:
+Plan chooses the Go router (`fiber`, `chi`, `mux` or `gin`), destination database
+and endpoints. The destination defaults to the detected source database. Choose
+`database_layer: "sqlite"` or `"pgx"` in CLI configuration or the optional TUI
+Plan form; source overrides stay in Advanced configuration. Scan reports source
+facts independently of that destination choice. A stateless application defaults
+to `database_layer: "none"`.
 
-```json
-{"source_framework":"flask","target_framework":"fiber","source_file":"app.py","database_layer":"none"}
-```
+Ambiguous entrypoints or model modules require an explicit override. A dynamic
+SQLAlchemy connection requires its referenced environment variable via
+`--extension-env`, or an explicit `source_database: "sqlite"` / `"postgresql"`.
+Scan never connects to the source database and does not save connection URLs or
+credentials. Source configuration overrides remain available for unusual layouts.
 
 The CLI runs the extension through its JSON subprocess command,
 `sanka-extension-python-to-golang`. Run Scan first and read its `gaps` and
@@ -69,12 +76,11 @@ The CLI runs the extension through its JSON subprocess command,
 and refuses changed source, changed configuration, or an existing output directory.
 Generated files live under the project's `.sanka/.../golang` artifact directory.
 
-With a candidate wheel that includes the conventional DRF profile, run:
+For a detected SQLite source going to PostgreSQL:
 
 ```bash
-CONFIG='{"source_framework":"drf","target_framework":"fiber","source_file":"shop_config/urls.py","models_file":"orders/models.py","database_layer":"pgx"}'
-sanka scan . --extension-config "$CONFIG"
-sanka plan . --to fiber --extension-config "$CONFIG"
+sanka scan . --extension-env SANKA_GO_SOURCE_PYTHON
+sanka plan . --to fiber --extension-config '{"database_layer":"pgx"}'
 ```
 
 Review the returned plan hash and files before `sanka apply --plan-hash <hash>`.
@@ -112,17 +118,17 @@ Choose the database in CLI Plan configuration or its optional `--tui` form.
 For an unattended Django example:
 
 ```bash
-CONFIG='{"source_framework":"auto","source_file":"crud_config/urls.py","models_file":"inventory/models.py","database_layer":"sqlite"}'
-sanka scan . --extension-config "$CONFIG"
-sanka plan . --to chi --extension-config "$CONFIG"
+sanka scan .
+sanka plan . --to chi
 # Review the files and returned hash before Apply.
 sanka apply --plan-hash '<reviewed-plan-hash>'
 sanka test
 sanka verify --extension-env SANKA_GO_SOURCE_PYTHON
 ```
 
-For FastAPI or Flask SQLite → PostgreSQL, choose `database_layer: "pgx"` and
-`source_database: "sqlite"`. Django's source database comes from captured settings.
+For SQLite → PostgreSQL, choose `database_layer: "pgx"`. The source database is
+detected separately; use `source_database: "sqlite"` only for a dynamic connection.
+Django's source database comes from captured settings.
 SQLite requires an empty destination; its generated migration refuses existing
 application objects. Test and Verify create temporary SQLite fixtures and do not
 reset a supplied SQLite file. A PostgreSQL destination still requires an explicit

@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import ast
 import json
 from pathlib import Path
 
@@ -16,7 +15,8 @@ from sanka_extensions.code import (
     success_response,
 )
 
-from .capture import VERSION, _python_path, canonical, capture, configuration, digest
+from .capture import VERSION, canonical, capture, configuration, digest
+from .discovery import InputRequired, discover
 from .render import render
 from .replay import replay
 
@@ -43,55 +43,7 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             # Never leave a previous passing report after a failed rerun.
             _safe(root, artifacts / f"{request.command}.json").unlink(missing_ok=True)
         values = {k: v for k, v in request.configuration.items() if k != "selected_endpoints"}
-        if values.get("source_file") in (None, ""):
-            entrypoints = (
-                [root / "app.py"] if (root / "app.py").is_file() else sorted(root.glob("*/urls.py"))
-            )
-            if len(entrypoints) != 1:
-                return failure_response(
-                    request,
-                    code="SANKA_EXTENSION_INPUT_REQUIRED",
-                    message="Choose the Python entrypoint relative to this project",
-                    details={"inputs": ["source_file"]},
-                )
-            values["source_file"] = entrypoints[0].relative_to(root).as_posix()
-        if values.get("source_framework", "auto") == "auto":
-            source_file = values["source_file"]
-            if not isinstance(source_file, str):
-                raise ValueError("source_file must be a relative Python path")
-            filename = _python_path(source_file, "source_file")
-            path = root / filename
-            if (
-                path.is_symlink()
-                or not path.resolve().is_relative_to(root)
-                or path.stat().st_size > 1024 * 1024
-            ):
-                raise ValueError("source_file must be a bounded regular project file")
-            tree = ast.parse(path.read_text())
-            imports = {
-                node.module.split(".")[0]
-                for node in ast.walk(tree)
-                if isinstance(node, ast.ImportFrom) and node.module
-            }
-            imports |= {
-                alias.name.split(".")[0]
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Import)
-                for alias in node.names
-            }
-            frameworks = imports & {"flask", "fastapi", "rest_framework"}
-            if not frameworks and "django" in imports and filename.endswith("/urls.py"):
-                frameworks = {"rest_framework"}
-            if len(frameworks) != 1:
-                return failure_response(
-                    request,
-                    code="SANKA_EXTENSION_INPUT_REQUIRED",
-                    message="Choose drf, fastapi or flask; the entrypoint is ambiguous",
-                    details={"inputs": ["source_framework"]},
-                )
-            values["source_framework"] = {"rest_framework": "drf"}.get(
-                next(iter(frameworks)), next(iter(frameworks))
-            )
+        values = discover(root, values)
         config = configuration(values)
         captured = capture(root, config)
         if request.command == "scan":
@@ -196,6 +148,13 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             data=data,
             artifacts=[str(destination)],
             limitations=["Experimental endpoint contract only; not a complete backend migration."],
+        )
+    except InputRequired as error:
+        return failure_response(
+            request,
+            code="SANKA_EXTENSION_INPUT_REQUIRED",
+            message=str(error),
+            details={"inputs": [error.field]},
         )
     except (ValueError, OSError, SyntaxError, KeyError, TypeError) as error:
         return failure_response(

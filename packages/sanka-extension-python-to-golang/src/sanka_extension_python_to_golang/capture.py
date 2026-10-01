@@ -36,7 +36,7 @@ from .values import (
 
 SOURCES = ("drf", "fastapi", "flask")
 TARGETS = ("fiber", "chi", "mux", "gin")
-VERSION = "0.1.0a13"
+VERSION = "0.1.0a14"
 MAX_SOURCE_BYTES = 256 * 1024 * 1024
 MAX_SOURCE_FILES = 20_000
 GAP_PATH_SAMPLES = 8
@@ -1556,24 +1556,11 @@ def recapture(root: Path, reviewed: dict[str, Any]) -> dict[str, Any]:
     return refreshed
 
 
-def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
-    framework = config["source_framework"]
-    filename = config["source_file"]
-    path = root / filename
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("source_file must be a regular non-symlink file")
-    # Inspect all source files, excluding only known generated/tool environments.
+def source_inventory(root: Path) -> tuple[dict[str, str], int]:
+    """Bound discovery and capture identically, including non-Python source files."""
     records: dict[str, str] = {}
-    gaps: list[str] = []
-    modules: list[str] = []
-    tree = ast.parse(path.read_text(), filename=filename)
-    try:
-        tree, modules = project_tree(root, filename, config.get("models_file", ""))
-    except (ValueError, TypeError, SyntaxError) as error:
-        gaps.append("project: " + str(error))
     ignored = {".git", ".venv", ".sanka", "__pycache__"}
     total = 0
-    unconsumed: list[str] = []
     for directory, names, filenames in os.walk(root, followlinks=False):
         names[:] = sorted(name for name in names if name not in ignored)
         if any((Path(directory) / name).is_symlink() for name in names):
@@ -1591,13 +1578,28 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
                 )
             content = source.read_bytes()
             records[relative.as_posix()] = hashlib.sha256(content).hexdigest()
-            if (
-                source.suffix == ".py"
-                and source != path
-                and relative.as_posix() not in modules
-                and source != root / config.get("models_file", "")
-            ):
-                unconsumed.append(relative.as_posix())
+    return records, total
+
+
+def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
+    framework = config["source_framework"]
+    filename = config["source_file"]
+    path = root / filename
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("source_file must be a regular non-symlink file")
+    records, total = source_inventory(root)
+    gaps: list[str] = []
+    modules: list[str] = []
+    tree = ast.parse(path.read_text(), filename=filename)
+    try:
+        tree, modules = project_tree(root, filename, config.get("models_file", ""))
+    except (ValueError, TypeError, SyntaxError) as error:
+        gaps.append("project: " + str(error))
+    unconsumed = [
+        name
+        for name in records
+        if name.endswith(".py") and name not in {filename, config.get("models_file", ""), *modules}
+    ]
     if framework == "drf" and (root / "manage.py").is_file():
         from .drf_project import capture_project
 

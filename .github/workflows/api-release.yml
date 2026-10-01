@@ -26,7 +26,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a13
+          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a14
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
@@ -95,7 +95,7 @@ jobs:
           persist-credentials: false
       - name: Verify public CLI lifecycle, compilation and actual HTTP parity
         env:
-          SANKA_API_RELEASE_CLI_VERSION: "0.3.4"
+          SANKA_API_RELEASE_CLI_VERSION: "0.3.5"
         run: >-
           uv run --no-project --python 3.12 python scripts/qualify_api_release.py
           --examples release/examples --release release/api-converters
@@ -144,7 +144,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "Python-to-Go converter 0.1.0a13" \
-            --notes "Experimental Python-to-Go 0.1.0a13 adds SQLite-to-SQLite and SQLite-to-PostgreSQL migrations with row transfer, rollback and numeric ordering, while retaining PostgreSQL-to-PostgreSQL and reviewed endpoint scopes. Qualified through the installed public CLI and all four native Go routers. Includes the unchanged Rust 0.1.0a3 converter and helper wheels. No arbitrary-application or production-cutover claim."
+            --title "Python-to-Go converter 0.1.0a14" \
+            --notes "Experimental Python-to-Go 0.1.0a14 detects the source framework, entrypoint, models and database during Scan. Plan selects the Go router, destination database and reviewed endpoints. Retains bounded SQLite-to-SQLite, SQLite-to-PostgreSQL and PostgreSQL-to-PostgreSQL migration paths. Qualified through the installed public CLI and all four native Go routers. Includes the unchanged Rust 0.1.0a3 converter and helper wheels. No arbitrary-application or production-cutover claim."
         env:
           GH_TOKEN: ${{ github.token }}

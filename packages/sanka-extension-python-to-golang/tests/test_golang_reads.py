@@ -317,10 +317,10 @@ def test_unknown_queries_block(tmp_path: Path, framework: str, change: str) -> N
 def test_read_replay_requires_explicit_fixture_databases(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://must-not-use/production")
     generate(tmp_path, "flask", "fiber", app_source=read_source("flask"))
     for key in ("SANKA_GO_SOURCE_TEST_DATABASE_URL", "SANKA_GO_TARGET_TEST_DATABASE_URL"):
         monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("DATABASE_URL", "postgresql://must-not-use/production")
     req = dataclasses.replace(
         request(tmp_path),
         command="verify",
