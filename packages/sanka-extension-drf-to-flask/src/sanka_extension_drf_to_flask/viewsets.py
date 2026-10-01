@@ -319,7 +319,10 @@ def handler(
             body += [
                 "    try:",
                 "        instance = _Serializer.model._default_manager.get(pk=pk)",
-                "    except (_Serializer.model.DoesNotExist, ValueError, TypeError):",
+                "    except _Serializer.model.DoesNotExist:",
+                "        raise _RequestError("
+                "f'No {_Serializer.model._meta.object_name} matches the given query.', 404)",
+                "    except (ValueError, TypeError):",
                 "        raise _RequestError('Not found.', 404)",
             ]
         if action == "retrieve":

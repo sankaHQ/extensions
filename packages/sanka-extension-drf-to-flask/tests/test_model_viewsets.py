@@ -219,6 +219,8 @@ send('GET','/api/bundles/',authorization='Basic cmVhZGVyOnRlc3QtcGFzc3dvcmQ=',
      session_cookie='not-a-session')
 send('GET','/api/bundles/',authorization='Basic /zph')
 send('DELETE','/api/bundles/1/')
+for method in ('GET', 'PATCH', 'DELETE'):
+    send(method, '/api/bundles/999/', {'state':'ready'} if method == 'PATCH' else None)
 print(json.dumps(results,sort_keys=True))
 """
     results = []

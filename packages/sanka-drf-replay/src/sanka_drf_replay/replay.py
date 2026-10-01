@@ -459,7 +459,8 @@ candidate_root = payload["candidate_root"]
 # A complete candidate tree must win over same-named source packages.
 sys.path[:0] = [candidate_root, payload["project_root"]]
 candidate_url = (payload["database"].replace("postgresql://", "postgresql+psycopg://", 1)
-                 if payload.get("database_backend") == "postgresql" else payload["database"])
+                 if payload.get("database_backend") == "postgresql" and payload["target"] == "flask"
+                 else payload["database"])
 os.environ[payload["candidate_db_env"]] = candidate_url
 if payload.get("database_backend") == "postgresql":
     os.environ["SANKA_DATABASE_URL"] = candidate_url
