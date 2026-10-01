@@ -19,6 +19,7 @@ if __package__ in {None, ""}:  # Direct script execution keeps only scripts/ on 
     sys.path.insert(0, str(ROOT))
 
 from scripts.build_release import (  # noqa: E402
+    CANDIDATE_WHEELS,
     LOCKED_DEPENDENCY_WHEELS,
     MARKETPLACE_WHEELS,
     PINNED_LOCAL_WHEELS,
@@ -153,7 +154,7 @@ def _hash(path: Path) -> str:
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
-def _catalog_errors(root: Path, release: Path) -> list[str]:
+def _catalog_errors(root: Path, release: Path, *, candidate: bool = False) -> list[str]:
     try:
         catalog = json.loads((root / "marketplace.json").read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as error:
@@ -162,11 +163,9 @@ def _catalog_errors(root: Path, release: Path) -> list[str]:
     if isinstance(extensions, list):
         for entry in extensions:
             if isinstance(entry, dict) and isinstance(entry.get("manifest"), str):
-                candidate = (root / entry["manifest"]).resolve()
-                if not candidate.is_relative_to(root.resolve()):
-                    return [
-                        f"catalog manifest path is outside the marketplace snapshot: {candidate}"
-                    ]
+                path = (root / entry["manifest"]).resolve()
+                if not path.is_relative_to(root.resolve()):
+                    return [f"catalog manifest path is outside the marketplace snapshot: {path}"]
     if catalog != CATALOG:
         return ["marketplace.json does not match the official sanka-marketplace/v1 catalog"]
     errors: list[str] = []
@@ -217,6 +216,13 @@ def _catalog_errors(root: Path, release: Path) -> list[str]:
             if not isinstance(wheel, dict) or set(wheel) != {"name", "url", "sha256"}:
                 errors.append(f"{package} manifest has an invalid wheel entry")
                 continue
+            digest = wheel["sha256"]
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                errors.append(f"{package} manifest has an invalid SHA-256: {name}")
             release_prefix = "https://github.com/sankaHQ/extensions/releases/download/"
             url = wheel["url"]
             expected_url = f"{release_prefix}{RELEASE_TAG}/{name}"
@@ -233,12 +239,14 @@ def _catalog_errors(root: Path, release: Path) -> list[str]:
             artifact = release / str(name)
             if not artifact.is_file():
                 errors.append(f"{package} manifest wheel is absent from the release: {name}")
-            elif wheel["sha256"] != _hash(artifact):
+            elif not (candidate and name in CANDIDATE_WHEELS) and digest != _hash(artifact):
                 errors.append(f"{package} manifest hash does not match release artifact: {name}")
     return errors
 
 
-def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
+def validate_release(
+    root: Path = ROOT, release: Path = RELEASE, *, candidate: bool = False
+) -> list[str]:
     if not release.is_dir():
         return [f"release directory is missing: {release}"]
     versions = _project_versions(root)
@@ -256,7 +264,11 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
             if _hash(wheel) != expected_hash:
                 errors.append(f"locked dependency hash does not match uv.lock: {wheel.name}")
             continue
-        if (expected_hash := PINNED_LOCAL_HASHES.get(wheel.name)) and _hash(wheel) != expected_hash:
+        if (
+            (expected_hash := PINNED_LOCAL_HASHES.get(wheel.name))
+            and not (candidate and wheel.name in CANDIDATE_WHEELS)
+            and _hash(wheel) != expected_hash
+        ):
             errors.append(f"published wheel hash changed: {wheel.name}")
         try:
             metadata, entries, members = _wheel_metadata(wheel)
@@ -291,21 +303,30 @@ def validate_release(root: Path = ROOT, release: Path = RELEASE) -> list[str]:
                 errors.append(f"{name} wheel has no exact executable entry point")
         else:
             errors.append(f"unexpected release distribution: {name}")
-    return errors + _catalog_errors(root, release)
+    return errors + _catalog_errors(root, release, candidate=candidate)
 
 
-def main(root: Path = ROOT, release: Path = RELEASE) -> int:
-    errors = validate_release(root, release)
+def main(root: Path = ROOT, release: Path = RELEASE, *, candidate: bool = False) -> int:
+    errors = validate_release(root, release, candidate=candidate)
     if errors:
         print("Release artifact validation failed:", file=sys.stderr)
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print(f"Release artifacts: OK ({len(MARKETPLACE_WHEELS)} marketplace wheels; hashes match)")
+    if candidate:
+        print(
+            f"Candidate artifacts: OK ({len(MARKETPLACE_WHEELS)} wheels; published SDKs unchanged)"
+        )
+    else:
+        print(f"Release artifacts: OK ({len(MARKETPLACE_WHEELS)} marketplace wheels; hashes match)")
     return 0
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("dist", nargs="?", type=Path, default=RELEASE)
-    raise SystemExit(main(release=parser.parse_args().dist))
+    parser.add_argument(
+        "--candidate", action="store_true", help="Validate unreleased source for PR checks"
+    )
+    args = parser.parse_args()
+    raise SystemExit(main(release=args.dist, candidate=args.candidate))
