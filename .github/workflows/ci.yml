@@ -82,7 +82,7 @@ jobs:
           uv run python -m pytest
           packages/sanka-extension-typescript-to-rust/tests/test_typescript_to_rust.py::test_subprocess_protocol
           packages/sanka-extension-react-native-to-native/tests/test_react_native_to_native.py::test_subprocess_protocol
-      - run: make build-release
+      - run: make build-release RELEASE_ARGS=--candidate
       - run: make build-business-flows
       - name: Install the actual Flask candidate and its published SDK dependencies
         if: needs.changes.outputs.flask == 'true'

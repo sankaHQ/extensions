@@ -1,8 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Public marketplace contract for runtime extension discovery."""
 
+import hashlib
 import json
+import shutil
 from pathlib import Path
+
+from scripts.check_release_artifacts import ROOT, _catalog_errors
 
 RELEASE_PREFIX = "https://github.com/sankaHQ/extensions/releases/download/"
 EXPECTED = {
@@ -100,3 +104,33 @@ def test_official_marketplace_has_only_current_code_extensions() -> None:
             expected_prefix = RELEASE_PREFIX + "mobile-converters-v0.1.0a1/"
         assert all(wheel["url"].startswith(expected_prefix) for wheel in manifest["wheels"])
         assert all(len(wheel["sha256"]) == 64 for wheel in manifest["wheels"])
+
+
+def test_candidate_hashes_do_not_change_publication_or_dependency_validation(
+    tmp_path: Path,
+) -> None:
+    snapshot, bundle = tmp_path / "snapshot", tmp_path / "bundle"
+    snapshot.mkdir()
+    bundle.mkdir()
+    shutil.copyfile(ROOT / "marketplace.json", snapshot / "marketplace.json")
+    for path in (ROOT / "packages").glob("*/extension*.json"):
+        destination = snapshot / path.relative_to(ROOT)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, destination)
+    for package in ("sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-flask"):
+        path = snapshot / "packages" / package / "extension.json"
+        manifest = json.loads(path.read_text())
+        for wheel in manifest["wheels"]:
+            artifact = bundle / wheel["name"]
+            artifact.write_bytes(b"reviewed bytes")
+            wheel["sha256"] = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        path.write_text(json.dumps(manifest))
+    assert not _catalog_errors(snapshot, bundle)
+    for artifact in bundle.glob("*.whl"):
+        if artifact.name.startswith(("sanka_extension_drf_to_flask-", "sanka_drf_replay-")):
+            artifact.write_bytes(b"changed source candidate")
+    assert _catalog_errors(snapshot, bundle)
+    assert not _catalog_errors(snapshot, bundle, candidate=True)
+    sdk = next(bundle.glob("sanka_extension_sdk-*.whl"))
+    sdk.write_bytes(b"changed published dependency")
+    assert _catalog_errors(snapshot, bundle, candidate=True)

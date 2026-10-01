@@ -76,7 +76,13 @@ gate complete merely because the marketplace release succeeds.
 
 ## Preparation and review
 
-Unreleased API converter changes use `uv run python scripts/build_api_release.py --candidate`
+For unreleased source changes, use `make build-release RELEASE_ARGS=--candidate` to
+validate current extension and replay wheels against the same package and dependency
+contracts without changing versions or manifests. PR and main CI use this mode; published
+SDK bytes remain pinned. Candidate success is not publication approval: the default
+build and publication workflow still require every reviewed manifest hash to match.
+
+API converter changes use `uv run python scripts/build_api_release.py --candidate`
 in PR and main CI. This refreshes hashes only in the private output bundle; reviewed
 source manifests and published SDK pins stay unchanged. Publication dispatches and
 the default build remain strict and require coordinated new versions and assets.

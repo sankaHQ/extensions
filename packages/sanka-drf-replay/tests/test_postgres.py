@@ -242,3 +242,41 @@ def test_postgres_admin_url_requires_password_before_connect(tmp_path):
     assert outcome.returncode != 0
     assert "dedicated PostgreSQL URL required" in outcome.stderr
     assert "connected" not in outcome.stderr
+
+
+def test_fastapi_postgres_replay_uses_a_url_its_native_driver_can_parse(tmp_path):
+    import base64
+    import json
+
+    from sanka_drf_replay.replay import _CANDIDATE_SCRIPT
+
+    (tmp_path / "settings.py").write_text("")
+    (tmp_path / "app.py").write_text(
+        "import os\nfrom fastapi import FastAPI\n"
+        "from tortoise.backends.base.config_generator import expand_db_url\n"
+        "app = FastAPI()\n"
+        '@app.get("/driver")\ndef driver():\n'
+        '    config = expand_db_url(os.environ["SANKA_DATABASE_URL"])\n'
+        '    return {"port": config["credentials"]["port"]}\n'
+    )
+    result = _run_side(
+        _CANDIDATE_SCRIPT,
+        {
+            "target": "fastapi",
+            "database_backend": "postgresql",
+            "project_root": str(tmp_path),
+            "candidate_root": str(tmp_path),
+            "settings_module": "settings",
+            "database": "postgresql://user:secret@localhost:55432/replay",
+            "db_env": "SOURCE_DB",
+            "candidate_db_env": "TARGET_DB",
+            "entrypoint": "app.py",
+            "media_root": str(tmp_path / "media"),
+            "setup": [],
+            "request": {"method": "GET", "path": "/driver"},
+        },
+        python=Path(sys.executable),
+        cwd=tmp_path,
+        env=os.environ,
+    )
+    assert json.loads(base64.b64decode(result["body_b64"])) == {"port": 55432}
