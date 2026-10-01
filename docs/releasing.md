@@ -1,5 +1,18 @@
 # Releasing Sanka extension packages
 
+## Automatic Go source discovery: API a14
+
+`api-converters-v0.1.0a14` publishes Python-to-Go `0.1.0a14`. Scan detects the
+framework, entrypoint, models and source database; Plan chooses router, destination
+database and endpoint scope. Ambiguous or dynamic source inputs require an override.
+The SQLite and PostgreSQL migration bounds remain unchanged. Other wheel versions
+and bytes remain unchanged; the API manifests point at this new immutable bundle.
+
+Build with `scripts/build_api_release.py --write-manifests`, review hashes, and
+require maintained checks plus native router qualification. Publish from the landed
+immutable tag, verify downloaded artifacts and public CLI lifecycles, then advance
+the CLI default catalog pin. No marketplace wheel republication is needed.
+
 ## SQLite and DRF replay fixes: a36 / API a13
 
 `extensions-v0.1.0a36` publishes DRF-to-Flask `0.1.0a15`, DRF-to-FastAPI

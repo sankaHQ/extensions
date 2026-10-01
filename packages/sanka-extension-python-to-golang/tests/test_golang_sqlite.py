@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """SQLite uses the same reviewed lifecycle and real HTTP replay as PostgreSQL."""
 
+import ast
 import dataclasses
 import hashlib
 import json
@@ -15,7 +16,7 @@ import pytest
 from sanka_extension_python_to_golang.adapter import handle
 from sanka_extension_python_to_golang.capture import capture, configuration
 from sanka_extension_python_to_golang.render import render
-from test_golang_drf_project import gadget_project
+from test_golang_drf_project import gadget_project, postgres_project
 from test_golang_fastapi_migrations import project
 from test_golang_reads import read_source
 from test_golang_relational_writes import backend_source
@@ -40,9 +41,8 @@ def test_sqlite_plan_uses_captured_django_database(tmp_path: Path) -> None:
 def test_drf_sqlite_lifecycle_http_rows_identity_and_rollback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
 ) -> None:
-    config = gadget_project(tmp_path)
-    config.update(database_layer="sqlite", target_framework=target)
-    config.pop("database_dialect")
+    gadget_project(tmp_path)
+    config = {"target_framework": target}
     original = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*.py")}
     monkeypatch.setenv("SANKA_GO_SOURCE_PYTHON", sys.executable)
     # Test/Verify provision their own disposable SQLite file; no container or user DB.
@@ -81,6 +81,103 @@ def test_missing_source_framework_is_detected_without_importing_source(tmp_path:
     planned = handle(base)
     assert planned.outcome == "success", planned.error
     assert planned.data["capture"]["configuration"]["source_framework"] == "flask"
+
+
+@pytest.mark.parametrize("postgres", [False, True])
+def test_scan_discovers_django_source_before_destination_selection(tmp_path: Path, postgres: bool):
+    (postgres_project if postgres else gadget_project)(tmp_path)
+    base = dataclasses.replace(request(tmp_path), command="scan", configuration={})
+    scanned = handle(base)
+    assert scanned.outcome == "success", scanned.error
+    config = scanned.data["configuration"]
+    assert config["source_framework"] == "drf"
+    assert config["source_file"] == ("shop_config/urls.py" if postgres else "crud_config/urls.py")
+    assert config["models_file"] == ("orders/models.py" if postgres else "inventory/models.py")
+    assert config["source_database"] == ("postgresql" if postgres else "sqlite")
+    assert scanned.data["routes"] and not scanned.data["gaps"]
+    plan = handle(
+        dataclasses.replace(
+            base, command="plan", configuration={"target": "chi", "database_layer": "pgx"}
+        )
+    )
+    assert plan.outcome == "success", plan.error
+    assert not plan.data["capture"]["gaps"]
+    assert plan.data["capture"]["configuration"]["source_database"] == config["source_database"]
+    assert plan.data["capture"]["configuration"]["database_layer"] == "pgx"
+    assert handle(base).data == scanned.data
+    if postgres:
+        blocked = handle(
+            dataclasses.replace(base, command="plan", configuration={"database_layer": "sqlite"})
+        )
+        assert blocked.outcome == "error"
+    # Detection must still disclose source facts when generation has a semantic gap.
+    settings = tmp_path / ("shop_config/settings.py" if postgres else "crud_config/settings.py")
+    tree = ast.parse(settings.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign) and ast.unparse(node.target) == "MIDDLEWARE":
+            node.value = ast.parse("['custom.Middleware']", mode="eval").body
+    settings.write_text(ast.unparse(tree))
+    unsupported = handle(base)
+    assert unsupported.outcome == "success", unsupported.error
+    assert unsupported.data["configuration"]["source_database"] == config["source_database"]
+    assert unsupported.data["gaps"] and not unsupported.data["generation_ready"]
+
+
+@pytest.mark.parametrize("framework", ["fastapi", "flask"])
+def test_scan_discovers_nested_sqlalchemy_source_without_executing_it(
+    tmp_path: Path, monkeypatch, framework: str
+):
+    package = tmp_path / "backend"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "main.py").write_text(
+        fastapi_write_source() if framework == "fastapi" else flask_write_source()
+    )
+    (package / "models.py").write_text(
+        model_source(framework).replace("mapped_column(BigInteger,", "mapped_column(Integer,")
+    )
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///source.db")
+    base = dataclasses.replace(request(tmp_path), command="scan", configuration={})
+    result = handle(base)
+    assert result.outcome == "success", result.error
+    config = result.data["configuration"]
+    assert config["source_framework"] == framework
+    assert config["source_file"] == "backend/main.py"
+    assert config["models_file"] == "backend/models.py"
+    assert config["source_database"] == "sqlite"
+    assert config["database_layer"] == "sqlite"
+    assert result.data["routes"] and not result.data["gaps"]
+    assert not (tmp_path / "source.db").exists()
+    monkeypatch.delenv("DATABASE_URL")
+    unknown = handle(base)
+    assert unknown.outcome == "error"
+    assert unknown.error.code == "SANKA_EXTENSION_INPUT_REQUIRED"
+    assert unknown.error.details["inputs"] == ["source_database"]
+    unknown_plan = handle(
+        dataclasses.replace(base, command="plan", configuration={"database_layer": "pgx"})
+    )
+    assert unknown_plan.outcome == "error"
+    assert unknown_plan.error.details["inputs"] == ["source_database"]
+    # An explicit source choice resolves an environment-only database without guessing.
+    assert (
+        handle(dataclasses.replace(base, configuration={"source_database": "sqlite"})).outcome
+        == "success"
+    )
+
+
+def test_scan_requires_entrypoint_when_two_apps_are_present(tmp_path: Path):
+    from test_python_to_golang import source
+
+    (tmp_path / "app.py").write_text(source("flask"))
+    (tmp_path / "main.py").write_text(source("fastapi"))
+    base = dataclasses.replace(request(tmp_path), command="scan", configuration={})
+    result = handle(base)
+    assert result.outcome == "error"
+    assert result.error.code == "SANKA_EXTENSION_INPUT_REQUIRED"
+    assert result.error.details["inputs"] == ["source_file"]
+    chosen = handle(dataclasses.replace(base, configuration={"source_file": "main.py"}))
+    assert chosen.outcome == "success", chosen.error
+    assert chosen.data["configuration"]["source_framework"] == "fastapi"
 
 
 @pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="requires Go toolchain")

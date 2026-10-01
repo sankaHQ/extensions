@@ -24,7 +24,7 @@ EXPECTED = {
         "protocol_version": "sanka-extension/v1",
         "distribution": {
             "name": "sanka-extension-python-to-golang",
-            "version": "0.1.0a13",
+            "version": "0.1.0a14",
             "executable": "sanka-extension-python-to-golang",
         },
     },
@@ -97,9 +97,9 @@ def test_official_marketplace_has_only_current_code_extensions() -> None:
         if item["id"] == "sanka/llm-to-jev":
             expected_prefix = RELEASE_PREFIX + "llm-to-jev-v0.1.0a1/"
         if item["id"] == "sanka/python-to-golang":
-            expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a13/"
+            expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a14/"
         if item["id"] == "sanka/typescript-to-rust":
-            expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a13/"
+            expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a14/"
         if item["id"] == "sanka/react-native-to-native":
             expected_prefix = RELEASE_PREFIX + "mobile-converters-v0.1.0a1/"
         assert all(wheel["url"].startswith(expected_prefix) for wheel in manifest["wheels"])
