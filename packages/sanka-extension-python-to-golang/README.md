@@ -3,7 +3,8 @@
 `sanka/python-to-golang` converts captured DRF, Flask, and FastAPI APIs to Fiber
 (the default), chi, Gorilla mux, or Gin. It generates a Go `backend` package and a
 runnable `cmd/api`. Choose `database_layer: "none"` for literal JSON endpoints or
-`"pgx"` for the supported PostgreSQL models, reads, and writes.
+`"pgx"` for the supported PostgreSQL models, reads, and writes. This branch also
+adds `"sqlite"` for a Go SQLite destination; that profile is unreleased.
 
 This is an experimental converter. It handles the source patterns documented below,
 including conventional DRF projects, flat CRUD, and explicit auth and transaction
@@ -21,30 +22,33 @@ The main contracts are [routing and package imports](#project-routing),
 
 ## Install the published prerelease
 
-The published `api-converters-v0.1.0a6` GitHub prerelease contains the converter
-and dependency wheels with SHA-256 manifests. With the published CLI 0.3.0, pin it
-in a separate marketplace entry:
+The CLI includes the official catalog. Install from it directly:
 
 ```bash
-RELEASE_COMMIT=$(git ls-remote https://github.com/sankaHQ/extensions.git refs/tags/api-converters-v0.1.0a6 | cut -f1)
-test "${#RELEASE_COMMIT}" -eq 40
-sanka extension marketplace add https://github.com/sankaHQ/extensions.git \
-  --revision "$RELEASE_COMMIT" --name api-converters --trust
-sanka extension add sanka/python-to-golang --marketplace api-converters
+sanka extension add sanka/python-to-golang
 ```
 
-This does not change the CLI's default catalog or install an unpublished candidate.
+An older configured official snapshot can be upgraded in place, without creating
+another alias:
+
+```bash
+sanka extension marketplace upgrade official
+sanka extension upgrade sanka/python-to-golang
+```
+
+These commands install published artifacts, not this branch's SQLite candidate.
 The public release check runs pinned examples through Scan, Plan, Apply, Test,
 and Verify and compares source and target HTTP responses. See
 [sanka-examples](https://github.com/sankaHQ/sanka-examples) for that example's
-setup and plan review. The FastAPI row-transfer command requires the published
-0.1.0a7 wheel. Alembic `add_column` lowering requires the 0.1.0a8 wheel after
-that prerelease is published. Do not install a manifest that points
-to an unpublished asset.
+setup and plan review. Explicit marketplace revision pins remain available for
+reproducing an older release.
 
 ## Start with a project
 
-Point `source_file` at the app entrypoint. For a database-backed project, also set
+An omitted framework is detected statically from `app.py` or a single Django
+URLs module. Ambiguous projects ask for an explicit entrypoint/framework, without
+importing source code. Point `source_file` at another app entrypoint when needed.
+For a database-backed project, also set
 `models_file` to the model module. For example:
 
 ```json
@@ -92,6 +96,60 @@ and compares the selected HTTP scenarios. Both execute code, so use trusted sour
 and disposable fixture databases. See [verification and fixtures](#write-qualification)
 for database checks and [the conventional DRF project profile](#conventional-django-project-profile)
 for `ModelViewSet` projects.
+
+## SQLite profile (unreleased)
+
+The candidate supports SQLite → SQLite, SQLite → PostgreSQL and the existing
+PostgreSQL → PostgreSQL profile. PostgreSQL → SQLite is rejected. SQLite qualifies
+captured integer, boolean and text fields; unsupported value codecs remain Scan
+gaps. SQLAlchemy SQLite auto IDs require `Integer`, because SQLite does not
+auto-allocate a `BigInteger` primary key. Django IDs retain their high-water mark;
+SQLAlchemy ROWID allocation follows the remaining rows, including rollback.
+SQLite SQLAlchemy sessions are synchronous. SQLite → PostgreSQL for DRF uses the
+conventional Django project profile; flat DRF modules do not qualify that path.
+
+Choose the database in CLI Plan configuration or its optional `--tui` form.
+For an unattended Django example:
+
+```bash
+CONFIG='{"source_framework":"auto","source_file":"crud_config/urls.py","models_file":"inventory/models.py","database_layer":"sqlite"}'
+sanka scan . --extension-config "$CONFIG"
+sanka plan . --to chi --extension-config "$CONFIG"
+# Review the files and returned hash before Apply.
+sanka apply --plan-hash '<reviewed-plan-hash>'
+sanka test
+sanka verify --extension-env SANKA_GO_SOURCE_PYTHON
+```
+
+For FastAPI or Flask SQLite → PostgreSQL, choose `database_layer: "pgx"` and
+`source_database: "sqlite"`. Django's source database comes from captured settings.
+SQLite requires an empty destination; its generated migration refuses existing
+application objects. Test and Verify create temporary SQLite fixtures and do not
+reset a supplied SQLite file. A PostgreSQL destination still requires an explicit
+disposable `SANKA_GO_TARGET_TEST_DATABASE_URL`.
+
+The generated service uses `DATABASE_URL=file:///absolute/path/target.sqlite3`.
+Run its reviewed schema migration explicitly with `go run ./cmd/migrate up`, then
+start it with `go run ./cmd/api`. `down` removes the generated application tables.
+SQLite connections enforce foreign keys and a bounded busy timeout.
+
+Existing-row transfer is a separate, opt-in generated tool. Apply does not copy
+rows. Supply an existing source file and a migrated, empty target:
+
+```bash
+export SANKA_GO_SOURCE_DATABASE_URL=file:///absolute/path/source.sqlite3
+export DATABASE_URL=file:///absolute/path/target.sqlite3  # or a PostgreSQL URL
+python tools/transfer_existing.py                       # dry run
+python tools/transfer_existing.py --execute --acknowledge-excluded-tables
+python tools/transfer_existing.py --verify
+```
+
+The source opens read-only. Transfer checks captured columns, indexes, foreign
+keys, applied migrations and destination emptiness, and copies rows transactionally.
+It preserves Django's deleted-ID high-water mark and reports excluded tables.
+Review that list before acknowledging it. Repeating execution against a nonempty
+destination is refused. Qualification remains limited to the captured contract and
+the ordered scenarios; it is not approval to migrate a customer application.
 
 ## Authentication and row access
 
@@ -1299,8 +1357,8 @@ rows and sequences after the copy; it fails if either side drifts. A second copy
 refuses to run. Use a source write freeze and an isolated clone first; this
 command does not synchronize writes made after its source snapshot. Excluded
 tables, including Django's built-in auth and migration tables, and
-application-specific jobs still need a separate cutover plan. SQLite source
-databases do not have this transfer recipe. The FastAPI transfer requires source
+application-specific jobs still need a separate cutover plan. SQLite sources use
+the unreleased [SQLite profile](#sqlite-profile-unreleased) above. The FastAPI transfer requires source
 and target schema parity; it does not apply Alembic migrations or copy
 `alembic_version`, which appears in the dry run as an excluded table.
 

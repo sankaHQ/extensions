@@ -15,12 +15,19 @@
       "id": "source_framework",
       "stage": "plan",
       "type": "choice",
-      "default": "drf",
+      "default": "auto",
       "label": {
         "en": "Source framework",
         "ja": "移行元フレームワーク"
       },
       "choices": [
+        {
+          "value": "auto",
+          "label": {
+            "en": "Auto-detect from the Python entrypoint",
+            "ja": "Python エントリーポイントから自動検出"
+          }
+        },
         {
           "value": "drf",
           "label": {
@@ -48,10 +55,15 @@
       "id": "source_file",
       "stage": "plan",
       "type": "path",
-      "default": "app.py",
+      "default": null,
       "label": {
         "en": "Python entrypoint (relative to this project)",
         "ja": "Python エントリーポイント（プロジェクトからの相対パス）"
+      },
+      "optional": true,
+      "description": {
+        "en": "Leave empty to detect app.py or one Django URLs module.",
+        "ja": "空欄の場合は app.py または Django の URLs モジュールを検出します。"
       }
     },
     {
@@ -76,6 +88,56 @@
           "label": {
             "en": "PostgreSQL — pgx and Goose",
             "ja": "PostgreSQL — pgx と Goose"
+          }
+        },
+        {
+          "value": "sqlite",
+          "label": {
+            "en": "SQLite — database/sql and Goose",
+            "ja": "SQLite — database/sql と Goose"
+          }
+        }
+      ]
+    },
+    {
+      "id": "source_database",
+      "stage": "plan",
+      "type": "choice",
+      "default": "auto",
+      "label": {
+        "en": "Source database",
+        "ja": "移行元データベース"
+      },
+      "description": {
+        "en": "Django is detected from settings. For FastAPI/Flask, Auto follows the target dialect; select SQLite for SQLite to PostgreSQL.",
+        "ja": "Djangoは設定から検出します。FastAPI/Flaskの自動検出では移行先と同じ種類を使います。SQLiteからPostgreSQLへの移行ではSQLiteを選択してください。"
+      },
+      "when": {
+        "database_layer": [
+          "pgx",
+          "sqlite"
+        ]
+      },
+      "choices": [
+        {
+          "value": "auto",
+          "label": {
+            "en": "Auto-detect",
+            "ja": "自動検出"
+          }
+        },
+        {
+          "value": "sqlite",
+          "label": {
+            "en": "SQLite",
+            "ja": "SQLite"
+          }
+        },
+        {
+          "value": "postgresql",
+          "label": {
+            "en": "PostgreSQL",
+            "ja": "PostgreSQL"
           }
         }
       ]
@@ -107,6 +169,10 @@
       ],
       "when": {
         "database_layer": "pgx"
+      },
+      "description": {
+        "en": "SQLite supports empty destinations only. Existing PostgreSQL schemas require validation.",
+        "ja": "SQLite は空の移行先に対応します。既存の PostgreSQL スキーマは検証が必要です。"
       }
     },
     {
@@ -120,7 +186,10 @@
       },
       "advanced": true,
       "when": {
-        "database_layer": "pgx"
+        "database_layer": [
+          "pgx",
+          "sqlite"
+        ]
       }
     }
   ]

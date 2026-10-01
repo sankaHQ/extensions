@@ -35,6 +35,7 @@ from .replay import (
     _write_source_files,
 )
 from .security import compare_headers, header_probe, security_cases, security_environment
+from .sqlite import source_probe
 from .toolchain import ensure_go
 
 
@@ -215,6 +216,7 @@ def observation_columns(model: dict[str, Any]) -> str:
 
 def write_probe(captured: dict[str, Any]) -> str:
     target = captured["configuration"]["target_framework"]
+    sqlite = captured["configuration"]["database_layer"] == "sqlite"
     exchange = """response, err := app.Test(request)
         if err != nil { t.Fatal(err) }
         status, mediaType := response.StatusCode, response.Header.Get("Content-Type")
@@ -229,6 +231,10 @@ def write_probe(captured: dict[str, Any]) -> str:
         primary = next(f for f in model["fields"] if f["primary_key"])
         columns = observation_columns(model)
         query = f'SELECT row_to_json(saved) FROM (SELECT {columns} FROM "{model["table"]}" ORDER BY "{primary["name"]}") saved'
+        if sqlite:
+            from .sqlite import snapshot_query
+
+            query = snapshot_query(model)
         queries.append(f"""{{
             rows, err := pool.Query(ctx, {canonical(query)}); if err != nil {{ t.Fatal(err) }}
             saved := []json.RawMessage{{}}
@@ -236,7 +242,13 @@ def write_probe(captured: dict[str, Any]) -> str:
             rows.Close(); if err := rows.Err(); err != nil {{ t.Fatal(err) }}
             tables[{canonical(model["table"])}] = saved
         }}""")
-        if primary["auto"]:
+        if primary["auto"] and model.get("sqlite_rowid"):
+            queries.append(f"""{{
+                var value int64
+                if err := pool.QueryRow(ctx, {canonical(f'SELECT COALESCE(MAX("{primary["name"]}"),0) FROM "{model["table"]}"')}).Scan(&value); err != nil {{ t.Fatal(err) }}
+                sequences[{canonical(model["table"])}] = []any{{fmt.Sprint(value),value!=0}}
+            }}""")
+        elif primary["auto"]:
             queries.append(f"""{{
                 var sequence string
                 if err := pool.QueryRow(ctx, "SELECT pg_get_serial_sequence($1,$2)", {canonical('"' + model["table"] + '"')}, {canonical(primary["name"])}).Scan(&sequence); err != nil {{ t.Fatal(err) }}
@@ -244,7 +256,7 @@ def write_probe(captured: dict[str, Any]) -> str:
                 if err := pool.QueryRow(ctx, "SELECT last_value::text,is_called FROM " + sequence).Scan(&value,&called); err != nil {{ t.Fatal(err) }}
                 sequences[{canonical(model["table"])}] = []any{{value,called}}
             }}""")
-    return (
+    result = (
         """package backend
 import ("bytes"; "context"; "encoding/json"; "net/http/httptest"; "os"; "strings"; "testing"; "time"; "github.com/jackc/pgx/v5/pgxpool"; IO_IMPORT)
 func TestSankaFixtureIdentity(t *testing.T) {
@@ -296,6 +308,16 @@ func TestSankaContractReplay(t *testing.T) {
         .replace("EXCHANGE", exchange)
         .replace("QUERIES", "\n".join(queries))
     )
+    if any(model.get("sqlite_rowid") for model in captured["models"]):
+        result = result.replace('"bytes";', '"bytes"; "fmt";')
+    if sqlite:
+        from .sqlite import adapt_go
+
+        # SQLite fixtures are created here, never supplied by a caller; no remote identity probe.
+        start = result.index("func TestSankaFixtureIdentity")
+        end = result.index("func TestSankaContractReplay", start)
+        result = adapt_go(result[:start] + result[end:])
+    return result
 
 
 def normalize_bodies(observed: list[dict[str, Any]], captured: dict[str, Any]) -> None:
@@ -349,7 +371,11 @@ def replay_writes(
         )
     target_url = os.environ.get("SANKA_GO_TARGET_TEST_DATABASE_URL", "")
     source_url = os.environ.get("SANKA_GO_SOURCE_TEST_DATABASE_URL", "")
-    urls = [target_url] + ([source_url] if command == "verify" else [])
+    sqlite = config["database_layer"] == "sqlite"
+    source_sqlite = config.get("source_database") == "sqlite"
+    urls = ([] if sqlite else [target_url]) + (
+        [source_url] if command == "verify" and not source_sqlite else []
+    )
     for index, url in enumerate(urls):
         parsed = urlsplit(url)
         schemes = (
@@ -367,9 +393,14 @@ def replay_writes(
                 "write replay requires explicit SANKA_GO_TARGET_TEST_DATABASE_URL and (for verify) SANKA_GO_SOURCE_TEST_DATABASE_URL resettable PostgreSQL fixtures"
             )
         _ = parsed.port
-    if command == "verify" and source_url.replace("postgresql+psycopg:", "postgresql:").replace(
-        "postgres:", "postgresql:"
-    ) == target_url.replace("postgres:", "postgresql:"):
+    if (
+        command == "verify"
+        and not source_sqlite
+        and source_url.replace("postgresql+psycopg:", "postgresql:").replace(
+            "postgres:", "postgresql:"
+        )
+        == target_url.replace("postgres:", "postgresql:")
+    ):
         raise ValueError("source and target write fixtures must be independent")
     source_python = _source_python() if command == "verify" else None
     snapshot = _snapshot(output)
@@ -389,6 +420,10 @@ def replay_writes(
     }
     with tempfile.TemporaryDirectory(prefix="sanka-go-write-replay-") as temporary:
         workspace = Path(temporary)
+        if sqlite:
+            target_url = (workspace / "target.sqlite3").as_uri()
+        if source_sqlite:
+            source_url = "sqlite:///" + str(workspace / "source.sqlite3")
         candidate = workspace / "candidate"
         candidate.mkdir()
         for name, content in snapshot.items():
@@ -413,7 +448,7 @@ def replay_writes(
         target_env = environment | {"DATABASE_URL": target_url} | security_environment(captured)
         version = _run([executable, "version"], candidate, environment=environment).strip()
         # Compare actual connection identities before either fixture is reset.
-        if command == "verify":
+        if command == "verify" and not source_sqlite:
             identities = []
             for url in (target_url, source_url.replace("postgresql+psycopg:", "postgresql:")):
                 _run(
@@ -479,7 +514,9 @@ def replay_writes(
                     str(source_python),
                     "-I",
                     "-c",
-                    _client_lifecycle(SOURCE_WRITES),
+                    _client_lifecycle(
+                        source_probe(SOURCE_WRITES, writes=True) if source_sqlite else SOURCE_WRITES
+                    ),
                     config["source_framework"],
                     str(source / config["source_file"]),
                     str(cases),

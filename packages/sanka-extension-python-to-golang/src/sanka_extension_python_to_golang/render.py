@@ -29,6 +29,21 @@ def _go_literal(value: Any) -> str:
     )
 
 
+def _insert_query(model: dict[str, Any], columns: str, placeholders: str, returning: str) -> str:
+    if model.get("sqlite_rowid"):
+        primary = next(field for field in model["fields"] if field["primary_key"])
+        if primary["auto"]:
+            # SQLite ROWID is max(current ids)+1 and rolls back with its transaction.
+            return (
+                f'INSERT INTO "{model["table"]}" ("{primary["name"]}", {columns}) '
+                f'SELECT (SELECT COALESCE(MAX("{primary["name"]}"),0)+1 FROM "{model["table"]}"), '
+                f"{placeholders} RETURNING {returning}"
+            )
+    return (
+        f'INSERT INTO "{model["table"]}" ({columns}) VALUES ({placeholders}) RETURNING {returning}'
+    )
+
+
 def _projection(fields: list[dict[str, Any]]) -> str:
     # pgx's binary numeric decoder discards scale for zero. PostgreSQL text
     # preserves it for every read and RETURNING path, including nullable fields.
@@ -607,7 +622,11 @@ func writeResponse(w http.ResponseWriter, status int, payload any) {
 """
     # A library-shaped app avoids inventing deployment settings during endpoint qualification.
     lock_name = target + (
-        "-postgresql" if captured["configuration"]["database_layer"] == "pgx" else ""
+        "-postgresql"
+        if captured["configuration"]["database_layer"] == "pgx"
+        else "-sqlite"
+        if captured["configuration"]["database_layer"] == "sqlite"
+        else ""
     )
     lock = files("sanka_extension_python_to_golang").joinpath("locks", lock_name)
     result = {
@@ -617,13 +636,16 @@ func writeResponse(w http.ResponseWriter, status int, payload any) {
         "contract.json": canonical(captured) + "\n",
     }
 
-    if captured["configuration"]["database_layer"] == "pgx":
+    if captured["configuration"]["database_layer"] != "none":
         result.update(render_database(captured))
-        if captured["configuration"]["source_framework"] == "fastapi":
-            from .drf_transfer import TRANSFER_SCRIPT
+        if (
+            captured["configuration"]["source_framework"] == "fastapi"
+            or captured["configuration"].get("source_database") == "sqlite"
+        ):
+            from .sqlite_transfer import render_transfer
 
-            result["tools/transfer_existing.py"] = TRANSFER_SCRIPT
-    result.update(_runtime(target, database, captured["configuration"]["database_layer"] == "pgx"))
+            result.update(render_transfer(captured))
+    result.update(_runtime(target, database, captured["configuration"]["database_layer"] != "none"))
     if captured.get("security"):
         result["security.go"] = render_security(captured)
         if captured["security"]["kind"] == "jwt-hs256-roles":
@@ -674,6 +696,29 @@ func rowPrincipal(ctx context.Context) (map[string]string, error) {
                 denial + "\n            if errors.Is(err, errInvalidWrite)",
             )
         result["app.go"] = app
+    if (
+        captured["configuration"].get("source_database") == "sqlite"
+        and captured["configuration"]["database_layer"] == "pgx"
+    ):
+        # ponytail: table locks match SQLite's single writer; qualify finer locking for throughput.
+        statements = [
+            _go_literal(f'LOCK TABLE "{model["table"]}" IN EXCLUSIVE MODE')
+            for model in sorted(captured["models"], key=lambda m: m["table"])
+        ]
+        locks = "\n".join(
+            f"        if _, err := tx.Exec(ctx, {statement}); err != nil {{ return err }}"
+            for statement in statements
+        )
+        result = {
+            name: text.replace("func(tx pgx.Tx) error {", "func(tx pgx.Tx) error {\n" + locks)
+            if name.endswith(".go")
+            else text
+            for name, text in result.items()
+        }
+    if captured["configuration"]["database_layer"] == "sqlite":
+        from .sqlite import adapt_files
+
+        result = adapt_files(result)
     return result
 
 
@@ -964,7 +1009,7 @@ def _transaction_helper(index: int, write: dict[str, Any], models: list[dict[str
         if operation == "create":
             placeholders = ", ".join(f"${i}" for i in range(1, len(writable) + 1))
             arguments = ", ".join(f"item{number}." + go_name(field["name"]) for field in writable)
-            query = f'INSERT INTO "{model["table"]}" ({columns}) VALUES ({placeholders}) RETURNING {returning}'
+            query = _insert_query(model, columns, placeholders, returning)
             statements.append(
                 f"if err := tx.QueryRow(ctx, {_go_literal(query)}, {arguments}).Scan({destinations}); err != nil {{ return err }}"
             )
@@ -1312,7 +1357,7 @@ def _write_helper(
     if operation == "create":
         placeholders = ", ".join(f"${number}" for number in range(1, len(writable) + 1))
         arguments = ", ".join(argument_values[field["name"]] for field in writable)
-        query = f'INSERT INTO "{model["table"]}" ({columns}) VALUES ({placeholders}) RETURNING {returning}'
+        query = _insert_query(model, columns, placeholders, returning)
         helper = f"""func writeRow{index}(ctx context.Context, pool *pgxpool.Pool, body []byte) ({model["name"]}, error) {{
     {guard}
     item, {seen_name}, err := {decoder_name}(body, false)

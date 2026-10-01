@@ -19,6 +19,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 from .capture import canonical, digest, recapture
 from .render import render
 from .security import compare_headers, header_probe, security_cases, security_environment
+from .sqlite import adapt_go, source_probe
 from .toolchain import ensure_go
 
 SOURCE_PROBE = """
@@ -203,7 +204,9 @@ def _run_original_pytest_tests(
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
     } | security_environment(captured)
     test_database = ""
-    if captured["configuration"]["database_layer"] != "none":
+    if captured["configuration"].get("source_database") == "sqlite":
+        environment["DATABASE_URL"] = "sqlite:///" + str(workspace / "original-tests.sqlite3")
+    elif captured["configuration"]["database_layer"] != "none":
         if not database_url:
             raise ValueError("original database tests require an explicit source fixture URL")
         test_database = "sanka_verify_" + uuid.uuid4().hex
@@ -443,18 +446,22 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
     )
     config = captured["configuration"]
     database = any("read" in route for route in captured["routes"])
+    sqlite = config["database_layer"] == "sqlite"
+    source_sqlite = config.get("source_database") == "sqlite"
     source_environment: dict[str, str] = {}
     target_environment: dict[str, str] = {}
     if database:
         target_url = os.environ.get("SANKA_GO_TARGET_TEST_DATABASE_URL", "")
         source_url = os.environ.get("SANKA_GO_SOURCE_TEST_DATABASE_URL", "")
-        if not target_url or (command == "verify" and not source_url):
+        if (not sqlite and not target_url) or (
+            command == "verify" and not source_sqlite and not source_url
+        ):
             raise ValueError(
                 "database replay requires explicit SANKA_GO_TARGET_TEST_DATABASE_URL "
                 "and, for verify, SANKA_GO_SOURCE_TEST_DATABASE_URL fixture databases"
             )
-        urls = [(target_url, {"postgres", "postgresql"})]
-        if command == "verify":
+        urls = [] if sqlite else [(target_url, {"postgres", "postgresql"})]
+        if command == "verify" and not source_sqlite:
             urls.append(
                 (
                     source_url,
@@ -491,7 +498,7 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
     source_bytes = (root / config["source_file"]).read_bytes()
     module_bytes = {name: (root / name).read_bytes() for name in captured.get("source_modules", [])}
     model_bytes = (
-        (root / config["models_file"]).read_bytes() if config["database_layer"] == "pgx" else None
+        (root / config["models_file"]).read_bytes() if config["database_layer"] != "none" else None
     )
     if recapture(root, captured) != captured:
         raise ValueError("source changed before replay")
@@ -523,6 +530,10 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
     paths = [path for path, _ in cases]
     with tempfile.TemporaryDirectory(prefix="sanka-go-replay-") as temporary:
         workspace = Path(temporary)
+        if database and sqlite:
+            target_environment["DATABASE_URL"] = (workspace / "target.sqlite3").as_uri()
+        if database and source_sqlite:
+            source_environment["DATABASE_URL"] = "sqlite:///" + str(workspace / "source.sqlite3")
         candidate = workspace / "candidate"
         candidate.mkdir()
         for name, content in snapshot.items():
@@ -538,20 +549,25 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             )
         ):
             raise ValueError("candidate uses reserved replay filenames")
+        probe = _probe(
+            config["target_framework"],
+            paths,
+            database,
+            [case.get("headers", {}) for case in requests],
+        )
         (candidate / "sanka_contract_probe_test.go").write_text(
-            header_probe(
-                _probe(
-                    config["target_framework"],
-                    paths,
-                    database,
-                    [case.get("headers", {}) for case in requests],
-                ),
-                captured,
-            )
+            header_probe(adapt_go(probe) if sqlite else probe, captured)
         )
         executable, go_environment = ensure_go(root)
         target_environment.update(go_environment)
         version = _run([executable, "version"], candidate, environment=go_environment).split()
+        if database and sqlite:
+            for direction in ("up", "down", "up"):
+                _run(
+                    [executable, "run", "-p=2", "./cmd/migrate", direction],
+                    candidate,
+                    environment=target_environment,
+                )
         _run(
             [executable, "test", "-count=1", "-p=2", "-timeout=60s", "./..."],
             candidate,
@@ -599,7 +615,9 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
                     str(source_python),
                     "-I",
                     "-c",
-                    _client_lifecycle(SOURCE_PROBE),
+                    _client_lifecycle(
+                        source_probe(SOURCE_PROBE) if source_sqlite else SOURCE_PROBE
+                    ),
                     config["source_framework"],
                     str(source),
                     canonical(requests),

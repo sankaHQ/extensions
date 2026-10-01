@@ -99,6 +99,7 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
         "migration_tool",
         "schema_mode",
         "models_file",
+        "source_database",
     }
     if set(raw) - allowed:
         raise ValueError("unknown configuration fields: " + ", ".join(sorted(set(raw) - allowed)))
@@ -119,14 +120,33 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
         raise ValueError("source_framework must be drf, fastapi or flask")
     if result["target_framework"] not in TARGETS:
         raise ValueError("target_framework must be fiber, chi, mux or gin")
-    if result["database_layer"] not in {"none", "pgx"}:
-        raise ValueError("database_layer must be none or pgx")
-    database_keys = {"database_dialect", "migration_tool", "schema_mode", "models_file"}
+    if result["database_layer"] not in {"none", "pgx", "sqlite"}:
+        raise ValueError("database_layer must be none, pgx or sqlite")
+    database_keys = {
+        "database_dialect",
+        "migration_tool",
+        "schema_mode",
+        "models_file",
+        "source_database",
+    }
     if result["database_layer"] == "none" and database_keys & raw.keys():
-        raise ValueError("database options require database_layer=pgx")
-    if result["database_layer"] == "pgx":
+        raise ValueError("database options require database_layer=pgx or sqlite")
+    if result["database_layer"] != "none":
+        source_database = raw.get("source_database", "auto")
+        if type(source_database) is not str or source_database not in {
+            "auto",
+            "sqlite",
+            "postgresql",
+        }:
+            raise ValueError("source_database must be auto, sqlite or postgresql")
+        if result["database_layer"] == "sqlite" and source_database == "postgresql":
+            raise ValueError("PostgreSQL to SQLite is not a qualified migration path")
+        if source_database == "sqlite" or result["database_layer"] == "sqlite":
+            result["source_database"] = "sqlite"
+        elif source_database == "postgresql":
+            result["source_database"] = "postgresql"
         for key, default in {
-            "database_dialect": "postgresql",
+            "database_dialect": "sqlite" if result["database_layer"] == "sqlite" else "postgresql",
             "migration_tool": "goose",
             "schema_mode": "empty",
             "models_file": "models.py",
@@ -139,6 +159,10 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
             if key not in {"models_file", "schema_mode"} and value != default:
                 raise ValueError(f"only {key}={default} is qualified")
             result[key] = value
+        if result["database_layer"] == "sqlite" and result["schema_mode"] != "empty":
+            raise ValueError("SQLite requires schema_mode=empty; existing files are never adopted")
+        if result.get("source_database") == "sqlite" and result["schema_mode"] != "empty":
+            raise ValueError("SQLite source conversion requires an empty destination")
         model_file = _python_path(result["models_file"], "models_file")
         if model_file == result["source_file"]:
             raise ValueError("models_file must be distinct from source_file")
@@ -1610,7 +1634,7 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         )
     models = []
     allowed_imports = {key: set(value) for key, value in IMPORTS[framework].items()}
-    if config["database_layer"] == "pgx":
+    if config["database_layer"] != "none":
         try:
             model_module = Path(config["models_file"]).stem
             if not model_module.isidentifier() or model_module in sys.stdlib_module_names | {
@@ -1624,6 +1648,32 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
             }:
                 raise ValueError("models_file conflicts with runtime imports")
             models = capture_models(root / config["models_file"], framework)
+            if (
+                config.get("source_database") == "sqlite"
+                and config["database_layer"] == "pgx"
+                and framework == "drf"
+            ):
+                raise ValueError(
+                    "SQLite DRF to PostgreSQL requires the conventional Django project profile"
+                )
+            if config.get("source_database") == "sqlite" and framework != "drf":
+                if any(
+                    field["auto"] and field["sql_type"] != "integer"
+                    for model in models
+                    for field in model["fields"]
+                ):
+                    raise ValueError(
+                        "SQLite SQLAlchemy auto primary keys require Integer, not BigInteger"
+                    )
+                models = [dict(model, sqlite_rowid=True) for model in models]
+            if config.get("source_database") == "sqlite" and any(
+                field["go_type"] not in {"int32", "int64", "bool", "string"}
+                for model in models
+                for field in model["fields"]
+            ):
+                raise ValueError(
+                    "SQLite currently qualifies integer, boolean and text model fields"
+                )
             allowed_imports["django.db" if framework == "drf" else "sqlalchemy.exc"] = {
                 "IntegrityError",
                 *(["transaction"] if framework == "drf" else []),
@@ -1665,6 +1715,11 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         if framework == "drf" and security.get("native"):
             allowed_imports["rest_framework.permissions"].add("IsAuthenticated")
         if framework == "fastapi" and models:
+            if config.get("source_database") == "sqlite" and any(
+                isinstance(node, ast.ImportFrom) and node.module == "sqlalchemy.ext.asyncio"
+                for node in ast.walk(tree)
+            ):
+                raise ValueError("SQLite currently qualifies synchronous SQLAlchemy sessions")
             tree, async_repositories = normalize_async_persistence(tree)
             lowered_repositories |= async_repositories
         tree = normalize_routes(tree, framework)
@@ -2133,9 +2188,10 @@ def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
         result["fastapi_topology"] = topology
     if persistence is not None:
         result["fastapi_persistence"] = persistence
-    if config["database_layer"] == "pgx":
+    if config["database_layer"] != "none":
         result["models"] = models
+        database_name = "SQLite" if config["database_layer"] == "sqlite" else "PostgreSQL"
         result["scope"] = (
-            f"{config['schema_mode']} PostgreSQL schema baseline and captured JSON endpoints"
+            f"{config['schema_mode']} {database_name} schema baseline and captured JSON endpoints"
         )
     return result

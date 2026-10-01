@@ -283,9 +283,16 @@ def capture_project(
         },
     }
     try:
-        if config["database_layer"] != "pgx":
-            raise ValueError("conventional DRF migration requires pgx")
+        if config["database_layer"] not in {"pgx", "sqlite"}:
+            raise ValueError("conventional DRF migration requires pgx or sqlite")
         settings_name, settings, consumed = _settings(root)
+        if (
+            config.get("source_database")
+            and config["source_database"] != settings["database"]["engine"]
+        ):
+            raise ValueError("source_database differs from the captured Django settings")
+        if config["database_layer"] == "sqlite" and settings["database"]["engine"] != "sqlite":
+            raise ValueError("PostgreSQL to SQLite is not a qualified migration path")
         if (
             config["schema_mode"] == "adopt-existing"
             and settings["database"]["engine"] != "postgresql"
@@ -429,6 +436,12 @@ def capture_project(
                 raise ValueError(f"{app}/models.py or {app}/migrations: {error}") from error
         if len({m["table"] for m in models}) != len(models):
             raise ValueError("duplicate model database table")
+        if config["database_layer"] == "sqlite" and any(
+            field["go_type"] not in {"int32", "int64", "bool", "string"}
+            for model in models
+            for field in model["fields"]
+        ):
+            raise ValueError("SQLite currently qualifies integer, boolean and text model fields")
         model_map = {m["name"]: m for m in models}
         serializers: dict[str, ast.ClassDef] = {}
         views: dict[str, ast.ClassDef] = {}
