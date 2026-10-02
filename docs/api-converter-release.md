@@ -1,6 +1,10 @@
-# Source detection Go release
+# Go lifecycle feedback release
 
-The a14 API bundle publishes automatic source discovery for Python-to-Go 0.1.0a14.
+The a15 API bundle publishes lifecycle feedback for Python-to-Go 0.1.0a15.
+Test records actual Go test counts and scenario results. Verify records per-scenario
+source/Go statuses, response/database comparisons and endpoint coverage. Safe stage
+messages are emitted on stderr for a compatible CLI to display; arbitrary child
+logs and response bodies are not streamed. JSON response framing is unchanged.
 Scan detects supported DRF, Flask and FastAPI entrypoints, models and source databases
 without executing application code. Plan chooses the router, destination database
 and endpoints. Ambiguous or dynamic inputs require an explicit override.
@@ -19,7 +23,7 @@ and does not turn a passing subset into an application-wide parity claim.
 
 The `api-release.yml` jobs build seven wheels, check the two manifests and scoped
 catalog, and exercise the pinned `sanka-examples` revision
-`e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.5 on every pull
+`e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.6 on every pull
 request, main push and release tag.
 
 Only the publication tag also runs the installed-CLI PostgreSQL corpus: all 17
@@ -46,9 +50,9 @@ Review its wheel digest before committing. CI only validates checked-in bytes.
 ## Publication gate
 
 After this change lands, tag its
-reviewed merge commit `api-converters-v0.1.0a14` and dispatch
+reviewed merge commit `api-converters-v0.1.0a15` and dispatch
 `api-release.yml` on that tag. The dispatch job requires the tag to be on
-`main` and installs published CLI 0.3.5 for both pinned example qualifications
+`main` and installs published CLI 0.3.6 for both pinned example qualifications
 before GitHub publishes any assets. Do not publish from a pull-request build.
 
 The release contains seven wheels, two manifests, the scoped catalog and three

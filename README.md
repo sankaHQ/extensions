@@ -44,6 +44,20 @@ Plan selects the Go router, destination database and endpoints; the destination
 defaults to the detected source database. Ambiguous source inputs require a choice.
 The Go SQLite example needs no container; PostgreSQL examples need a disposable
 database. See the [Go package README](packages/sanka-extension-python-to-golang/README.md).
+Go Test and Verify report fixture setup, native Go tests and each captured HTTP
+scenario's outcome. Verify compares source and Go responses, rows and sequences
+where captured; it does not certify behaviors outside those scenarios. The
+saved reports include test counts and per-scenario results for CLI summaries.
+
+For example, the gadget-inventory fixture can report:
+
+```text
+MATCH PUT /api/gadgets/1/ [replace] — source 200 / Go 200; status, JSON body, media type, rows and sequences
+```
+
+The CLI summary lists every planned method. An endpoint without a replay scenario
+is labelled `not exercised`; add a scenario with suitable setup and expected status
+to cover it. Passing scenario comparisons do not certify every possible input.
 
 Each extension is an immutable GitHub release wheel. Before anything runs, the
 CLI checks the manifest, the release URL, the SHA-256 digest and the CLI
