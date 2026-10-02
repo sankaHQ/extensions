@@ -128,7 +128,7 @@ def ensure_go(root: Path) -> tuple[str, dict[str, str]]:
         raise ValueError(f"Incomplete Go toolchain cache: remove {destination} and retry.")
     suffix = "zip" if system == "windows" else "tar.gz"
     url = f"https://go.dev/dl/go{VERSION}.{system}-{arch}.{suffix}"
-    print(f"Installing Go {VERSION} into {destination}", file=sys.stderr, flush=True)
+    print(f"[sanka] Installing pinned Go {VERSION} toolchain…", file=sys.stderr, flush=True)
     try:
         with tempfile.TemporaryDirectory(prefix="install-", dir=cache) as temporary:
             staging = Path(temporary)

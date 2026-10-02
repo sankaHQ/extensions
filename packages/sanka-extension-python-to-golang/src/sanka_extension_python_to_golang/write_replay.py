@@ -476,7 +476,7 @@ def replay_writes(
                 candidate,
                 environment=target_env,
             )
-        _run(
+        test_log = _run(
             [executable, "test", "-count=1", "-p=2", "-timeout=60s", "./..."],
             candidate,
             environment=target_env,
@@ -545,6 +545,10 @@ def replay_writes(
                 "version": _run([str(source_python), "-I", "--version"], workspace).strip(),
             }
         result.update(compare(scenarios, actual, source_observed))
+        from .replay import _go_test_count, _report_steps
+
+        result["tests"] = _go_test_count(test_log)
+        _report_steps(scenarios, result, actual, source_observed)
         if command == "verify" and os.environ.get("SANKA_GO_RUN_ORIGINAL_TESTS") == "1":
             assert source_python is not None
             result["original_tests"] = _run_original_pytest_tests(

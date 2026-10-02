@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from sanka_code_migration.endpoints import apply_files, check_selection, plan_scope, scoped_routes
 
@@ -18,7 +20,7 @@ from sanka_extensions.code import (
 from .capture import VERSION, canonical, capture, configuration, digest
 from .discovery import InputRequired, discover
 from .render import render
-from .replay import replay
+from .replay import _progress, replay
 
 
 def _safe(root: Path, path: Path) -> Path:
@@ -86,6 +88,33 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                     raise ValueError("source or configuration differs from the applied plan")
                 output = _safe(root, artifacts / "golang")
                 report = replay(root, output, captured, request.command)
+                report["environment"] = str(output)
+                report["endpoints"] = []
+                for route in captured["routes"]:
+                    pattern = re.sub(r":[a-zA-Z_][a-zA-Z_0-9]*", "[^/]+", re.escape(route["path"]))
+                    steps = [
+                        step
+                        for step in report["steps"]
+                        if step["method"] == route["method"]
+                        and re.fullmatch(pattern, urlsplit(step["path"]).path)
+                    ]
+                    outcome = (
+                        "not_exercised"
+                        if not steps
+                        else "mismatch"
+                        if any(step["problems"] for step in steps)
+                        else "matched"
+                        if request.command == "verify"
+                        else "passed"
+                    )
+                    endpoint = f"{route['method']} {route['path']}"
+                    report["endpoints"].append(
+                        {"id": endpoint, "scenarios": len(steps), "outcome": outcome}
+                    )
+                    if not steps:
+                        _progress(
+                            f"NOT EXERCISED {endpoint} — add a scenario to exercise this endpoint"
+                        )
                 report["plan_hash"] = plan_hash
                 report["qualification"] = {
                     "candidate_executed": True,
@@ -145,7 +174,9 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
         destination.write_text(canonical(data) + "\n")
         return success_response(
             request,
-            data=data,
+            data={**data, "output": str((artifacts / "golang").relative_to(root))}
+            if request.command == "plan"
+            else data,
             artifacts=[str(destination)],
             limitations=["Experimental endpoint contract only; not a complete backend migration."],
         )

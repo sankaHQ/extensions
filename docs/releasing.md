@@ -1,5 +1,22 @@
 # Releasing Sanka extension packages
 
+## Go lifecycle feedback: API a15
+
+`api-converters-v0.1.0a15` publishes Python-to-Go `0.1.0a15`. Test records actual
+Go test counts and HTTP scenario outcomes. Verify reports source/Go status,
+response/database comparisons and endpoint coverage, including unexercised
+methods. Deliberate progress messages use stderr; raw child logs and response
+bodies are not streamed. A compatible CLI displays this feedback without mixing
+it into JSON or compact output. Generation and migration bounds are unchanged.
+The gadget fixture now covers PUT validation, replacement, readback and missing
+records in the existing four-router lifecycle.
+
+Build with `scripts/build_api_release.py --write-manifests`, review digests, and
+require maintained checks, installed candidate acceptance and native qualification.
+Publish the absent immutable tag from the reviewed merge. Validate the downloaded
+bundle and public acceptance before advancing the next CLI release's official pin.
+The shared SDK, helper and Rust wheels retain their existing versions and bytes.
+
 ## Automatic Go source discovery: API a14
 
 `api-converters-v0.1.0a14` publishes Python-to-Go `0.1.0a14`. Scan detects the

@@ -39,7 +39,7 @@ def test_sqlite_plan_uses_captured_django_database(tmp_path: Path) -> None:
 @pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="requires Go toolchain")
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
 def test_drf_sqlite_lifecycle_http_rows_identity_and_rollback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     gadget_project(tmp_path)
     config = {"target_framework": target}
@@ -65,6 +65,21 @@ def test_drf_sqlite_lifecycle_http_rows_identity_and_rollback(
         result = handle(dataclasses.replace(base, command=command))
         assert result.outcome == "success", result.error
         assert result.data["ok"]
+        assert result.data["tests"] > 0
+        put = next(e for e in result.data["endpoints"] if e["id"].startswith("PUT "))
+        assert put["outcome"] == ("matched" if command == "verify" else "passed")
+        assert put["scenarios"] == 3
+        assert all(e["scenarios"] > 0 for e in result.data["endpoints"])
+        assert len(result.data["endpoints"]) == 6
+        assert result.data["environment"] == applied.data["output"]
+        assert result.data["steps"] and all(not step["problems"] for step in result.data["steps"])
+        progress = capsys.readouterr().err
+        assert "Running Go tests" in progress
+        assert progress.count("[sanka] MATCH " if command == "verify" else "[sanka] PASS ") >= len(
+            result.data["steps"]
+        )
+        if command == "verify":
+            assert "Collecting Python source responses" in progress
     assert {
         str(p.relative_to(tmp_path)): p.read_bytes()
         for p in tmp_path.rglob("*.py")

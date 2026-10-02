@@ -65,7 +65,7 @@ def request(root: Path, framework: str = "flask", target: str = "fiber") -> Exte
         str(root),
         str(root / ".sanka" / "go"),
         "sanka/python-to-golang",
-        "0.1.0a14",
+        "0.1.0a15",
         "0" * 64,
         {},
         {"source_framework": framework, "target_framework": target},
@@ -381,7 +381,9 @@ def test_plan_is_independent_of_checkout_location(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="set SANKA_GO_TESTS=1 for Go replay")
-def test_replay_detects_candidate_changes(tmp_path: Path) -> None:
+def test_replay_detects_candidate_changes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     (tmp_path / "app.py").write_text(source("flask"))
     output = apply(tmp_path, "flask", "fiber")
     app = output / "app.go"
@@ -395,6 +397,8 @@ def test_replay_detects_candidate_changes(tmp_path: Path) -> None:
     assert report["ok"] is False
     assert report["candidate_digest"]
     assert json.dumps(report["source"]) != json.dumps(report["candidate"])
+    assert "[sanka] MISMATCH GET /health" in capsys.readouterr().err
+    assert any(step["problems"] for step in report["steps"])
     lock = output / "go.mod"
     lock.write_text(lock.read_text() + "\n// changed\n")
     response = handle(req)

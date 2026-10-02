@@ -119,6 +119,14 @@ def _client_lifecycle(probe: str) -> str:
 def _run(
     command: list[str], cwd: Path, *, timeout: int = 180, environment: dict[str, str] | None = None
 ) -> str:
+    go = Path(command[0]).name in {"go", "go.exe"}
+    if go and len(command) > 1 and command[1] == "test":
+        command = [*command[:2], "-json", *command[2:]]
+        _progress("Running Go tests and HTTP scenarios (compiling dependencies if needed)…")
+    elif go and len(command) > 1 and command[1] == "run":
+        _progress(f"Checking isolated fixture migrations: {command[-1]}…")
+    elif not go and "--version" not in command:
+        _progress("Collecting Python source responses on isolated fixtures…")
     try:
         result = subprocess.run(
             command,
@@ -150,6 +158,51 @@ def _run(
         raise ValueError("replay process failed: " + details)
 
     return result.stdout
+
+
+def _progress(message: str) -> None:
+    # Emit only deliberate messages, never subprocess logs, credentials or response bodies.
+    print("[sanka] " + json.dumps(message, ensure_ascii=False)[1:-1], file=sys.stderr, flush=True)
+
+
+def _go_test_count(log: str) -> int:
+    count = 0
+    for line in log.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("Action") == "pass" and event.get("Test"):
+            count += 1
+            _progress(f"PASS Go test: {event['Test']}")
+    return count
+
+
+def _report_steps(
+    scenarios: list[dict[str, Any]],
+    comparison: dict[str, Any],
+    candidate: list[dict[str, Any]],
+    source: list[dict[str, Any]] | None,
+) -> None:
+    for index, (case, step, observed) in enumerate(
+        zip(scenarios, comparison["steps"], candidate, strict=True)
+    ):
+        step.update(method=case["method"], path=case["path"])
+        outcome = "MISMATCH" if step["problems"] else "MATCH" if source is not None else "PASS"
+        details = (
+            "response or database mismatch; inspect saved report"
+            if step["problems"]
+            else (
+                "status, JSON body, media type"
+                + (", rows and sequences" if "tables" in observed else "")
+                if source is not None
+                else "expected status and response format"
+            )
+        )
+        if source is not None:
+            step["source_status"] = source[index]["status"]
+            details = f"source {source[index]['status']} / Go {observed['status']}; {details}"
+        _progress(f"{outcome} {case['method']} {case['path']} [{case['id']}] — {details}")
 
 
 def _write_source_files(root: Path, files: dict[str, bytes]) -> None:
@@ -228,6 +281,7 @@ def _run_original_pytest_tests(
         )
         environment["DATABASE_URL"] = test_url
     try:
+        _progress("Running original Python source tests on isolated fixtures…")
         if test_database:
             _run(
                 [source_python, "-I", "-c", database_script, test_database, "create"],
@@ -568,15 +622,17 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
                     candidate,
                     environment=target_environment,
                 )
-        _run(
+        test_log = _run(
             [executable, "test", "-count=1", "-p=2", "-timeout=60s", "./..."],
             candidate,
             environment=target_environment,
         )
+        tests_run = _go_test_count(test_log)
         actual = json.loads((candidate / "sanka-observed.json").read_text())
         result = {
             "schema": "sanka.python-to-golang.replay/v1",
             "command": command,
+            "tests": tests_run,
             "go_version": " ".join(version),
             "source_digest": captured["source_digest"],
             "candidate_digest": candidate_hash,
@@ -666,4 +722,21 @@ def replay(root: Path, output: Path, captured: dict[str, Any], command: str) -> 
             raise ValueError("source changed during replay; discard observations")
         if _snapshot(output) != snapshot:
             raise ValueError("candidate changed during replay; discard observations")
+        # GET-only replay has no scenario ids; compare each observed response directly.
+        source_results = result.get("source")
+        steps = []
+        for index, item in enumerate(actual):
+            problems = []
+            if item["status"] != cases[index][1] or item["media_type"] != "application/json":
+                problems.append("unexpected status or response format")
+            if source_results is not None and canonical(item) != canonical(source_results[index]):
+                problems.append("source != candidate")
+            steps.append({"id": str(index + 1), "status": item["status"], "problems": problems})
+        result["steps"] = steps
+        _report_steps(
+            [{"id": str(i + 1), "method": "GET", "path": path} for i, path in enumerate(paths)],
+            result,
+            actual,
+            source_results,
+        )
         return result

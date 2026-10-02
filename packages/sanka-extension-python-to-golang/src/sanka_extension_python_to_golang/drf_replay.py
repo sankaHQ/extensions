@@ -190,10 +190,13 @@ def replay_project(
 ) -> dict[str, Any]:
     from .capture import canonical, digest, recapture
     from .render import render
-    from .replay import _run, _snapshot, _source_python
+    from .replay import _go_test_count, _progress, _report_steps, _run, _snapshot, _source_python
     from .toolchain import ensure_go
 
     groups = scenario_groups(root, captured)
+    _progress(
+        f"Preparing {sum(len(group) for group in groups)} HTTP scenarios on isolated fixtures…"
+    )
     sqlite = captured["configuration"]["database_layer"] == "sqlite"
     dsn = os.environ.get("SANKA_GO_TARGET_TEST_DATABASE_URL", "")
     url = urlsplit(dsn)
@@ -278,12 +281,13 @@ def replay_project(
             path.write_bytes((root / name).read_bytes())
         (candidate / "sanka_groups.json").write_text(canonical([cases_document(g) for g in groups]))
         (candidate / "sanka_drf_probe_test.go").write_text(target_probe(captured))
-        _run(
+        test_log = _run(
             [go, "test", "-mod=readonly", "-p=2", "./..."],
             candidate,
             timeout=900,
             environment=toolchain | {"DATABASE_URL": dsn} | auth_env,
         )
+        tests_run = _go_test_count(test_log)
         target_groups = _observations(candidate / "sanka_groups_observed.json")
         if source_python:
             (workspace / "source_probe.py").write_text(SOURCE_PROBE)
@@ -314,6 +318,7 @@ def replay_project(
                     root, source, workspace, captured, source_python, auth_env
                 )
     failures: list[dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
     if len(target_groups) != len(groups) or (source_python and len(source_groups) != len(groups)):
         raise ValueError("replay omitted scenario groups")
     for index, cases in enumerate(groups):
@@ -327,11 +332,15 @@ def replay_project(
                 cases,
             )
         comparison = compare(cases, target, actual)
+        _report_steps(cases, comparison, target, actual)
+        steps.extend(dict(step, group=index) for step in comparison["steps"])
         failures.extend(dict(step, group=index) for step in comparison["steps"] if step["problems"])
     if recapture(root, captured) != captured or _snapshot(output) != snapshot:
         raise ValueError("source or generated files changed during replay")
     report = {
         "ok": not failures,
+        "tests": tests_run,
+        "steps": steps,
         "candidate": target_groups,
         "failures": failures,
         "scenarios": groups,
