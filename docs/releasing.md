@@ -1,5 +1,19 @@
 # Releasing Sanka extension packages
 
+## Qualified framework names: API a16
+
+`api-converters-v0.1.0a16` publishes Python-to-Go `0.1.0a16`. Known qualified
+source identifiers (`python-drf`, `python-fastapi`, `python-flask`) and Go router
+identifiers (`go-fiber`, `go-chi`, `go-mux`, `go-gin`) normalize to the existing
+wire values before configuration validation and Plan hashing. Short aliases,
+generation behavior and migration bounds remain supported.
+
+Build with `scripts/build_api_release.py --write-manifests`, review the Go digest,
+and require maintained checks plus installed/native qualification. Publish only
+the absent immutable tag from the merged release preparation PR. Validate public
+assets and acceptance before pinning the full merge in CLI 0.3.8. Rust, shared
+helper and SDK versions and wheel bytes are unchanged.
+
 ## Go lifecycle feedback: API a15
 
 `api-converters-v0.1.0a15` publishes Python-to-Go `0.1.0a15`. Test records actual

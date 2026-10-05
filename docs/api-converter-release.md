@@ -1,6 +1,8 @@
-# Go lifecycle feedback release
+# Qualified framework identifier release
 
-The a15 API bundle publishes lifecycle feedback for Python-to-Go 0.1.0a15.
+The a16 API bundle publishes qualified framework identifiers for Python-to-Go 0.1.0a16.
+Known `python-*` sources and `go-*` router choices normalize to retained wire
+values before validation and hashing; short aliases remain valid.
 Test records actual Go test counts and scenario results. Verify records per-scenario
 source/Go statuses, response/database comparisons and endpoint coverage. Safe stage
 messages are emitted on stderr for a compatible CLI to display; arbitrary child
@@ -50,7 +52,7 @@ Review its wheel digest before committing. CI only validates checked-in bytes.
 ## Publication gate
 
 After this change lands, tag its
-reviewed merge commit `api-converters-v0.1.0a15` and dispatch
+reviewed merge commit `api-converters-v0.1.0a16` and dispatch
 `api-release.yml` on that tag. The dispatch job requires the tag to be on
 `main` and installs published CLI 0.3.6 for both pinned example qualifications
 before GitHub publishes any assets. Do not publish from a pull-request build.
