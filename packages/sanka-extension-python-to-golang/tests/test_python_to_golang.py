@@ -6,6 +6,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import re
 import subprocess
 import sys
 from importlib import resources
@@ -122,6 +123,11 @@ def test_review_and_fail_closed(tmp_path: Path, framework: str) -> None:
     (tmp_path / "app.py").write_text(source(framework))
     output = apply(tmp_path, framework, "fiber")
     assert (output / "go.sum").is_file()
+    # Plan must review the same runnable instructions that Apply writes.
+    readme = (output / "README.md").read_text()
+    assert readme == plan.data["files"]["README.md"]
+    for command in re.findall(r"go run (\./cmd/\w+)", readme):
+        assert (output / command / "main.go").is_file()
     assert (
         handle(
             dataclasses.replace(

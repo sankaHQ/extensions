@@ -86,13 +86,6 @@
           }
         },
         {
-          "value": "none",
-          "label": {
-            "en": "No database conversion",
-            "ja": "データベース変換なし"
-          }
-        },
-        {
           "value": "pgx",
           "label": {
             "en": "PostgreSQL — pgx and Goose",
