@@ -31,7 +31,7 @@ On Windows, use `.venv\Scripts\python.exe` for the requirements command.
 ## Swagger UI
 
 Planning keeps Swagger UI at `/docs` enabled by default. Use
-`sanka plan . --to fastapi --no-swagger-ui` to disable that page, or choose
+`sanka plan . --to python-fastapi --no-swagger-ui` to disable that page, or choose
 Disabled in the TUI Plan configuration. The reviewed plan controls generated
 output in both native and compatibility modes. OpenAPI at `/openapi.json` and
 ReDoc remain available.

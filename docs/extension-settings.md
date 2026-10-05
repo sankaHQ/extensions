@@ -40,7 +40,7 @@ separately which settings are editable, fixed or hidden in the cloud.
 Python-to-Go a11 declares its source framework, source entrypoint and
 optional PostgreSQL conversion settings. Schema mode and models file appear only
 when PostgreSQL is selected. Output remains inside the artifact directory; select
-the Go router with CLI `--to fiber` (or `chi`, `mux`, `gin`) or the optional TUI target list. There
+the Go router with CLI `--to go-fiber` (or `go-chi`, `go-mux`, `go-gin`) or the optional TUI target list. There
 is no generation-layout setting. Changing these values requires a new reviewed
 plan. CLI versions that support settings declarations read it from the installed wheel.
 Public CLI 0.3.3 keeps its built-in form; it does not read this declaration.

@@ -29,21 +29,21 @@
           }
         },
         {
-          "value": "drf",
+          "value": "python-drf",
           "label": {
             "en": "Django REST Framework",
             "ja": "Django REST Framework"
           }
         },
         {
-          "value": "fastapi",
+          "value": "python-fastapi",
           "label": {
             "en": "FastAPI",
             "ja": "FastAPI"
           }
         },
         {
-          "value": "flask",
+          "value": "python-flask",
           "label": {
             "en": "Flask",
             "ja": "Flask"
