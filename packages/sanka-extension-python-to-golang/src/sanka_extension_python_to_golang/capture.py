@@ -87,7 +87,22 @@ def _python_path(value: str, label: str) -> str:
     return value
 
 
+def normalize_frameworks(raw: dict[str, Any]) -> dict[str, Any]:
+    """Accept public language-framework names without changing reviewed v1 captures."""
+    values = dict(raw)
+    for key, prefix, names in (
+        ("source_framework", "python-", SOURCES),
+        ("target_framework", "go-", TARGETS),
+        ("target", "go-", TARGETS),
+    ):
+        value = values.get(key)
+        if isinstance(value, str) and value in {prefix + name for name in names}:
+            values[key] = value.removeprefix(prefix)
+    return values
+
+
 def configuration(raw: dict[str, Any]) -> dict[str, str]:
+    raw = normalize_frameworks(raw)
     allowed = {
         "source_framework",
         "target_framework",

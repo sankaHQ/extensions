@@ -421,11 +421,13 @@ def test_replay_requires_current_applied_plan(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("target", TARGETS)
-def test_target_alias_plan_and_apply(tmp_path: Path, target: str) -> None:
-    (tmp_path / "app.py").write_text(source("flask"))
-    explicit = request(tmp_path, target=target)
+@pytest.mark.parametrize("framework", SOURCES)
+def test_target_alias_plan_and_apply(tmp_path: Path, target: str, framework: str) -> None:
+    (tmp_path / "app.py").write_text(source(framework))
+    explicit = request(tmp_path, framework, target=target)
     alias = dataclasses.replace(
-        explicit, configuration={"source_framework": "flask", "target": target}
+        explicit,
+        configuration={"source_framework": f"python-{framework}", "target": f"go-{target}"},
     )
     expected = handle(explicit)
     planned = handle(alias)
@@ -456,7 +458,9 @@ def test_target_alias_plan_and_apply(tmp_path: Path, target: str) -> None:
         assert "differs" in changed.error.message
 
 
-@pytest.mark.parametrize("value", [None, False, 0, "", "rust", [], {}])
+@pytest.mark.parametrize(
+    "value", [None, False, 0, "", "rust", "python-fiber", "go-fastapi", [], {}]
+)
 @pytest.mark.parametrize("key", ["target", "target_framework"])
 def test_invalid_target_alias(key: str, value: object) -> None:
     with pytest.raises(ValueError, match="must be fiber"):

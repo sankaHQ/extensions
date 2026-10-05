@@ -131,7 +131,7 @@ are generated alongside handlers. Readiness counts converted method/path pairs,
 not placeholders, and does not certify untested behavior.
 
 Use `sanka/drf-to-flask` through the CLI marketplace/project lock. Follow
-`scan → plan --to flask --strategy native --generation minimal → apply → test → verify`.
+`scan → plan --to python-flask --strategy native --generation minimal → apply → test → verify`.
 Apply requires the reviewed **core** plan hash. The output is an overlay: retain the
 original ORM modules and dependencies on the target Python path and install Flask
 in the target environment. `test` checks the unchanged generated files compile and

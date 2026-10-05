@@ -49,3 +49,17 @@ availability and the separate runtime implementation requirements.
 These are tracked compatibility surfaces, not recommended names for new abstractions. `scripts/check_terminology.py` rejects new legacy SDK imports and type definitions outside compatibility modules. Ordinary network connections, database connection pools, credential providers, and third-party library terms retain their technical meaning.
 
 SDK release order: `sanka-connector-sdk` compatibility dependency, `sanka-extension-sdk`, implementing extensions, then runtime dependency updates. Marketplace and package publication remain separate from preparing and reviewing this source change.
+
+## Language-qualified framework identifiers
+
+User-facing Plan targets are `python-fastapi`, `python-flask`, `go-fiber`,
+`go-chi`, `go-mux` and `go-gin`. Python-to-Go source overrides are `python-drf`,
+`python-fastapi` and `python-flask`; automatic Scan discovery is unchanged.
+The CLI projects these names from published manifests. Existing manifest targets,
+package IDs and immutable released wheel digests remain unchanged.
+
+Python-to-Go accepts the qualified identifiers at configuration/discovery boundaries
+and normalizes to its historical capture names before hashing or generating code.
+Short aliases remain valid, including mixed equivalent `target` / `target_framework`
+spellings. Wrong-language identifiers and conflicting routers still fail closed.
+A naming change does not invalidate an existing reviewed extension Plan.

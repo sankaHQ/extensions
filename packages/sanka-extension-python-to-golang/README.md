@@ -52,10 +52,10 @@ the application constructor, SQLAlchemy models and connection configuration.
 
 ```bash
 sanka scan . --extension-env SANKA_GO_SOURCE_PYTHON
-sanka plan . --to chi
+sanka plan . --to go-chi
 ```
 
-Plan chooses the Go router (`fiber`, `chi`, `mux` or `gin`), destination database
+Plan chooses the Go router (`go-fiber`, `go-chi`, `go-mux` or `go-gin`), destination database
 and endpoints. The destination defaults to the detected source database. Choose
 `database_layer: "sqlite"` or `"pgx"` in CLI configuration or the optional TUI
 Plan form; source overrides stay in Advanced configuration. Scan reports source
@@ -80,7 +80,7 @@ For a detected SQLite source going to PostgreSQL:
 
 ```bash
 sanka scan . --extension-env SANKA_GO_SOURCE_PYTHON
-sanka plan . --to fiber --extension-config '{"database_layer":"pgx"}'
+sanka plan . --to go-fiber --extension-config '{"database_layer":"pgx"}'
 ```
 
 Review the returned plan hash and files before `sanka apply --plan-hash <hash>`.
@@ -103,6 +103,12 @@ and disposable fixture databases. See [verification and fixtures](#write-qualifi
 for database checks and [the conventional DRF project profile](#conventional-django-project-profile)
 for `ModelViewSet` projects.
 
+Source overrides accept `python-drf`, `python-fastapi` and `python-flask`;
+short source names remain compatible. Qualified target names require the CLI's
+language-qualified target support. Older CLI versions should use `fiber`, `chi`,
+`mux` or `gin`. The extension normalizes both spellings before capture, so equivalent
+configuration keeps the same extension Plan hash and generated files.
+
 ## SQLite profile
 
 The converter supports SQLite → SQLite, SQLite → PostgreSQL and the existing
@@ -119,7 +125,7 @@ For an unattended Django example:
 
 ```bash
 sanka scan .
-sanka plan . --to chi
+sanka plan . --to go-chi
 # Review the files and returned hash before Apply.
 sanka apply --plan-hash '<reviewed-plan-hash>'
 sanka test

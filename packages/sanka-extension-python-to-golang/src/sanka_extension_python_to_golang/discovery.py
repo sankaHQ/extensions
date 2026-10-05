@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .capture import _python_path, source_inventory
+from .capture import _python_path, normalize_frameworks, source_inventory
 from .routing import project_tree
 
 
@@ -156,7 +156,9 @@ def _url(node: ast.expr, tree: ast.Module) -> str | None:
 
 
 def discover(root: Path, raw: dict[str, Any]) -> dict[str, Any]:
-    values = {key: value for key, value in raw.items() if value not in (None, "")}
+    values = {
+        key: value for key, value in normalize_frameworks(raw).items() if value not in (None, "")
+    }
     records, _ = source_inventory(root)
     trees = {}
     for name in records:
