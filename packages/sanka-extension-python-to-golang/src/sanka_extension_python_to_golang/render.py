@@ -190,6 +190,88 @@ func TestLoadConfig(t *testing.T) {{
 
 
 def render(captured: dict[str, Any]) -> dict[str, str]:
+    result = _render(captured)
+    config = captured["configuration"]
+    version = re.search(r"^go (\S+)", result["go.mod"], re.MULTILINE)
+    assert version is not None
+    readme = f"""# Generated Go backend
+
+Source: {config["source_framework"]}. Target: go-{config["target_framework"]}.
+This project contains the endpoints selected in your reviewed Sanka Plan.
+The captured contract is in `contract.json`.
+
+## Requirements
+
+Use Go {version[1]} or newer. Run the commands below from this directory,
+which contains `go.mod`. Downloads use the versions pinned in `go.mod` and `go.sum`.
+The server reads exported environment variables; it does not load `.env.example`.
+
+"""
+    if "cmd/migrate/main.go" in result:
+        if config["database_layer"] == "sqlite":
+            readme += "## SQLite database\n\n"
+            readme += (
+                "Use the existing SQLite destination reviewed in Plan:\n\n"
+                "```bash\nexport DATABASE_URL='file:/path/to/destination.sqlite3'\n```\n\n"
+                if config["schema_mode"] == "adopt-existing"
+                else "Create a separate local database for the generated app:\n\n"
+                '```bash\nmkdir -p data\nexport DATABASE_URL="file:$PWD/data/app.sqlite3"\n```\n\n'
+            )
+        else:
+            readme += """## PostgreSQL database
+
+Set `DATABASE_URL` to your destination PostgreSQL database. Replace the example
+with your own connection details:
+
+```bash
+export DATABASE_URL='postgresql://USER:PASSWORD@localhost:5432/DATABASE'
+```
+
+"""
+        readme += (
+            "The Plan uses `adopt-existing`: migrations validate the destination's existing\n"
+            "schema rather than creating application tables. Use the reviewed destination.\n\n"
+            if config["schema_mode"] == "adopt-existing"
+            else "The Plan uses an empty destination schema. Migrations create the captured\n"
+            "tables; they do not copy rows from the source database.\n\n"
+        )
+        readme += """Apply the generated schema migrations before starting the API:
+
+```bash
+go run ./cmd/migrate up
+```
+
+"""
+    if any(line.startswith("AUTH_") for line in result[".env.example"].splitlines()):
+        readme += "Set and export the authentication variables listed in `.env.example` before running the API.\n\n"
+    readme += """## Run the API
+
+```bash
+PORT=18080 go run ./cmd/api
+```
+
+The API listens on `http://localhost:18080`. Choose another free port if needed;
+without `PORT` it uses 8080. Send requests to the selected paths in `contract.json`.
+Press Ctrl+C to stop the server.
+
+## Test and verify
+
+```bash
+go test ./...
+go vet ./...
+go build ./cmd/api
+```
+
+These native checks do not compare the original Python app with this backend.
+From your source project directory, run `sanka test .` and `sanka verify .` using
+the same artifact directory and extension environment options as your migration.
+Review their reports for mismatches and endpoints that were not exercised.
+"""
+    result["README.md"] = readme
+    return result
+
+
+def _render(captured: dict[str, Any]) -> dict[str, str]:
     if captured["gaps"]:
         raise ValueError("resolve source capture gaps before generation")
     if captured.get("drf_project"):
