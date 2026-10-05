@@ -10,6 +10,7 @@ import sqlite3
 import subprocess
 import sys
 import uuid
+from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -26,13 +27,27 @@ from test_golang_writes import fastapi_write_source, flask_write_source
 from test_python_to_golang import request
 
 
-def test_sqlite_plan_uses_captured_django_database(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("selection", "destination"), [(1, "sqlite"), (2, "pgx"), (3, "sqlite")])
+def test_sqlite_plan_uses_captured_django_database(
+    tmp_path: Path, selection: int, destination: str
+) -> None:
     config = gadget_project(tmp_path)
-    config["database_layer"] = "sqlite"
+    declaration = json.loads(
+        resources.files("sanka_extension_python_to_golang")
+        .joinpath("sanka-extension-settings.json")
+        .read_text("utf-8")
+    )
+    database = next(
+        setting for setting in declaration["settings"] if setting["id"] == "database_layer"
+    )
+    config["database_layer"] = database["choices"][selection - 1]["value"]
     config.pop("database_dialect")
     planned = handle(dataclasses.replace(request(tmp_path, "drf", "chi"), configuration=config))
     assert planned.outcome == "success", planned.error
-    assert planned.data["capture"]["configuration"]["database_dialect"] == "sqlite"
+    assert planned.data["capture"]["configuration"]["database_dialect"] == (
+        "postgresql" if destination == "pgx" else "sqlite"
+    )
+    assert planned.data["capture"]["configuration"]["database_layer"] == destination
     assert planned.data["capture"]["gaps"] == []
 
 

@@ -60,7 +60,8 @@ and endpoints. The destination defaults to the detected source database. Choose
 `database_layer: "sqlite"` or `"pgx"` in CLI configuration or the optional TUI
 Plan form; source overrides stay in Advanced configuration. Scan reports source
 facts independently of that destination choice. A stateless application defaults
-to `database_layer: "none"`.
+to `database_layer: "none"`. No-database conversion is not a menu choice;
+explicit and saved `database_layer: "none"` configurations remain supported.
 
 Ambiguous entrypoints or model modules require an explicit override. A dynamic
 SQLAlchemy connection requires its referenced environment variable via
