@@ -39,6 +39,10 @@ sanka extension list
 
 Commands use the CLI by default. Add `--tui` or run `sanka tui` for the optional
 interactive interface. Both use the same Plan configuration and endpoint scope.
+Updated CLI planning choices use language-qualified targets such as
+`python-fastapi`, `python-flask` and `go-chi` (also `go-fiber`, `go-gin`, `go-mux`).
+Short names remain compatible; extension package IDs and published manifest
+identities stay unchanged. See [naming compatibility](docs/naming-compatibility.md).
 Python-to-Go Scan discovers the source framework, entrypoint, models and database.
 Plan selects the Go router, destination database and endpoints; the destination
 defaults to the detected source database. Ambiguous source inputs require a choice.
