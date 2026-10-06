@@ -1,5 +1,16 @@
 # Releasing Sanka extension packages
 
+## Current release: API a17
+
+`api-converters-v0.1.0a17` publishes Python-to-Go `0.1.0a17`. Apply writes a
+reviewed README with commands for the chosen router and database. Plan exposes
+auto, PostgreSQL and SQLite destination choices; stateless and explicit `none`
+configurations remain supported. CLI 0.3.9 uses this verified catalog at
+`191bdaf9a92f567e74ac0af0b253b99e99158a4c`. Both public releases are complete.
+
+Follow [the API release procedure](api-converter-release.md) for future versions.
+Older release records below retain their original versions and qualification pins.
+
 ## Qualified framework names: API a16
 
 `api-converters-v0.1.0a16` publishes Python-to-Go `0.1.0a16`. Known qualified

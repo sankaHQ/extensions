@@ -4,22 +4,25 @@ Apache-2.0 interfaces for building Sanka Extensions with Python 3.12+.
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) before
 running these macOS/Linux shell commands.
 
-From the repository root, build the a8 SDK candidate and install it separately
-from the CLI:
+Install the published SDK `0.1.0a8` separately from the CLI:
 
 ```bash
-uv build --wheel --package sanka-extension-sdk --out-dir dist/sdk
 uv venv --python 3.12 .venv
 source .venv/bin/activate
 uv pip install \
-  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a7/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
-  dist/sdk/sanka_extension_sdk-0.1.0a8-py3-none-any.whl
+  'https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a8/sanka_connector_sdk-0.1.0a12-py3-none-any.whl#sha256=34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e' \
+  'https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a8/sanka_extension_sdk-0.1.0a8-py3-none-any.whl#sha256=faa18386a9376e7477f6465f56de106111071c84c4f6e5d65dd273b988cf3377'
 ```
 
-The a8 wheel is a local candidate; the a12 compatibility dependency is published.
-Use a Python 3.12+ virtual environment for extension development; do not install
-the SDK into the CLI tool environment. CLI `0.2.12` is a verified consumer of
-this SDK. SDK availability does not imply native Flow execution.
+Both wheels are published in `sdk-v0.1.0a8`; the URL fragments verify their
+SHA-256 digests. Use a Python 3.12+ virtual environment for extension development;
+do not replace the SDK embedded in the CLI tool environment. Standalone and
+embedded SDK versions have separate compatibility requirements. SDK availability
+does not imply native Flow execution.
+
+For local SDK development, build this checkout with
+`uv build --wheel --package sanka-extension-sdk --out-dir dist/sdk`, then install
+the resulting wheel in your development environment.
 
 ```python
 from sanka_extensions.app import ExtensionRegistration, DataReader, DataWriter

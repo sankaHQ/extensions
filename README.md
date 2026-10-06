@@ -19,7 +19,7 @@ sources and destinations those capabilities read from and write to.
 | --- | --- |
 | `sanka/drf-to-fastapi` | Converts a Django REST Framework app to native async FastAPI ([guide](https://sanka.com/docs/developers/migrate/django-to-fastapi/)) |
 | `sanka/drf-to-flask` | Converts a Django REST Framework app to Flask ([guide](https://sanka.com/docs/developers/migrate/django-to-flask/)) |
-| `sanka/python-to-golang` | Converts supported DRF, FastAPI and Flask APIs to Go, including SQLite and PostgreSQL ([guide](https://sanka.com/docs/developers/migrate/python-to-golang/)) |
+| `sanka/python-to-golang` | Converts supported DRF, FastAPI and Flask APIs to Go, including SQLite and PostgreSQL ([guide](https://sanka.com/docs/developers/migrate/python-to-go/)) |
 
 The generated [catalog](docs/catalog.md) is the authoritative list, with roles
 and versions checked against `marketplace.json` and each manifest. Experimental
@@ -27,12 +27,15 @@ converters also appear in the official catalog. Go and Rust use the scoped
 [API converter release](docs/api-converter-release.md), and
 `sanka/react-native-to-native`
 ([`mobile-converters-v0.1.0a1`](docs/mobile-converter-release.md)); each package
-README describes its supported scenarios and how to pin an older release.
+README describes its supported scenarios and historical release pins. Package
+READMEs also form immutable wheel metadata; use this guide for current installation.
 
 ## Install
 
 ```bash
-uv tool install --python 3.12 sanka-cli      # the CLI, if you do not have it yet
+uv tool install --upgrade --python 3.12 'sanka-cli==0.3.9'
+sanka extension marketplace list
+sanka extension marketplace upgrade official
 sanka extension add sanka/drf-to-fastapi     # this marketplace is preconfigured and trusted
 sanka extension list
 ```
@@ -85,17 +88,15 @@ sanka extension marketplace add PATH_OR_GIT_URL --name third-party --trust
 
 ## Build your own
 
-The `sanka_extensions.app` interface is in the a8 SDK candidate in this
-checkout. Build it into a Python 3.12 virtual environment while its release is
-pending:
+The published SDK `0.1.0a8` provides `sanka_extensions.app`. Install it in a
+separate Python 3.12 environment for extension development:
 
 ```bash
-uv build --wheel --package sanka-extension-sdk --out-dir dist/sdk
 uv venv --python 3.12 .venv
 source .venv/bin/activate
 uv pip install \
-  https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a7/sanka_connector_sdk-0.1.0a12-py3-none-any.whl \
-  dist/sdk/sanka_extension_sdk-0.1.0a8-py3-none-any.whl
+  'https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a8/sanka_connector_sdk-0.1.0a12-py3-none-any.whl#sha256=34da5c35aaa60fc19258e76b72a3eca58bf52fff96e2ccf9a0aa1115f8878d8e' \
+  'https://github.com/sankaHQ/extensions/releases/download/sdk-v0.1.0a8/sanka_extension_sdk-0.1.0a8-py3-none-any.whl#sha256=faa18386a9376e7477f6465f56de106111071c84c4f6e5d65dd273b988cf3377'
 ```
 
 | Interface | Use it for |
