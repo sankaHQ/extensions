@@ -48,6 +48,8 @@ Plan selects the Go router, destination database and endpoints; the destination
 defaults to the detected source database. Ambiguous source inputs require a choice.
 The Go SQLite example needs no container; PostgreSQL examples need a disposable
 database. See the [Go package README](packages/sanka-extension-python-to-golang/README.md).
+Apply writes a reviewed `README.md` into the generated Go project, with database
+migration, API startup and native test commands for its selected router.
 Go Test and Verify report fixture setup, native Go tests and each captured HTTP
 scenario's outcome. Verify compares source and Go responses, rows and sequences
 where captured; it does not certify behaviors outside those scenarios. The

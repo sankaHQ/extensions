@@ -26,7 +26,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a16
+          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a17
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
@@ -144,7 +144,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "Python-to-Go converter 0.1.0a16" \
-            --notes "Experimental Python-to-Go 0.1.0a16 accepts language-qualified Python sources and Go router identifiers while preserving short aliases and reviewed Plan hashes. Compatible CLI releases show safe stage progress and saved report paths. Scan detects the source framework, entrypoint, models and database; Plan selects the router, database and endpoints. Retains bounded SQLite-to-SQLite, SQLite-to-PostgreSQL and PostgreSQL-to-PostgreSQL migration paths. Qualified through the installed public CLI and all four native Go routers. Includes the unchanged Rust 0.1.0a3 converter and helper wheels. No arbitrary-application or production-cutover claim."
+            --title "Python-to-Go converter 0.1.0a17" \
+            --notes "Experimental Python-to-Go 0.1.0a17 includes a generated README with migration, API startup and native-check commands in the reviewed Plan. Destination database prompts offer auto, PostgreSQL and SQLite; explicit saved no-database configurations remain supported. Retains language-qualified identifiers and short aliases. Compatible CLI releases show safe stage progress and saved report paths. Scan detects the source framework, entrypoint, models and database; Plan selects the router, database and endpoints. Retains bounded SQLite-to-SQLite, SQLite-to-PostgreSQL and PostgreSQL-to-PostgreSQL migration paths. Qualified through the installed public CLI and all four native Go routers. Includes the unchanged Rust 0.1.0a3 converter and helper wheels. No arbitrary-application or production-cutover claim."
         env:
           GH_TOKEN: ${{ github.token }}
