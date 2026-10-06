@@ -31,16 +31,20 @@ settings may be `optional` with a `null` default. `advanced` places a setting un
 Advanced. `when` shows a setting only while other settings hold the given values.
 An updated CLI also accepts a nonempty list of scalar alternatives, such as
 `"when": {"database_layer": ["pgx", "sqlite"]}`. Consumers must use membership
-for these lists; nested objects/arrays are invalid. This addition is unreleased.
+for these lists; nested objects/arrays are invalid. CLI 0.3.9 supports these lists.
 
 The file declares what the extension accepts, not hosting policy. Sanka Code decides
 separately which settings are editable, fixed or hidden in the cloud.
 `tests/test_extension_settings.py` validates every shipped file.
 
-Python-to-Go a11 declares its source framework, source entrypoint and
-optional PostgreSQL conversion settings. Schema mode and models file appear only
-when PostgreSQL is selected. Output remains inside the artifact directory; select
-the Go router with CLI `--to go-fiber` (or `go-chi`, `go-mux`, `go-gin`) or the optional TUI target list. There
-is no generation-layout setting. Changing these values requires a new reviewed
-plan. CLI versions that support settings declarations read it from the installed wheel.
-Public CLI 0.3.3 keeps its built-in form; it does not read this declaration.
+Python-to-Go `0.1.0a17` detects the source framework, entrypoint, models and
+source database during Scan. Plan offers three destination choices: same as
+source, PostgreSQL (`pgx`), or SQLite (`sqlite`). Stateless sources still resolve
+to `none`; explicit or saved `none` configurations remain supported, but it is
+not a menu choice. Source overrides are in Advanced configuration. Schema mode
+appears for PostgreSQL; models-file overrides apply to auto, PostgreSQL and SQLite.
+
+Select the Go router with `sanka plan .` or explicit `--to go-chi`, `go-fiber`,
+`go-mux` or `go-gin`. CLI 0.3.9 and its optional TUI read the same installed
+settings declaration. Changing settings requires a new reviewed Plan. Output
+remains inside the artifact directory; there is no generation-layout setting.

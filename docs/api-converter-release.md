@@ -1,6 +1,10 @@
-# Qualified framework identifier release
+# API converter release
 
-The a16 API bundle publishes qualified framework identifiers for Python-to-Go 0.1.0a16.
+The current `api-converters-v0.1.0a17` bundle publishes Python-to-Go `0.1.0a17`.
+Apply includes a README for the selected router and database, with schema
+migration, startup and native test commands. CLI 0.3.9 reads the Plan settings,
+uses CLI output by default and automatically forwards an exported
+`SANKA_GO_SOURCE_PYTHON`.
 Known `python-*` sources and `go-*` router choices normalize to retained wire
 values before validation and hashing; short aliases remain valid.
 Test records actual Go test counts and scenario results. Verify records per-scenario
@@ -51,9 +55,10 @@ Review its wheel digest before committing. CI only validates checked-in bytes.
 
 ## Publication gate
 
-After this change lands, tag its
-reviewed merge commit `api-converters-v0.1.0a16` and dispatch
-`api-release.yml` on that tag. The dispatch job requires the tag to be on
+The a17 tag and assets are already published. For a future release, create only
+its absent immutable version tag on the reviewed merge commit and dispatch
+`api-release.yml` once on that tag. Never retag or overwrite published assets.
+The dispatch job requires the tag to be on
 `main` and installs published CLI 0.3.6 for both pinned example qualifications
 before GitHub publishes any assets. Do not publish from a pull-request build.
 
@@ -68,6 +73,8 @@ uv run python scripts/build_api_release.py --check-only \
 
 Then run `scripts/qualify_api_release.py` with `--published-revision` pinned to
 the full release commit for both `go` and `rust`. Public readback must pass
-before describing the release as consumer-verified. The CLI marketplace's
-default revision remains unchanged. Passing these fixtures does not qualify
+before describing the release as consumer-verified. CLI 0.3.9 pins the verified a17 merge
+`191bdaf9a92f567e74ac0af0b253b99e99158a4c` as its official catalog. Catalog
+refreshes preserve existing project locks; explicit extension installation adopts
+the new wheel. Passing these fixtures does not qualify
 arbitrary applications or a production data cutover.
