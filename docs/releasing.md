@@ -1,5 +1,17 @@
 # Releasing Sanka extension packages
 
+## Readiness fix release 0.1.0a18
+
+Prepare the absent immutable `api-converters-v0.1.0a18` tag after this change
+lands and exact-head CI passes. The Go extension now distinguishes unsupported
+capture and missing DRF replay prerequisites from execution failures. Existing
+source support, plan guards and verification requirements remain unchanged.
+Other wheel versions and bytes are retained. Build reviewed manifests with
+`scripts/build_api_release.py --write-manifests`, run the maintained qualification
+workflow on the merged tag, then verify downloaded assets and public acceptance
+before advancing the CLI catalog pin. No benchmark-score improvement is claimed.
+
+
 ## Current release: API a17
 
 `api-converters-v0.1.0a17` publishes Python-to-Go `0.1.0a17`. Apply writes a
