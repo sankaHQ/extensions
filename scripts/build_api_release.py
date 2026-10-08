@@ -30,12 +30,14 @@ PACKAGES = (
     "sanka-ts-capture",
     "sanka-http-replay",
     "sanka-code-migration",
+    "sanka-drf-replay",
 )
 VERSIONS = dict.fromkeys(PACKAGES, "0.1.0a2")
 VERSIONS[PACKAGES[0]] = VERSION
 VERSIONS[PACKAGES[1]] = "0.1.0a3"
 VERSIONS["sanka-code-migration"] = "0.1.0a4"
 VERSIONS["sanka-ts-capture"] = "0.1.0a1"
+VERSIONS["sanka-drf-replay"] = "0.1.0a6"
 SDK = tuple(
     w
     for w in PINNED_LOCAL_WHEELS
@@ -46,6 +48,7 @@ DEPENDENCIES = {
         "sanka-extension-sdk==0.1.0a4",
         "sanka-http-replay==0.1.0a2",
         "sanka-code-migration==0.1.0a4",
+        "sanka-drf-replay==0.1.0a6",
     ],
     PACKAGES[1]: [
         "sanka-extension-sdk==0.1.0a4",
@@ -56,6 +59,7 @@ DEPENDENCIES = {
     PACKAGES[2]: [],
     PACKAGES[3]: [],
     PACKAGES[4]: [],
+    PACKAGES[5]: [],
 }
 TS_DIGEST = "3ae902c92cc44dace175c0e69e13a4b0899f6983c6121d76b9ab8dd5795e7675"
 CATALOG = {
@@ -76,10 +80,12 @@ def wheel_name(package: str) -> str:
     return f"{package.replace('-', '_')}-{VERSIONS[package]}-py3-none-any.whl"
 
 
-def closure(package: str) -> list[str]:
+def closure(package: str, *, candidate: bool = False) -> list[str]:
     own = (
-        [package, *PACKAGES[2:]] if package == PACKAGES[1] else [package, PACKAGES[3], PACKAGES[4]]
+        [package, *PACKAGES[2:5]] if package == PACKAGES[1] else [package, PACKAGES[3], PACKAGES[4]]
     )
+    if candidate and package == PACKAGES[0]:
+        own.append("sanka-drf-replay")
     return [*(wheel_name(p) for p in own), *(w.name for w in SDK)]
 
 
@@ -89,10 +95,21 @@ def manifest(package: str, root: Path = ROOT, *, candidate: Path | None = None) 
     template = json.loads((directory / "extension.template.json").read_text())
     if result | {"wheels": []} != template:
         raise ValueError(f"{package}: manifest contract differs from template")
-    entries = result.get("wheels", [])
-    if [w.get("name") for w in entries] != closure(package):
-        raise ValueError(f"{package}: incomplete wheel closure")
     sdk_hashes = {w.name: w.sha256 for w in SDK}
+    if candidate is not None:
+        # Candidate qualification must not rewrite published manifest hashes.
+        prefix = PREFIX if package == PACKAGES[0] else RUST_PREFIX
+        result["wheels"] = [
+            {
+                "name": name,
+                "url": prefix + name,
+                "sha256": sdk_hashes[name] if name in sdk_hashes else digest(candidate / name),
+            }
+            for name in closure(package, candidate=True)
+        ]
+    entries = result.get("wheels", [])
+    if [w.get("name") for w in entries] != closure(package, candidate=candidate is not None):
+        raise ValueError(f"{package}: incomplete wheel closure")
     prefix = PREFIX if package == PACKAGES[0] else RUST_PREFIX
     for wheel in entries:
         sha = wheel.get("sha256", "")
@@ -110,7 +127,9 @@ def manifest(package: str, root: Path = ROOT, *, candidate: Path | None = None) 
 
 
 def validate(output: Path, root: Path = ROOT, *, candidate: bool = False) -> None:
-    manifests = {p: manifest(p, root) for p in PACKAGES[:2]}
+    manifests = {
+        p: manifest(p, root, candidate=output if candidate else None) for p in PACKAGES[:2]
+    }
     names = {wheel_name(p) for p in PACKAGES} | {w.name for w in SDK}
     assets = names | {f"{p}.json" for p in manifests} | {"marketplace.json"}
     if {p.name for p in output.iterdir()} != assets:
@@ -120,8 +139,6 @@ def validate(output: Path, root: Path = ROOT, *, candidate: bool = False) -> Non
     if json.loads((output / "marketplace.json").read_text()) != CATALOG:
         raise ValueError("Scoped release catalog changed")
     for package, data in manifests.items():
-        if candidate:
-            data = manifest(package, root, candidate=output)
         if json.loads((output / f"{package}.json").read_text()) != data:
             raise ValueError("Release manifest differs from reviewed source")
         for wheel in data["wheels"]:
@@ -190,7 +207,7 @@ def build(output: Path, *, write_manifests: bool = False, candidate: bool = Fals
                 package,
                 *(
                     ["--build-constraint", str(ROOT / "scripts/api-build-constraints.txt")]
-                    if package != "sanka-code-migration"
+                    if package not in {"sanka-code-migration", "sanka-drf-replay"}
                     else []
                 ),
                 "--out-dir",
@@ -209,7 +226,7 @@ def build(output: Path, *, write_manifests: bool = False, candidate: bool = Fals
             data = json.loads((directory / "extension.template.json").read_text())
             data["wheels"] = [
                 {"name": n, "url": PREFIX + n, "sha256": digest(output / n)}
-                for n in closure(package)
+                for n in closure(package, candidate=True)
             ]
             (directory / "extension.json").write_text(json.dumps(data, indent=2) + "\n")
         (output / f"{package}.json").write_text(
@@ -232,7 +249,7 @@ def main() -> None:
     else:
         build(args.output_dir, write_manifests=args.write_manifests, candidate=args.candidate)
     label = "candidate for " if args.candidate else ""
-    print(f"Validated {label}{TAG}: seven wheels, two manifests and scoped catalog")
+    print(f"Validated {label}{TAG}: eight wheels, two manifests and scoped catalog")
 
 
 if __name__ == "__main__":
