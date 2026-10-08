@@ -26,7 +26,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a18
+          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a19
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
@@ -144,7 +144,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "Python-to-Go converter 0.1.0a18" \
-            --notes "Experimental Python-to-Go 0.1.0a18 reports unsupported capture gaps as readiness failures and missing DRF replay files as explicit prerequisites. Preserves unsupported-behavior rejection, saved-plan binding and stale-report removal. Retains the existing capture and generation scope; no new authentication, nested-write or custom-service support. Includes unchanged Rust 0.1.0a3 and helper wheels. No arbitrary-application, benchmark-score or production-cutover claim."
+            --title "Python-to-Go converter 0.1.0a19" \
+            --notes "Python-to-Go 0.1.0a19 verifies edited Go candidates against isolated public Django/SQLite scenarios through shared replay 0.1.0a6. Compares responses, headers, database state and media, binds reports to candidate contents, and classifies infrastructure failures separately. Capture support and generation safeguards remain unchanged. Includes unchanged Rust 0.1.0a3 and published SDK wheels. Public replay is not full native compliance or proof of improved benchmark scores."
         env:
           GH_TOKEN: ${{ github.token }}
