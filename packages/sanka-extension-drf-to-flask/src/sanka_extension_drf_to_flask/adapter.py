@@ -1187,7 +1187,12 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             ],
         )
     except ReplayError as error:
-        return failure_response(request, code="SANKA_EXTENSION_REPLAY_INVALID", message=str(error))
+        return failure_response(
+            request,
+            code="SANKA_EXTENSION_REPLAY_INVALID",
+            message=str(error),
+            details={"failure_category": error.category},
+        )
     except ModuleNotFoundError as error:
         return failure_response(
             request,
