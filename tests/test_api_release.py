@@ -77,9 +77,17 @@ def test_candidate_hashes_preserve_source_contracts_and_published_sdk_pins(
         reviewed = manifest(package, snapshot)
         candidate = manifest(package, snapshot, candidate=bundle)
         assert candidate | {"wheels": []} == reviewed | {"wheels": []}
-        for original, wheel in zip(reviewed["wheels"], candidate["wheels"], strict=True):
+        candidate_wheels = {wheel["name"]: wheel for wheel in candidate["wheels"]}
+        if package == PACKAGES[0]:
+            replay = candidate_wheels.pop(wheel_name("sanka-drf-replay"))
+            assert replay["sha256"] == expected
+        assert set(candidate_wheels) == {wheel["name"] for wheel in reviewed["wheels"]}
+        for original in reviewed["wheels"]:
+            wheel = candidate_wheels[original["name"]]
             assert wheel["sha256"] == (
                 original["sha256"] if wheel["name"] in sdk_names else expected
             )
             assert wheel | {"sha256": ""} == original | {"sha256": ""}
         assert path.read_bytes() == before
+        path.write_text(json.dumps(candidate))
+        assert manifest(package, snapshot) == candidate

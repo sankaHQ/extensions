@@ -44,6 +44,10 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
         if request.command in {"test", "verify"}:
             # Never leave a previous passing report after a failed rerun.
             _safe(root, artifacts / f"{request.command}.json").unlink(missing_ok=True)
+        if request.command == "verify" and request.configuration.get("scenarios") is not None:
+            from .candidate_replay import handle_replay
+
+            return handle_replay(request)
         values = {k: v for k, v in request.configuration.items() if k != "selected_endpoints"}
         values = discover(root, values)
         config = configuration(values)

@@ -83,6 +83,7 @@ explicit_package_bases = true
 exclude = ["packages/.*/tests/"]
 
 [tool.pytest.ini_options]
+markers = ["slow: isolated runtime integration requiring subprocesses"]
 addopts = "-q"
 asyncio_mode = "auto"
 testpaths = ["packages", "tests"]

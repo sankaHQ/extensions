@@ -131,6 +131,13 @@ def test_candidate_hashes_do_not_change_publication_or_dependency_validation(
             artifact.write_bytes(b"changed source candidate")
     assert _catalog_errors(snapshot, bundle)
     assert not _catalog_errors(snapshot, bundle, candidate=True)
+    replay = next(bundle.glob("sanka_drf_replay-*.whl"))
+    project = snapshot / "packages" / "sanka-drf-replay" / "pyproject.toml"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('[project]\nname = "sanka-drf-replay"\nversion = "9.9.9"\n')
+    replay.rename(bundle / "sanka_drf_replay-9.9.9-py3-none-any.whl")
+    assert not _catalog_errors(snapshot, bundle, candidate=True)
+    assert _catalog_errors(snapshot, bundle)
     sdk = next(bundle.glob("sanka_extension_sdk-*.whl"))
     sdk.write_bytes(b"changed published dependency")
     assert _catalog_errors(snapshot, bundle, candidate=True)

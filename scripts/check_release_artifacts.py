@@ -149,6 +149,17 @@ def _project_versions(root: Path) -> dict[str, str]:
     }
 
 
+def _candidate_wheel_names(root: Path) -> dict[str, str]:
+    versions = _project_versions(root)
+    return {
+        wheel: f"{distribution}-{versions[package]}-py3-none-any.whl"
+        for wheel in CANDIDATE_WHEELS
+        for distribution in [wheel.split("-", 1)[0]]
+        for package in [distribution.replace("_", "-")]
+        if package in versions
+    }
+
+
 def _hash(path: Path) -> str:
     with path.open("rb") as handle:
         return hashlib.file_digest(handle, "sha256").hexdigest()
@@ -169,6 +180,7 @@ def _catalog_errors(root: Path, release: Path, *, candidate: bool = False) -> li
     if catalog != CATALOG:
         return ["marketplace.json does not match the official sanka-marketplace/v1 catalog"]
     errors: list[str] = []
+    candidate_names = _candidate_wheel_names(root) if candidate else {}
     # Jev publishes its wheels under a separate immutable tag. Validate its
     # catalog contract here; the dedicated release gate validates those bytes.
     from scripts.build_jev_release import manifest as jev_manifest
@@ -236,7 +248,7 @@ def _catalog_errors(root: Path, release: Path, *, candidate: bool = False) -> li
                 package not in UPDATED_MANIFESTS and not preserved_url
             ):
                 errors.append(f"{package} manifest has a non-immutable GitHub URL: {name}")
-            artifact = release / str(name)
+            artifact = release / candidate_names.get(str(name), str(name))
             if not artifact.is_file():
                 errors.append(f"{package} manifest wheel is absent from the release: {name}")
             elif not (candidate and name in CANDIDATE_WHEELS) and digest != _hash(artifact):
@@ -250,7 +262,8 @@ def validate_release(
     if not release.is_dir():
         return [f"release directory is missing: {release}"]
     versions = _project_versions(root)
-    expected_names = set(MARKETPLACE_WHEELS)
+    candidate_names = _candidate_wheel_names(root) if candidate else {}
+    expected_names = {candidate_names.get(name, name) for name in MARKETPLACE_WHEELS}
     wheels = {path.name: path for path in release.glob("*.whl")}
     errors: list[str] = []
     if set(wheels) != expected_names:
@@ -293,7 +306,7 @@ def validate_release(
                 errors.append(f"{name} wheel is missing required package data: {sorted(missing)}")
             if sorted(requirements) != [
                 "sanka-code-migration==0.1.0a4",
-                "sanka-drf-replay==0.1.0a5",
+                "sanka-drf-replay==" + (versions["sanka-drf-replay"] if candidate else "0.1.0a5"),
                 "sanka-extension-sdk==0.1.0a4",
             ]:
                 errors.append(f"{name} does not have the exact migration dependency closure")

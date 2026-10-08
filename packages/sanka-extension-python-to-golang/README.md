@@ -1413,3 +1413,52 @@ source, test and verify
 return `SANKA_EXTENSION_INPUT_REQUIRED` with `details.files`, without executing
 replay or retaining an earlier passing report. Adding the file changes the source
 inventory: review a new plan and preserve any manual destination edits.
+
+## Verify an edited Go candidate
+
+The candidate replay path compares a Django source with an independently edited
+Go HTTP server. It does not require successful generation or an applied plan:
+
+```sh
+sanka verify . --to fiber --scenarios public-tests/scenarios.json \
+  --candidate . --entrypoint cmd/api/main.go --db-env BENCH_DB_PATH \
+  --seed seed.py --extension-env SANKA_GO_SOURCE_PYTHON
+```
+
+Set `SANKA_GO_SOURCE_PYTHON` to the source environment's Python executable, with
+Django and the source dependencies installed. Go and all module dependencies must
+already be available locally: build uses readonly modules and disables downloads.
+The entrypoint is a Go file in the executable package; the whole package is built.
+The server must honor `PORT`, and `DATABASE_URL` receives an isolated SQLite file
+URI. `--extension-config '{"candidate_db_env":"BENCH_DB_PATH"}'` selects a different
+variable receiving the database path.
+
+Each scenario gets independent source/target copies of the Django-migrated,
+optionally seeded database. Setup requests retain cookies. Status, body, declared
+headers, database state and media side effects use the shared differential replay
+rules. This path does not create or adopt a production database, nor does it add
+`migration_identity` to the source schema. A candidate requiring a different schema
+must implement its own compatible application startup; a mismatch remains a failure.
+
+Candidate files and assets are copied and hashed; hidden paths, vendor, node_modules
+and Python caches are excluded. The source tree and historical candidate are not
+rewritten. An edited candidate must be verified again: the report identifies the
+bytes copied for the build, and a failed verification removes the current success
+record. Historical detailed reports remain separate.
+
+Generation readiness safeguards remain unchanged. Replay executes supplied source
+and candidate code locally and is not a hostile-code sandbox. Go process replay currently requires a POSIX host and caps each scenario at 300
+seconds and each response at 8 MiB. Matching public scenarios proves only those scenarios; compiled Go does not establish the benchmark's
+full native-compliance grade or cutover readiness. Infrastructure/build/input errors
+are distinct from response/database mismatches. SQLite is the supported fixture
+backend for this new Go candidate path.
+
+Offline integration check (cached Go dependencies required):
+
+```sh
+SANKA_GO_REPLAY_TESTS=1 uv run python -m pytest \
+  packages/sanka-extension-python-to-golang/tests/test_go_candidate_replay.py
+```
+
+Release order: publish `sanka-drf-replay` 0.1.0a6 before publishing extension
+wheels that depend on it. These source changes do not publish a release.

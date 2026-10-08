@@ -132,6 +132,7 @@ def main() -> int:
                 "sanka_code_migration",
             )
             if project.get("dependencies") != [
+                "sanka-drf-replay==0.1.0a6",
                 "sanka-code-migration==0.1.0a4",
                 "sanka-extension-sdk==0.1.0a4",
                 "sanka-http-replay==0.1.0a2",
@@ -183,7 +184,7 @@ def main() -> int:
             expected_dependency = f"{EXTENSION_SDK_NAME}=={extension_version}"
             if project.get("dependencies") != [
                 expected_dependency,
-                "sanka-drf-replay==0.1.0a5",
+                "sanka-drf-replay==0.1.0a6",
                 "sanka-code-migration==0.1.0a4",
             ]:
                 errors.append(f"{package.name} must depend exactly on {expected_dependency}")
