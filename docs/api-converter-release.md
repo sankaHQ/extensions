@@ -1,5 +1,21 @@
 # API converter release
 
+## Edited Go candidate replay release 0.1.0a19
+
+Publish the absent immutable `api-converters-v0.1.0a19` from the reviewed merge.
+It contains Go extension a19 and shared replay a6 in one complete wheel bundle.
+Edited Go candidates can be compiled offline and compared with isolated Django
+SQLite scenarios, including response headers, state and media. Current reports
+bind to candidate contents; dependency/transport failures remain separate from
+candidate failures. Capture support and generation safeguards are unchanged.
+
+Require maintained checks, installed-wheel replay fixtures, release qualification
+and downloaded artifact validation. Verify public installation before pinning
+this release in CLI 0.3.11. Existing locks and published releases are unchanged.
+Only the API bundle is published; FastAPI/Flask marketplace releases remain pinned.
+New verification feedback changes agent assistance and needs a separate benchmark
+cohort; no score improvement is claimed.
+
 ## Readiness fix release 0.1.0a18
 
 Prepare the absent immutable `api-converters-v0.1.0a18` tag after this change

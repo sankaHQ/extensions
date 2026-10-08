@@ -79,7 +79,7 @@ def test_candidate_hashes_preserve_source_contracts_and_published_sdk_pins(
         assert candidate | {"wheels": []} == reviewed | {"wheels": []}
         candidate_wheels = {wheel["name"]: wheel for wheel in candidate["wheels"]}
         if package == PACKAGES[0]:
-            replay = candidate_wheels.pop(wheel_name("sanka-drf-replay"))
+            replay = candidate_wheels[wheel_name("sanka-drf-replay")]
             assert replay["sha256"] == expected
         assert set(candidate_wheels) == {wheel["name"] for wheel in reviewed["wheels"]}
         for original in reviewed["wheels"]:
