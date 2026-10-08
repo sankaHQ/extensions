@@ -1,5 +1,16 @@
 # API converter release
 
+## Seed repair release 0.1.0a20
+
+Publish only the absent immutable `api-converters-v0.1.0a20` tag after the
+release PR lands and exact-head checks pass. It bundles Go extension a20 and
+shared replay a7, including structured seed failures, SQLite replacement
+detection and bounded diagnostics. Genuine infrastructure failures remain fatal.
+FastAPI/Flask source dependency pins advance for workspace consistency; their
+marketplace releases remain unchanged. Existing project locks stay pinned until
+explicit installation. Qualify the public bundle before adopting it in a new
+benchmark cohort. This does not resolve provider stream interruptions.
+
 ## Edited Go candidate replay release 0.1.0a19
 
 Publish the absent immutable `api-converters-v0.1.0a19` from the reviewed merge.
