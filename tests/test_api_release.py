@@ -89,3 +89,5 @@ def test_candidate_hashes_preserve_source_contracts_and_published_sdk_pins(
             )
             assert wheel | {"sha256": ""} == original | {"sha256": ""}
         assert path.read_bytes() == before
+        path.write_text(json.dumps(candidate))
+        assert manifest(package, snapshot) == candidate

@@ -108,7 +108,11 @@ def manifest(package: str, root: Path = ROOT, *, candidate: Path | None = None) 
             for name in closure(package, candidate=True)
         ]
     entries = result.get("wheels", [])
-    if [w.get("name") for w in entries] != closure(package, candidate=candidate is not None):
+    # Catalog reads retain the published closure; new bundles require the expanded closure.
+    if [w.get("name") for w in entries] not in (
+        closure(package),
+        closure(package, candidate=True),
+    ):
         raise ValueError(f"{package}: incomplete wheel closure")
     prefix = PREFIX if package == PACKAGES[0] else RUST_PREFIX
     for wheel in entries:
@@ -139,6 +143,8 @@ def validate(output: Path, root: Path = ROOT, *, candidate: bool = False) -> Non
     if json.loads((output / "marketplace.json").read_text()) != CATALOG:
         raise ValueError("Scoped release catalog changed")
     for package, data in manifests.items():
+        if [wheel["name"] for wheel in data["wheels"]] != closure(package, candidate=True):
+            raise ValueError(f"{package}: release bundle lacks current dependencies")
         if json.loads((output / f"{package}.json").read_text()) != data:
             raise ValueError("Release manifest differs from reviewed source")
         for wheel in data["wheels"]:
