@@ -1399,3 +1399,17 @@ still return 406. API-only source projects may explicitly set
 `DEFAULT_RENDERER_CLASSES` to `["rest_framework.renderers.JSONRenderer"]`; other
 explicit renderer configurations remain unsupported. This avoids requiring Django
 browsable-API HTML templates and does not generate an HTML interface.
+
+### Lifecycle readiness errors
+
+A blocked capture remains inspectable through scan and plan. Apply, test and
+verify return `SANKA_EXTENSION_READINESS` with `details.gaps`; repeating them
+without resolving those support gaps cannot generate or verify the application.
+Unsupported behavior is never replaced with generated placeholders.
+
+DRF replay requires an explicit `sanka-verify.json` in the source root. Prepare
+its scenarios and required setup before planning. If absent from the reviewed
+source, test and verify
+return `SANKA_EXTENSION_INPUT_REQUIRED` with `details.files`, without executing
+replay or retaining an earlier passing report. Adding the file changes the source
+inventory: review a new plan and preserve any manual destination edits.
