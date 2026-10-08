@@ -66,7 +66,7 @@ def request(root: Path, framework: str = "flask", target: str = "fiber") -> Exte
         str(root),
         str(root / ".sanka" / "go"),
         "sanka/python-to-golang",
-        "0.1.0a17",
+        "0.1.0a18",
         "0" * 64,
         {},
         {"source_framework": framework, "target_framework": target},

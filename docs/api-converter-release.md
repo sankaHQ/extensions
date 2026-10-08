@@ -1,5 +1,17 @@
 # API converter release
 
+## Readiness fix release 0.1.0a18
+
+Prepare the absent immutable `api-converters-v0.1.0a18` tag after this change
+lands and exact-head CI passes. The Go extension now distinguishes unsupported
+capture and missing DRF replay prerequisites from execution failures. Existing
+source support, plan guards and verification requirements remain unchanged.
+Other wheel versions and bytes are retained. Build reviewed manifests with
+`scripts/build_api_release.py --write-manifests`, run the maintained qualification
+workflow on the merged tag, then verify downloaded assets and public acceptance
+before advancing the CLI catalog pin. No benchmark-score improvement is claimed.
+
+
 The current `api-converters-v0.1.0a17` bundle publishes Python-to-Go `0.1.0a17`.
 Apply includes a README for the selected router and database, with schema
 migration, startup and native test commands. CLI 0.3.9 reads the Plan settings,

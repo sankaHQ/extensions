@@ -71,6 +71,14 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             requested = request.configuration.get("selected_endpoints")
             check_selection(requested, scope)
             captured["routes"] = scoped_routes(captured["routes"], scope)
+            if request.command != "plan" and captured["gaps"]:
+                return failure_response(
+                    request,
+                    code="SANKA_EXTENSION_READINESS",
+                    message="Source behavior is not supported; inspect the capture gaps. "
+                    "Repeating this command without resolving them cannot generate or verify code.",
+                    details={"gaps": captured["gaps"], "generation_ready": False},
+                )
             generated = render(captured) if not captured["gaps"] else {}
             data = {
                 "schema": "sanka.python-to-golang.plan/v1",
@@ -86,6 +94,15 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                 saved = _safe(root, artifacts / name)
                 if not saved.is_file() or json.loads(saved.read_text()) != data:
                     raise ValueError("source or configuration differs from the applied plan")
+                if captured.get("drf_project") and not (root / "sanka-verify.json").exists():
+                    return failure_response(
+                        request,
+                        code="SANKA_EXTENSION_INPUT_REQUIRED",
+                        message="Create sanka-verify.json in the source root with explicit HTTP "
+                        "scenarios and any required setup, then review a new plan before "
+                        "test or verify. No replay was executed.",
+                        details={"files": ["sanka-verify.json"]},
+                    )
                 output = _safe(root, artifacts / "golang")
                 report = replay(root, output, captured, request.command)
                 report["environment"] = str(output)
@@ -146,8 +163,6 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
                     ],
                 )
             if request.command == "apply":
-                if captured["gaps"]:
-                    raise ValueError("capture has unsupported behavior; inspect plan gaps")
                 reviewed = request.configuration.get("extension_plan_hash")
                 if not request.reviewed_plan_hash or not reviewed or reviewed != plan_hash:
                     raise ValueError("extension_plan_hash must match the reviewed current plan")
