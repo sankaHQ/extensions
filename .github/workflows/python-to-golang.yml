@@ -83,10 +83,17 @@ jobs:
         if: matrix.target == 'fiber'
         working-directory: packages/sanka-extension-python-to-golang/src/sanka_extension_python_to_golang/locks/fiber-sqlite
         run: go mod download
+      - name: Verify edited Go candidates against isolated source fixtures
+        if: matrix.target == 'fiber'
+        env:
+          SANKA_GO_REPLAY_TESTS: "1"
+          GOTOOLCHAIN: local
+          GOWORK: "off"
+          GOMAXPROCS: "2"
+        run: uv run --no-sync python -m pytest packages/sanka-extension-python-to-golang/tests/test_go_candidate_replay.py -q
       - name: Compare all three Python sources with the ${{ matrix.target }} Go target
         env:
           SANKA_GO_TESTS: "1"
-          SANKA_GO_REPLAY_TESTS: ${{ matrix.target == 'fiber' && '1' || '0' }}
           SANKA_GO_TARGET_SHARD: ${{ matrix.target }}
           GOTOOLCHAIN: local
           GOWORK: "off"
