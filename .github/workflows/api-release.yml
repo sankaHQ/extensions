@@ -26,7 +26,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a20
+          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a21
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
@@ -144,7 +144,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "Python-to-Go converter 0.1.0a20" \
-            --notes "Python-to-Go 0.1.0a20 bundles shared replay 0.1.0a7: distinguishes seed-script failures and SQLite database replacement from infrastructure failures, preserves bounded SQLite diagnostics, and keeps PostgreSQL redaction. Seed scripts populate already-migrated tables. No task, grading, budget or provider retry policy changes; no claim of improved benchmark scores. Includes unchanged Rust 0.1.0a3 and published SDK wheels."
+            --title "Python-to-Go converter 0.1.0a21" \
+            --notes "Python-to-Go 0.1.0a21 bundles shared replay 0.1.0a8: local response timeouts after request send return repairable candidate feedback. Infrastructure safeguards, verification gates and numeric budgets are unchanged. Recovery behavior changes; preserve prior benchmark cohorts. No score improvement claimed. Includes unchanged Rust 0.1.0a3 and published SDK wheels."
         env:
           GH_TOKEN: ${{ github.token }}

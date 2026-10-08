@@ -20,7 +20,7 @@ if __package__ in {None, ""}:
 from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel  # noqa: E402
 from scripts.check_release_artifacts import _entry_points, _wheel_metadata  # noqa: E402
 
-VERSION = "0.1.0a20"
+VERSION = "0.1.0a21"
 TAG = f"api-converters-v{VERSION}"
 PREFIX = f"https://github.com/sankaHQ/extensions/releases/download/{TAG}/"
 RUST_PREFIX = PREFIX
@@ -37,7 +37,7 @@ VERSIONS[PACKAGES[0]] = VERSION
 VERSIONS[PACKAGES[1]] = "0.1.0a3"
 VERSIONS["sanka-code-migration"] = "0.1.0a4"
 VERSIONS["sanka-ts-capture"] = "0.1.0a1"
-VERSIONS["sanka-drf-replay"] = "0.1.0a7"
+VERSIONS["sanka-drf-replay"] = "0.1.0a8"
 SDK = tuple(
     w
     for w in PINNED_LOCAL_WHEELS
@@ -48,7 +48,7 @@ DEPENDENCIES = {
         "sanka-extension-sdk==0.1.0a4",
         "sanka-http-replay==0.1.0a2",
         "sanka-code-migration==0.1.0a4",
-        "sanka-drf-replay==0.1.0a7",
+        "sanka-drf-replay==0.1.0a8",
     ],
     PACKAGES[1]: [
         "sanka-extension-sdk==0.1.0a4",
