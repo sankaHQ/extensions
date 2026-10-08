@@ -98,7 +98,7 @@ def test_go_candidate_response_parity(
         str(tmp_path),
         str(artifacts),
         "sanka/python-to-golang",
-        "0.1.0a20",
+        "0.1.0a21",
         "0" * 64,
         {},
         {

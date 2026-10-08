@@ -1,5 +1,16 @@
 # API converter release
 
+## Candidate timeout recovery release 0.1.0a21
+
+Publish the absent immutable `api-converters-v0.1.0a21` tag from the reviewed
+release merge. Go a21 bundles replay a8. Response-header/body timeouts after
+local request send return candidate repair feedback; send/readiness failures,
+other transport errors and watchdog expiry retain infrastructure handling.
+No automatic retry, grading or numeric-limit change. This changes agent recovery
+and requires a separate benchmark cohort. Prior candidates remain unchanged.
+FastAPI/Flask workspace dependencies advance; their marketplace releases do not.
+Qualify downloaded public artifacts before benchmarking.
+
 ## Seed repair release 0.1.0a20
 
 Publish only the absent immutable `api-converters-v0.1.0a20` tag after the
