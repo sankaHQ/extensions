@@ -934,3 +934,57 @@ def test_contract_probes_are_bounded_and_do_not_invent_contracts() -> None:
     assert len(probes) == 12
     assert all(p["probe_kind"] == "credential-rejection" for p in probes)
     assert edge_probes_from_scan({"routes": [None], "serializer_details": [None]}, scenarios) == []
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "mode,category",
+    [
+        ("delete", "seed_failure"),
+        ("delete-write", "seed_failure"),
+        ("replace", "seed_failure"),
+        ("value", "seed_failure"),
+        ("operational", "infrastructure_failure"),
+        ("permission", "infrastructure_failure"),
+        ("startup", "infrastructure_failure"),
+    ],
+)
+def test_seed_failure_is_distinct_from_environment_failure(tmp_path, mode, category):
+    project = tmp_path / "source"
+    shutil.copytree(FIXTURES / "drf_crud_project", project)
+    (project / "target_app.py").write_text("# preparation fails before serving")
+    seed = project / "seed.py"
+    scripts = {
+        "delete": "import os\nos.unlink(os.environ['SANKA_TEST_DB'])\n",
+        "delete-write": (
+            "import os\nfrom django.db import connection\n"
+            "os.unlink(os.environ['SANKA_TEST_DB'])\n"
+            "with connection.cursor() as cursor:\n"
+            "    cursor.execute('CREATE TABLE broken (id INTEGER)')\n"
+        ),
+        "replace": (
+            "import os\nfrom pathlib import Path\n"
+            "path=Path(os.environ['SANKA_TEST_DB'])\n"
+            "other=path.with_suffix('.replacement')\n"
+            "other.write_bytes(path.read_bytes())\nos.replace(other, path)\n"
+        ),
+        "value": "raise ValueError('invalid seed row')\n",
+        "operational": (
+            "from django.db import OperationalError\nraise OperationalError('unavailable')\n"
+        ),
+        "permission": "raise PermissionError('unwritable')\n",
+        "startup": "pass\n",
+    }
+    seed.write_text(scripts[mode])
+    with pytest.raises(ReplayError) as caught:
+        replay(
+            project,
+            [{"id": "list", "method": "GET", "path": "/items/"}],
+            settings_module="missing_settings" if mode == "startup" else "crud_config.settings",
+            db_env="SANKA_TEST_DB",
+            seed=seed,
+            python=Path(sys.executable),
+        )
+    assert caught.value.category == category
+    if mode == "value":
+        assert "invalid seed row" in str(caught.value)

@@ -13,7 +13,31 @@ django.setup()
 from django.core.management import call_command
 call_command("migrate", interactive=False, verbosity=0, run_syncdb=True)
 if payload.get("seed"):
-    runpy.run_path(payload["seed"], run_name="__main__")
+    from django.db import OperationalError, InterfaceError
+    sqlite = payload.get("database_backend") != "postgresql"
+    before = os.stat(payload["database"]) if sqlite else None
+    seed_error = None
+    try:
+        runpy.run_path(payload["seed"], run_name="__main__")
+    except Exception as error:
+        seed_error = error
+    # Replacing an open SQLite file invalidates the migrated connection.
+    try:
+        after = os.stat(payload["database"]) if sqlite else None
+    except FileNotFoundError:
+        after = None
+    replaced = sqlite and (after is None or (before.st_dev, before.st_ino) !=
+                           (after.st_dev, after.st_ino))
+    if replaced or (seed_error is not None and not isinstance(
+            seed_error, (OSError, OperationalError, InterfaceError))):
+        if sqlite and seed_error is not None:
+            import traceback
+            traceback.print_exception(seed_error)
+        print(json.dumps({"ok": False, "failure_category": "seed_failure",
+                          "database_replaced": replaced}))
+        raise SystemExit(0)
+    if seed_error is not None:
+        raise seed_error
 from django.conf import settings
 if os.path.realpath(settings.MEDIA_ROOT) != os.path.realpath(payload["media_root"]):
     raise SystemExit("seed changed MEDIA_ROOT; write seed files under settings.MEDIA_ROOT")

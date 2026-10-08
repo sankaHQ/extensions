@@ -627,6 +627,28 @@ def _run_side(
         raise ReplayError(f"{payload.get('side', 'side')} process returned invalid JSON") from error
     if not isinstance(result, dict):
         raise ReplayError(f"{payload.get('side', 'side')} process returned no result object")
+    if (
+        payload.get("side") == "prepare"
+        and payload.get("seed")
+        and result.get("failure_category") == "seed_failure"
+    ):
+        reason = (
+            "Seed replaced the replay database."
+            if result.get("database_replaced")
+            else "Seed script failed."
+        )
+        detail = (
+            ""
+            if payload.get("database_backend") == "postgresql"
+            else outcome.stderr.strip()[-4000:]
+        )
+        raise ReplayError(
+            reason + " Replay already configures Django "
+            "and runs migrations; seed existing tables without deleting or replacing the "
+            "database, reconfiguring settings, or rerunning initialization."
+            + ("\n" + detail if detail else ""),
+            category="seed_failure",
+        )
     return result
 
 

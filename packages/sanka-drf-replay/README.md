@@ -103,3 +103,13 @@ creation timeout leaves ownership unconfirmed, replay refuses deletion and repor
 the database name for manual inspection rather than risking an unrelated database. Reports contain backend and environment-variable names, not
 the maintenance URL. Missing permissions, incompatible settings or cleanup failures
 are errors, not successful verification.
+
+### Seed preparation failures
+
+Replay configures Django and runs source migrations before executing the Python
+seed in that process. Seed scripts should populate existing tables; do not delete
+or replace the database, change database settings, or rerun initialization.
+Identified script errors and SQLite database replacement return
+`failure_category: seed_failure`. Correct the seed and invoke verification again.
+Permission, connection, migration and unclassified database operational failures
+remain infrastructure failures. Failed verification never establishes parity.

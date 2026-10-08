@@ -399,6 +399,7 @@ def _handle_replay(request: ExtensionRequest) -> ExtensionResponse:
             request,
             code="SANKA_EXTENSION_REPLAY_INVALID",
             message=str(error),
+            details={"failure_category": error.category},
         )
     data = _data(save_report(report, Path(request.artifact_root)))
     artifacts = (str(data["report_path"]),)
