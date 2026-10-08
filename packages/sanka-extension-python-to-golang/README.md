@@ -1460,5 +1460,5 @@ SANKA_GO_REPLAY_TESTS=1 uv run python -m pytest \
   packages/sanka-extension-python-to-golang/tests/test_go_candidate_replay.py
 ```
 
-Release order: publish `sanka-drf-replay` 0.1.0a6 before publishing extension
+Release order: publish `sanka-drf-replay` 0.1.0a7 before publishing extension
 wheels that depend on it. These source changes do not publish a release.
