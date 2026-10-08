@@ -1447,8 +1447,8 @@ bytes copied for the build, and a failed verification removes the current succes
 record. Historical detailed reports remain separate.
 
 Generation readiness safeguards remain unchanged. Replay executes supplied source
-and candidate code locally and is not a hostile-code sandbox. Matching public
-scenarios proves only those scenarios; compiled Go does not establish the benchmark's
+and candidate code locally and is not a hostile-code sandbox. Go process replay currently requires a POSIX host and caps each scenario at 300
+seconds and each response at 8 MiB. Matching public scenarios proves only those scenarios; compiled Go does not establish the benchmark's
 full native-compliance grade or cutover readiness. Infrastructure/build/input errors
 are distinct from response/database mismatches. SQLite is the supported fixture
 backend for this new Go candidate path.

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Differential scenario replay: the source Django application against a candidate.
 
-The candidate is a FastAPI or Flask application exposing ``app`` from an entrypoint module.
+Python candidates expose ``app``; Go candidates expose an HTTP server using PORT.
 Every scenario starts from an identical freshly migrated (and optionally seeded)
 SQLite database, is sent to both applications, and the responses and the resulting
 database state are compared. Nothing here depends on a Sanka plan or a generated

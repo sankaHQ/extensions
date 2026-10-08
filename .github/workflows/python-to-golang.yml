@@ -65,6 +65,7 @@ jobs:
           cache: true
           cache-dependency-path: packages/sanka-extension-python-to-golang/src/sanka_extension_python_to_golang/locks/**/go.sum
       - run: uv sync --frozen --all-packages
+      - run: uv build --wheel --package sanka-drf-replay --out-dir release/python-to-golang
       - run: uv build --wheel --package sanka-http-replay --out-dir release/python-to-golang
       - run: uv build --wheel --package sanka-code-migration --out-dir release/python-to-golang
       - run: uv build --wheel --package sanka-extension-python-to-golang --out-dir release/python-to-golang
@@ -78,9 +79,14 @@ jobs:
         env:
           SANKA_GO_TESTS: "1"
         run: uv run --no-sync python -m pytest packages/sanka-code-migration/tests/test_input_values.py -q
+      - name: Cache modules for offline candidate replay
+        if: matrix.target == 'fiber'
+        working-directory: packages/sanka-extension-python-to-golang/src/sanka_extension_python_to_golang/locks/fiber-sqlite
+        run: go mod download
       - name: Compare all three Python sources with the ${{ matrix.target }} Go target
         env:
           SANKA_GO_TESTS: "1"
+          SANKA_GO_REPLAY_TESTS: ${{ matrix.target == 'fiber' && '1' || '0' }}
           SANKA_GO_TARGET_SHARD: ${{ matrix.target }}
           GOTOOLCHAIN: local
           GOWORK: "off"
