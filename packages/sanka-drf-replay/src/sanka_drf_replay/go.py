@@ -155,7 +155,7 @@ def run_candidate(
                     time.sleep(0.02)
             result: dict[str, Any] = {}
             cookies = http.cookiejar.CookieJar()
-            for step in [*setup, request]:
+            for step_number, step in enumerate([*setup, request], start=1):
                 body, headers = encoder["request_bytes"](step)
                 headers.setdefault("host", "testserver")
                 cookie_request = urllib.request.Request(
@@ -164,10 +164,13 @@ def run_candidate(
                 cookies.add_cookie_header(cookie_request)
                 headers = dict(cookie_request.header_items())
                 connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                phase = "request send"
                 try:
                     connection.request(step["method"], step["path"], body, headers)
+                    phase = "response headers"
                     response = connection.getresponse()
                     cookies.extract_cookies(response, cookie_request)
+                    phase = "response body"
                     content = response.read(8 * 1024 * 1024 + 1)
                     if len(content) > 8 * 1024 * 1024:
                         raise ReplayError("Go response exceeds the 8 MiB replay limit")
@@ -179,6 +182,17 @@ def run_candidate(
                         "headers": {k.lower(): v for k, v in response.getheaders()},
                         "native": {"compiled_go": True},
                     }
+                except TimeoutError as error:
+                    # A sent loopback request that stalls is repairable candidate behavior.
+                    # Send/startup and watchdog failures still stop infrastructure recovery.
+                    if phase != "request send" and not expired.is_set():
+                        raise ReplayError(
+                            f"Go candidate timed out waiting for {phase} "
+                            f"at replay step {step_number} (10 second request limit); "
+                            "inspect the handler for blocking work or database connection waits",
+                            category="candidate_failure",
+                        ) from error
+                    raise
                 finally:
                     connection.close()
             return result
