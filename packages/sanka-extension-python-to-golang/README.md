@@ -1462,3 +1462,16 @@ SANKA_GO_REPLAY_TESTS=1 uv run python -m pytest \
 
 Release order: publish `sanka-drf-replay` 0.1.0a7 before publishing extension
 wheels that depend on it. These source changes do not publish a release.
+
+A local candidate that accepts and receives a request but exceeds the existing
+10-second socket timeout while returning response headers or body reports
+`candidate_failure`. The error identifies the response phase and replay step;
+inspect the handler for blocking work or database connection waits. An agent may
+repair the candidate and verify again within its existing limits. This is not a
+successful verification or an automatic retry. Request-send and readiness timeouts, other
+transport errors, interruption and the scenario watchdog remain infrastructure
+failures. Raw request bodies, credentials and server logs are not added to errors.
+
+Changing this classification gives agents a repair opportunity that older releases
+could terminate early. Record the extension version when comparing benchmark runs;
+keep previous candidates and results unchanged.

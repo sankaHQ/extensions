@@ -20,7 +20,8 @@ from sanka_extensions.code import ExtensionRequest
     os.environ.get("SANKA_GO_REPLAY_TESTS") != "1", reason="requires cached Go toolchain"
 )
 @pytest.mark.parametrize(
-    "mode", ["match", "status", "write", "missing", "syntax", "cache", "interrupted"]
+    "mode",
+    ["match", "status", "write", "missing", "syntax", "cache", "interrupted", "response-timeout"],
 )
 def test_go_candidate_response_parity(
     tmp_path: Path, mode: str, monkeypatch: pytest.MonkeyPatch
@@ -121,8 +122,14 @@ def test_go_candidate_response_parity(
             os.kill(os.getpid(), signal.SIGTERM)
 
         monkeypatch.setattr(http.client.HTTPConnection, "request", interrupt)
+    if mode == "response-timeout":
+
+        def timeout(*args: object, **kwargs: object) -> None:
+            raise TimeoutError()
+
+        monkeypatch.setattr(http.client.HTTPConnection, "getresponse", timeout)
     response = handle(request)
-    if mode in {"missing", "syntax", "cache", "interrupted"}:
+    if mode in {"missing", "syntax", "cache", "interrupted", "response-timeout"}:
         assert response.outcome == "error"
         assert response.error.code == "SANKA_EXTENSION_REPLAY_INVALID"
         assert response.error.details["failure_category"] == (
