@@ -1,5 +1,15 @@
 # API converter release
 
+## Supplied request probe release 0.1.0a22
+
+Publish the absent immutable `api-converters-v0.1.0a22` tag from the reviewed
+release merge. Go a22 bundles replay a9 and request-derived boundary probes
+from PR181. Capture/generation safeguards and the 12-probe cap remain unchanged.
+New repair feedback requires a separate cohort; historical candidates and scores
+remain unchanged. FastAPI/Flask workspace dependency pins advance but their
+marketplace releases do not. Qualify downloaded public artifacts before use.
+
+
 ## Candidate timeout recovery release 0.1.0a21
 
 Publish the absent immutable `api-converters-v0.1.0a21` tag from the reviewed

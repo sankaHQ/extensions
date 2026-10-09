@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Sanka, Inc." }]
-dependencies = ["sanka-extension-sdk==0.1.0a4", "sanka-drf-replay==0.1.0a8", "sanka-code-migration==0.1.0a4"]
+dependencies = ["sanka-extension-sdk==0.1.0a4", "sanka-drf-replay==0.1.0a9", "sanka-code-migration==0.1.0a4"]
 
 [project.scripts]
 sanka-extension-drf-to-flask = "sanka_extension_drf_to_flask.__main__:main"
