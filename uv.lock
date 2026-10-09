@@ -1032,7 +1032,7 @@ source = { editable = "packages/sanka-connector-sdk" }
 
 [[package]]
 name = "sanka-drf-replay"
-version = "0.1.0a9"
+version = "0.1.0a10"
 source = { editable = "packages/sanka-drf-replay" }
 
 [[package]]
@@ -1093,7 +1093,7 @@ requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-exte
 
 [[package]]
 name = "sanka-extension-python-to-golang"
-version = "0.1.0a22"
+version = "0.1.0a23"
 source = { editable = "packages/sanka-extension-python-to-golang" }
 dependencies = [
     { name = "sanka-code-migration" },
