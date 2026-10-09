@@ -168,6 +168,7 @@ def test_write_probes_keep_context_and_mutate_only_supplied_payloads():
     assert not replay_module._write_probes({"body": {"records": []}, "multipart": {"files": []}})
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("target", ["fastapi", "flask"])
 def test_write_probes_find_parser_and_nested_validation_divergence(tmp_path, target):
     project = tmp_path / "crud"
@@ -178,14 +179,17 @@ from django.http import JsonResponse
 from django.urls import path
 from django.views.decorators.csrf import csrf_exempt
 @csrf_exempt
-def write(request):
+def write(request, kind=None):
     if request.content_type == "multipart/form-data":
         return JsonResponse({"bytes": base64.b64encode(request.FILES["blob"].read()).decode()})
-    records = json.loads(request.body)["records"]
+    data = json.loads(request.body)
+    if "value" in data:
+        return JsonResponse({"value": "source-null" if data["value"] is None else data["value"]})
+    records = data["records"]
     if len({record["code"] for record in records}) != len(records):
         return JsonResponse({"records": ["duplicate"]}, status=400)
     return JsonResponse({"count": len(records)})
-urlpatterns = [path("write/", write)]
+urlpatterns = [path("write/", write), path("scalar/<str:kind>/", write)]
 """)
     app = """
 import base64, json
@@ -197,13 +201,17 @@ def result(raw, content_type):
             b"Content-Type: " + content_type.encode() + b"\\r\\n\\r\\n" + raw)
         part = next(message.iter_parts())
         return {"bytes": base64.b64encode(part.get_payload(decode=True)).decode()}
-    return {"count": len(json.loads(raw)["records"])}
+    data = json.loads(raw)
+    if "value" in data:
+        return {"value": data["value"]}
+    return {"count": len(data["records"])}
 """
     app += (
         """
 from fastapi import FastAPI, Request
 app = FastAPI()
 @app.post("/write/")
+@app.post("/scalar/{kind}/")
 async def write(request: Request):
     return result(await request.body(), request.headers["content-type"])
 """
@@ -212,7 +220,8 @@ async def write(request: Request):
 from flask import Flask, request
 app = Flask(__name__)
 @app.post("/write/")
-def write():
+@app.post("/scalar/<kind>/")
+def write(kind=None):
     return result(request.get_data(), request.content_type)
 """
     )
@@ -234,6 +243,21 @@ def write():
             },
         },
     ]
+    # An uncaptured route still needs scalar-null parity probes, including falsy values.
+    supplied.extend(
+        {
+            "id": f"scalar-{name}",
+            "method": "POST",
+            "path": f"/scalar/{name}/",
+            "body": {"value": value},
+        }
+        for name, value in (
+            ("integer", 0),
+            ("decimal", 1.25),
+            ("boolean", False),
+            ("text", "sample"),
+        )
+    )
     probes = [
         p
         for p in edge_probes_from_scan(
@@ -251,6 +275,10 @@ def write():
     )
     rows = {r["id"]: r for r in report["scenarios"]}
     assert rows["nested"]["match"] and rows["upload"]["match"]
+    for name in ("integer", "decimal", "boolean", "text"):
+        assert rows[f"scalar-{name}"]["match"]
+        null_probe = rows[f"edge:null-scalar:value:scalar-{name}"]
+        assert null_probe["status_match"] and not null_probe["body_match"]
     assert rows["edge:upload-binary:upload"]["match"]
     boundary = rows["edge:upload-boundary:upload"]
     assert not boundary["body_match"]
