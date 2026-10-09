@@ -1,5 +1,15 @@
 # API converter release
 
+## Scalar-null verification release 0.1.0a23
+
+Publish the absent immutable `api-converters-v0.1.0a23` tag from the reviewed
+release merge. Go a23 bundles replay a10 and scalar-null probes from PR183.
+Source behavior remains the oracle, including nullable fields. Capture/generation
+safeguards and the 12-probe cap remain unchanged. New repair feedback requires
+a separate benchmark cohort; historical attempts remain unchanged. FastAPI/Flask
+workspace dependency pins advance, while their marketplace releases stay pinned.
+Qualify downloaded public artifacts before use.
+
 ## Supplied request probe release 0.1.0a22
 
 Publish the absent immutable `api-converters-v0.1.0a22` tag from the reviewed
