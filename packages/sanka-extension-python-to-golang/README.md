@@ -1475,3 +1475,10 @@ failures. Raw request bodies, credentials and server logs are not added to error
 Changing this classification gives agents a repair opportunity that older releases
 could terminate early. Record the extension version when comparing benchmark runs;
 keep previous candidates and results unchanged.
+
+With `--edge-probes`, supplied write requests also provide bounded replay coverage
+when static capture reports an unsupported route. Null collections and blank or
+padded text are checked against the running source, within the shared 12-probe
+budget. This does not enable generation for unsupported source behavior or claim
+full application parity. Changing these probes changes repair feedback, so compare
+new benchmark runs as a separate versioned cohort.

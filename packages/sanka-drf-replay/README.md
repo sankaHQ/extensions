@@ -46,7 +46,16 @@ duplicate-record probes for two collection depths in JSON objects. They preserve
 the original route, fields, filenames, authentication and setup. Expected responses
 come from executing the source, including its parser and validation behavior;
 neither successful writes nor rejection statuses are assumed. All contract probes
-share a 12-request cap. Use explicit scenarios for deeper or additional contexts.
+share a 12-request cap, distributed across supplied requests so a wide body does
+not consume the entire budget before later write methods are considered.
+
+When static scan cannot describe a supplied write route, replay can still derive
+probes from that request: null collections, empty/whitespace-only text, and padded
+text, as well as the upload and duplicate-record variants above. Source responses
+and database effects remain the reference; no serializer rules, route patterns or
+support for code generation are inferred. Original requests and fixture setup are
+preserved. An original source request must succeed before its contract probes
+count as coverage. Use explicit scenarios for deeper or additional contexts.
 
 ## PostgreSQL replay
 
