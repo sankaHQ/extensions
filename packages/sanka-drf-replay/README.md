@@ -51,7 +51,9 @@ not consume the entire budget before later write methods are considered.
 
 When static scan cannot describe a supplied write route, replay can still derive
 probes from that request: null scalar values and collections, empty/whitespace-only
-text, and padded text, as well as the upload and duplicate-record variants above.
+text, padded text, and one additional trailing zero on fixed-point decimal strings,
+as well as the upload and duplicate-record variants above. Decimal-scale probes
+keep the numeric value but can expose premature rounding or normalization.
 Source responses and database effects remain the reference, including when null is
 accepted; no serializer rules, route patterns or support for code generation are
 inferred. Original requests and fixture setup are

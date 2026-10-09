@@ -175,6 +175,8 @@ def test_write_probes_find_parser_and_nested_validation_divergence(tmp_path, tar
     shutil.copytree(FIXTURES / "drf_crud_project", project)
     (project / "crud_config/urls.py").write_text("""
 import base64, json
+from rest_framework.fields import DecimalField
+from rest_framework.exceptions import ValidationError
 from django.http import JsonResponse
 from django.urls import path
 from django.views.decorators.csrf import csrf_exempt
@@ -183,6 +185,12 @@ def write(request, kind=None):
     if request.content_type == "multipart/form-data":
         return JsonResponse({"bytes": base64.b64encode(request.FILES["blob"].read()).decode()})
     data = json.loads(request.body)
+    if kind == "decimal-text":
+        try:
+            value = DecimalField(max_digits=5, decimal_places=2).run_validation(data["value"])
+            return JsonResponse({"value": str(value)})
+        except ValidationError as exc:
+            return JsonResponse({"errors": exc.detail}, status=400)
     if "value" in data:
         return JsonResponse({"value": "source-null" if data["value"] is None else data["value"]})
     records = data["records"]
@@ -195,13 +203,18 @@ urlpatterns = [path("write/", write), path("scalar/<str:kind>/", write)]
 import base64, json
 from email.parser import BytesParser
 from email.policy import default
-def result(raw, content_type):
+from decimal import Decimal
+def result(raw, content_type, kind=None):
     if content_type.startswith("multipart/form-data"):
         message = BytesParser(policy=default).parsebytes(
             b"Content-Type: " + content_type.encode() + b"\\r\\n\\r\\n" + raw)
         part = next(message.iter_parts())
         return {"bytes": base64.b64encode(part.get_payload(decode=True)).decode()}
     data = json.loads(raw)
+    if kind == "decimal-text" and data.get("value"):
+        # Faulty target loses declared precision by normalizing before validation.
+        value = Decimal(data["value"]).normalize()
+        return {"value": str(value.quantize(Decimal("0.01")))}
     if "value" in data:
         return {"value": data["value"]}
     return {"count": len(data["records"])}
@@ -212,8 +225,8 @@ from fastapi import FastAPI, Request
 app = FastAPI()
 @app.post("/write/")
 @app.post("/scalar/{kind}/")
-async def write(request: Request):
-    return result(await request.body(), request.headers["content-type"])
+async def write(request: Request, kind: str | None = None):
+    return result(await request.body(), request.headers["content-type"], kind)
 """
         if target == "fastapi"
         else """
@@ -222,7 +235,7 @@ app = Flask(__name__)
 @app.post("/write/")
 @app.post("/scalar/<kind>/")
 def write(kind=None):
-    return result(request.get_data(), request.content_type)
+    return result(request.get_data(), request.content_type, kind)
 """
     )
     candidate = tmp_path / "candidate"
@@ -255,7 +268,8 @@ def write(kind=None):
             ("integer", 0),
             ("decimal", 1.25),
             ("boolean", False),
-            ("text", "sample"),
+            ("text", "7.50"),
+            ("decimal-text", "7.50"),
         )
     )
     probes = [
@@ -279,6 +293,9 @@ def write(kind=None):
         assert rows[f"scalar-{name}"]["match"]
         null_probe = rows[f"edge:null-scalar:value:scalar-{name}"]
         assert null_probe["status_match"] and not null_probe["body_match"]
+    assert rows["scalar-decimal-text"]["match"]
+    assert not rows["edge:decimal-scale:value:scalar-decimal-text"]["status_match"]
+    assert rows["edge:decimal-scale:value:scalar-text"]["match"]
     assert rows["edge:upload-binary:upload"]["match"]
     boundary = rows["edge:upload-boundary:upload"]
     assert not boundary["body_match"]

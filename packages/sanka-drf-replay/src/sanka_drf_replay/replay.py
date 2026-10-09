@@ -22,6 +22,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -341,6 +342,9 @@ def _write_probes(
                 elif isinstance(value, str | int | float | bool):
                     variants = [("null-scalar", None)]
                     if isinstance(value, str):
+                        if re.fullmatch(r"[+-]?[0-9]+\.[0-9]+", value):
+                            # Decimal scale can be significant even when the value is unchanged.
+                            variants.append(("decimal-scale", value + "0"))
                         variants.extend(
                             [
                                 ("blank-text", ""),
