@@ -338,12 +338,16 @@ def _write_probes(
                 variants: list[tuple[str, Any]] = []
                 if isinstance(value, list):
                     variants = [("null-collection", None)]
-                elif isinstance(value, str):
-                    variants = [
-                        ("blank-text", ""),
-                        ("whitespace-text", " \t "),
-                        ("padded-text", f" {value} "),
-                    ]
+                elif isinstance(value, str | int | float | bool):
+                    variants = [("null-scalar", None)]
+                    if isinstance(value, str):
+                        variants.extend(
+                            [
+                                ("blank-text", ""),
+                                ("whitespace-text", " \t "),
+                                ("padded-text", f" {value} "),
+                            ]
+                        )
                 for kind, replacement in variants:
                     changes.append(
                         (f"{kind}:{name}", {"body": {**copy.deepcopy(body), name: replacement}})
