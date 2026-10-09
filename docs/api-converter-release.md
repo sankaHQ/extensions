@@ -1,5 +1,15 @@
 # API converter release
 
+## Decimal-scale verification release 0.1.0a24
+
+Publish the absent immutable `api-converters-v0.1.0a24` tag from the reviewed
+release merge. Go a24 bundles replay a11 and decimal-scale probes from PR185.
+Supplied fixed-point decimal strings gain one trailing zero; source responses and
+database effects remain authoritative. Capture safeguards and probe limits are
+unchanged. New repair feedback requires a separate benchmark cohort and does not
+guarantee model repair. Historical results and marketplace releases remain pinned.
+Qualify downloaded public artifacts before use.
+
 ## Scalar-null verification release 0.1.0a23
 
 Publish the absent immutable `api-converters-v0.1.0a23` tag from the reviewed
