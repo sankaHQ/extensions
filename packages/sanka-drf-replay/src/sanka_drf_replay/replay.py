@@ -30,6 +30,7 @@ import tempfile
 import uuid
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any
 
@@ -174,10 +175,12 @@ def edge_probes_from_scan(
     and, for single-parameter detail paths, a request for an object that does not
     exist (404 body). GET routes also receive a HEAD probe. Only provided setup
     requests may mutate fixture state. Context never crosses route boundaries.
+    Supplied write bodies also support bounded mutations without captured routes;
+    these requests do not establish static capture or generation support.
     """
     routes = scan.get("routes")
     if not isinstance(routes, list):
-        return []
+        routes = []
     methods_by_path: dict[str, set[str]] = {}
     for route in routes:
         if not isinstance(route, dict):
@@ -229,13 +232,13 @@ def _contract_probes(
         if isinstance(s, dict) and isinstance(s.get("name"), str)
     }
     probes: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    groups: list[list[dict[str, Any]]] = []
     for scenario in scenarios:
         method = str(scenario.get("method", "GET")).upper()
         route = next(
             (
                 r
-                for r in scan.get("routes", [])
+                for r in (scan.get("routes") or [])
                 if isinstance(r, dict)
                 and r.get("method") == method
                 and isinstance(r.get("path"), str)
@@ -243,8 +246,10 @@ def _contract_probes(
             ),
             None,
         )
+        request_only = route is None
         if route is None:
-            continue
+            # Supplied requests support replay even when static capture is unsupported.
+            route = {"path": scenario["path"]}
         headers = {k.lower(): v for k, v in (scenario.get("headers") or {}).items()}
         changes: list[tuple[str, dict[str, Any]]] = []
         fields = serializers.get(route.get("serializer"), {}).get("fields", [])
@@ -260,7 +265,7 @@ def _contract_probes(
         ):
             changes.append(("read-only", {"body": {**scenario["body"], **readonly}}))
         if method in {"POST", "PUT", "PATCH"}:
-            changes.extend(_write_probes(scenario))
+            changes.extend(_write_probes(scenario, request_only=request_only))
         authenticators = [
             name for name in (route.get("authentication") or []) if isinstance(name, str)
         ]
@@ -281,11 +286,8 @@ def _contract_probes(
                     {"headers": {k: v for k, v in headers.items() if k != "x-csrftoken"}},
                 )
             )
+        group = []
         for kind, change in changes:
-            key = (method, route["path"], kind)
-            if key in seen:
-                continue
-            seen.add(key)
             probe = copy.deepcopy(dict(scenario))
             probe.pop("expected_source_status", None)
             probe.update(
@@ -295,14 +297,27 @@ def _contract_probes(
                 generated_from=route["path"],
                 context_from=scenario["id"],
             )
+            group.append(probe)
+        groups.append(group)
+    seen: set[tuple[str, str, str]] = set()
+    # Share the existing budget across requests instead of exhausting it on the first body.
+    for batch in zip_longest(*groups):
+        for probe in batch:
+            if probe is None:
+                continue
+            key = (probe["method"], probe["generated_from"], probe["probe_kind"])
+            if key in seen:
+                continue
+            seen.add(key)
             probes.append(probe)
-            # ponytail: cap extra replay work; make configurable if large suites need more.
             if len(probes) == 12:
                 return probes
     return probes
 
 
-def _write_probes(scenario: Mapping[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+def _write_probes(
+    scenario: Mapping[str, Any], *, request_only: bool = False
+) -> list[tuple[str, dict[str, Any]]]:
     changes: list[tuple[str, dict[str, Any]]] = []
     multipart = scenario.get("multipart")
     if isinstance(multipart, dict):
@@ -318,6 +333,23 @@ def _write_probes(scenario: Mapping[str, Any]) -> list[tuple[str, dict[str, Any]
                 changes.append((kind, {"multipart": mutated}))
     body = scenario.get("body")
     if isinstance(body, dict):
+        if request_only:
+            for name, value in body.items():
+                variants: list[tuple[str, Any]] = []
+                if isinstance(value, list):
+                    variants = [("null-collection", None)]
+                elif isinstance(value, str):
+                    variants = [
+                        ("blank-text", ""),
+                        ("whitespace-text", " \t "),
+                        ("padded-text", f" {value} "),
+                    ]
+                for kind, replacement in variants:
+                    changes.append(
+                        (f"{kind}:{name}", {"body": {**copy.deepcopy(body), name: replacement}})
+                    )
+                    if len(changes) == 12:
+                        return changes
         # ponytail: two collection depths cover common nested writes; deeper graphs stay explicit.
         for depth in (0, 1):
             mutated = copy.deepcopy(body)
