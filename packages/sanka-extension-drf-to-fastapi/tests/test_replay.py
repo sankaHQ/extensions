@@ -961,7 +961,15 @@ def test_contract_probes_are_bounded_and_do_not_invent_contracts() -> None:
     probes = [p for p in edge_probes_from_scan(scan, scenarios) if p.get("probe_kind")]
     assert len(probes) == 12
     assert all(p["probe_kind"] == "credential-rejection" for p in probes)
-    assert edge_probes_from_scan({"routes": [None], "serializer_details": [None]}, scenarios) == []
+    request_probes = edge_probes_from_scan(
+        {"routes": [None], "serializer_details": [None]}, scenarios
+    )
+    assert len(request_probes) == 12
+    for probe in request_probes:
+        original = next(s for s in scenarios if s["id"] == probe["context_from"])
+        assert probe["path"] == original["path"] and probe["headers"] == original["headers"]
+        assert probe["body"] == {"id": None}
+        assert "expected_source_status" not in probe
 
 
 @pytest.mark.slow
