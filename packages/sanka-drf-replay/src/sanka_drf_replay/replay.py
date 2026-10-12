@@ -345,6 +345,10 @@ def _write_probes(
                         if re.fullmatch(r"[+-]?[0-9]+\.[0-9]+", value):
                             # Decimal scale can be significant even when the value is unchanged.
                             variants.append(("decimal-scale", value + "0"))
+                            # Cross the 64-bit integer boundary without changing fractional scale.
+                            variants.append(
+                                ("decimal-precision", "9" * 20 + "." + value.split(".")[1])
+                            )
                         variants.extend(
                             [
                                 ("blank-text", ""),

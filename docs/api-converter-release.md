@@ -168,3 +168,20 @@ before describing the release as consumer-verified. CLI 0.3.9 pins the verified 
 refreshes preserve existing project locks; explicit extension installation adopts
 the new wheel. Passing these fixtures does not qualify
 arbitrary applications or a production data cutover.
+
+## Python-to-Go a26 / DRF replay a12
+
+Adds a request-derived decimal precision probe, separate from fractional scale,
+within the existing 12-probe budget. Supplied source responses remain the oracle.
+Go response disconnects after a sent request are repairable candidate failures
+unless the watchdog expired or the process was killed by a signal. On macOS,
+cleanup ignores permission denial only for a reaped leader with a confirmed empty
+process group; live or unqueryable groups still fail closed. This includes the
+previously unlanded cleanup change from PR #180.
+
+Saved Terra004 and Sol002 candidates were replayed offline without edits: the
+new probe exposes the decimal error mismatch, and the original Go panic is no
+longer masked by cleanup. Terra003 did not reach verification before its time
+limit; Sol003 was rejected for provider capacity. Neither justifies a product
+change. Retries must retain their original attempts and unchanged task/grader
+inputs, prompts, limits and concurrency. No benchmark score is guaranteed.
