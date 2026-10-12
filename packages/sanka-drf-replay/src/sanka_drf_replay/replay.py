@@ -176,7 +176,7 @@ def edge_probes_from_scan(
     and, for single-parameter detail paths, a request for an object that does not
     exist (404 body). GET routes also receive a HEAD probe. Only provided setup
     requests may mutate fixture state. Context never crosses route boundaries.
-    Supplied write bodies also support bounded mutations without captured routes;
+    Supplied numeric GET paths and write bodies support bounded mutations without captured routes;
     these requests do not establish static capture or generation support.
     """
     routes = scan.get("routes")
@@ -253,6 +253,16 @@ def _contract_probes(
             route = {"path": scenario["path"]}
         headers = {k.lower(): v for k, v in (scenario.get("headers") or {}).items()}
         changes: list[tuple[str, dict[str, Any]]] = []
+        if request_only and method == "GET":
+            path, separator, query = str(scenario["path"]).partition("?")
+            segments = path.removesuffix("/").split("/")
+            if segments[-1].isascii() and segments[-1].isdigit():
+                # A numeric path value is observed; neither route shape nor 404 is assumed.
+                segments[-1] = "999998" if segments[-1] == "999999" else "999999"
+                changed_path = "/".join(segments) + ("/" if path.endswith("/") else "")
+                changes.append(
+                    ("numeric-path", {"method": "GET", "path": changed_path + separator + query})
+                )
         fields = serializers.get(route.get("serializer"), {}).get("fields", [])
         readonly = {
             f["name"]: {"sanka_read_only_probe": True}

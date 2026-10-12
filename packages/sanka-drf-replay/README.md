@@ -60,6 +60,14 @@ inferred. Original requests and fixture setup are
 preserved. An original source request must succeed before its contract probes
 count as coverage. Use explicit scenarios for deeper or additional contexts.
 
+An uncaptured GET request whose final path segment is an ASCII integer also
+receives one numeric-path probe. It substitutes a large integer while preserving
+the supplied path shape, trailing slash, query, authentication and setup. The
+source response is the oracle: the value may exist, and no 404 is assumed. This
+probe shares the existing 12-request contract budget. Opaque identifiers and
+write paths are not guessed or changed. Passing replay covers these sampled
+requests only; it does not establish capture or generation support.
+
 ## PostgreSQL replay
 
 Set the extension verification configuration to:
