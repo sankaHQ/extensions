@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import ctypes
 import hashlib
 import http.client
 import http.cookiejar
@@ -11,11 +12,11 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
 from collections.abc import Mapping
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +93,30 @@ def prepare_candidate(root: Path, entrypoint: str, temp: Path) -> tuple[Path, di
     return copy, files
 
 
+def _kill_group(process: subprocess.Popen[bytes]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        # Seatbelt can deny signalling a dead group; reap its leader before checking.
+        if sys.platform != "darwin" or process.poll() is None:
+            raise
+        try:
+            library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+            query = library.proc_listpgrppids
+            query.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+            query.restype = ctypes.c_int
+            member = ctypes.c_int()
+            ctypes.set_errno(0)
+            count = query(process.pid, ctypes.byref(member), ctypes.sizeof(member))
+            gone = count == 0 and ctypes.get_errno() == 0
+        except (OSError, AttributeError):
+            gone = False
+        if not gone:
+            raise
+
+
 def run_candidate(
     root: Path,
     request: Mapping[str, Any],
@@ -134,8 +159,7 @@ def run_candidate(
 
         def expire() -> None:
             expired.set()
-            with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
+            _kill_group(process)
 
         watchdog = threading.Timer(300, expire)
         watchdog.start()
@@ -193,6 +217,19 @@ def run_candidate(
                             category="candidate_failure",
                         ) from error
                     raise
+                except http.client.RemoteDisconnected as error:
+                    status = process.poll()
+                    if (
+                        phase != "request send"
+                        and not expired.is_set()
+                        and (status is None or status >= 0)
+                    ):
+                        raise ReplayError(
+                            f"Go candidate closed the response at replay step {step_number}; "
+                            "inspect the handler for a crash",
+                            category="candidate_failure",
+                        ) from error
+                    raise
                 finally:
                     connection.close()
             return result
@@ -203,6 +240,5 @@ def run_candidate(
             if previous_handler is not None:
                 signal.signal(signal.SIGTERM, previous_handler)
             # Kill descendants too; a timed-out candidate must not survive the replay.
-            with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
+            _kill_group(process)
             process.wait()

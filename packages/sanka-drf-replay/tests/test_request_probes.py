@@ -50,3 +50,30 @@ def test_probe_budget_does_not_let_first_request_starve_later_write_methods():
     assert len(probes) <= 12
     assert any(p["method"] == "PATCH" and p["body"] == {"entries": None} for p in probes)
     assert any(p["method"] == "POST" for p in probes)
+
+
+def test_decimal_request_probes_cover_precision_without_changing_scale():
+    scenario = {
+        "id": "payment",
+        "method": "POST",
+        "path": "/payments/",
+        "body": {"payer": 1, "payee": 2, "value": "12.50", "reference": "sample"},
+        "headers": {"Authorization": "Custom sample"},
+        "setup": [{"method": "POST", "path": "/fixtures/"}],
+    }
+    before = copy.deepcopy(scenario)
+    probes = edge_probes_from_scan({"routes": []}, [scenario])
+    precision = [
+        p
+        for p in probes
+        if isinstance(p.get("body", {}).get("value"), str)
+        and len(p["body"]["value"].split(".")[0]) > 18
+    ]
+    assert len(precision) == 1
+    probe = precision[0]
+    assert probe["body"]["value"].split(".")[1] == "50"
+    assert probe["body"]["reference"] == "sample"
+    assert probe["headers"] == scenario["headers"]
+    assert probe["setup"] == scenario["setup"]
+    assert len(probes) <= 12
+    assert scenario == before
