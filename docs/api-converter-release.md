@@ -1,5 +1,15 @@
 # API converter release
 
+## Explicit anonymous DRF capture release 0.1.0a25
+
+Publish the absent immutable `api-converters-v0.1.0a25` tag from the reviewed
+release merge. Go a25 includes PR187: a literal empty default authentication list
+with `UNAUTHENTICATED_USER=None` can omit `django.contrib.auth`. Nonempty, dynamic
+and custom authentication remains unsupported. Model capture safeguards remain
+unchanged. Shared replay a11 and all other wheel versions stay pinned. Qualify
+downloaded public artifacts before a separate benchmark attempt; this does not
+guarantee model repair or support for previously blocked model settings.
+
 ## Decimal-scale verification release 0.1.0a24
 
 Publish the absent immutable `api-converters-v0.1.0a24` tag from the reviewed
@@ -107,7 +117,7 @@ and does not turn a passing subset into an application-wide parity claim.
 
 ## Qualification before publication
 
-The `api-release.yml` jobs build seven wheels, check the two manifests and scoped
+The `api-release.yml` jobs build eight wheels, check the two manifests and scoped
 catalog, and exercise the pinned `sanka-examples` revision
 `e4b9990ccc21ec3d1e775b0955f021f2083fc524` with published CLI 0.3.6 on every pull
 request, main push and release tag.
@@ -142,7 +152,7 @@ The dispatch job requires the tag to be on
 `main` and installs published CLI 0.3.6 for both pinned example qualifications
 before GitHub publishes any assets. Do not publish from a pull-request build.
 
-The release contains seven wheels, two manifests, the scoped catalog and three
+The release contains eight wheels, two manifests, the scoped catalog and three
 acceptance reports. After publication, download the assets into a new
 directory and validate their exact hashes:
 

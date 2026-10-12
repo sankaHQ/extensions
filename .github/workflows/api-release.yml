@@ -26,7 +26,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a24
+          test "$GITHUB_REF_NAME" = api-converters-v0.1.0a25
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
@@ -144,7 +144,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "Python-to-Go converter 0.1.0a24" \
-            --notes "Python-to-Go 0.1.0a24 bundles replay 0.1.0a11: decimal-scale probes append a trailing zero to supplied fixed-point decimal strings when static capture has no matching route. Source responses and database effects remain authoritative. Capture safeguards and probe limits are unchanged. New verification feedback requires a separate benchmark cohort; no score improvement is guaranteed. Includes unchanged Rust 0.1.0a3 and published SDK wheels."
+            --title "Python-to-Go converter 0.1.0a25" \
+            --notes "Python-to-Go 0.1.0a25 accepts explicitly anonymous DRF settings with an empty default authentication list and UNAUTHENTICATED_USER=None. django.contrib.auth is optional only in that case. Unsupported authentication and model settings remain blocked. Includes unchanged replay 0.1.0a11, Rust 0.1.0a3 and published SDK wheels. New benchmark attempts remain separate; no score improvement is guaranteed."
         env:
           GH_TOKEN: ${{ github.token }}
