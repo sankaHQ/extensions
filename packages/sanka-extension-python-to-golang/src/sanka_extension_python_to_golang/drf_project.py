@@ -115,10 +115,18 @@ if __name__ == "__main__":
     rest = _literal(values["REST_FRAMEWORK"])
     if (
         not isinstance(rest, dict)
-        or set(rest) - {"UNAUTHENTICATED_USER", "PAGE_SIZE", "DEFAULT_RENDERER_CLASSES"}
+        or set(rest)
+        - {
+            "UNAUTHENTICATED_USER",
+            "PAGE_SIZE",
+            "DEFAULT_RENDERER_CLASSES",
+            "DEFAULT_AUTHENTICATION_CLASSES",
+        }
         or rest.get("UNAUTHENTICATED_USER", False) is not None
     ):
         raise ValueError("DRF settings require separate capture")
+    if "DEFAULT_AUTHENTICATION_CLASSES" in rest and rest["DEFAULT_AUTHENTICATION_CLASSES"] != []:
+        raise ValueError("nonempty default authentication requires separate capture")
     if "DEFAULT_RENDERER_CLASSES" in rest and rest["DEFAULT_RENDERER_CLASSES"] != [
         "rest_framework.renderers.JSONRenderer"
     ]:
@@ -133,7 +141,13 @@ if __name__ == "__main__":
         raise ValueError("unknown implicit primary key")
     apps = _literal(values["INSTALLED_APPS"])
     builtin = {"django.contrib.auth", "django.contrib.contenttypes", "rest_framework"}
-    if not isinstance(apps, list) or len(set(apps)) != len(apps) or not builtin <= set(apps):
+    # Without authenticators or an anonymous-user class, Django's auth app is optional.
+    required_apps = (
+        builtin - {"django.contrib.auth"}
+        if rest.get("DEFAULT_AUTHENTICATION_CLASSES") == []
+        else builtin
+    )
+    if not isinstance(apps, list) or len(set(apps)) != len(apps) or not required_apps <= set(apps):
         raise ValueError("unsupported installed apps")
     local = [a for a in apps if a not in builtin]
     if not local or any(

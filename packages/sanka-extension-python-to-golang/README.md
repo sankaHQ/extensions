@@ -1270,6 +1270,14 @@ Executable annotations, writable identity overrides, other custom validators,
 nested uniqueness validators, and optional aggregate fields are blocked rather
 than silently changed.
 
+Anonymous conventional projects may explicitly set
+`REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"] = []` with
+`UNAUTHENTICATED_USER = None`. In that case `django.contrib.auth` is optional;
+`django.contrib.contenttypes` and `rest_framework` remain required. Nonempty or
+computed default authentication and unqualified per-view authentication or
+permission overrides still block generation. This does not extend support for
+uncaptured model constraints, serializer logic, or startup behavior.
+
 ### Signed project authentication
 
 The conventional project profile accepts the same statically matched DRF
