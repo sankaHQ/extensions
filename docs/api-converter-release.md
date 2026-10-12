@@ -185,3 +185,13 @@ longer masked by cleanup. Terra003 did not reach verification before its time
 limit; Sol003 was rejected for provider capacity. Neither justifies a product
 change. Retries must retain their original attempts and unchanged task/grader
 inputs, prompts, limits and concurrency. No benchmark score is guaranteed.
+
+## Python-to-Go a27 / DRF replay a13
+
+Adds a bounded numeric GET path probe when route capture is unavailable. It
+preserves query, authentication and fixture setup, compares with the source,
+and shares the existing 12-probe budget. Opaque IDs and write paths are unchanged;
+unsupported capture still blocks generation. Offline replay of the unchanged
+Terra003 a26 candidate now exposes its missing-resource response-body mismatch
+instead of accepting all supplied checks. A fresh model attempt is required to
+measure whether the additional feedback changes the benchmark result.
