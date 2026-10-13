@@ -122,3 +122,61 @@ def test_decimal_request_probes_cover_precision_without_changing_scale():
     assert probe["setup"] == scenario["setup"]
     assert len(probes) <= 12
     assert scenario == before
+
+
+def test_uncaptured_write_path_get_probe_keeps_context_without_a_body():
+    scenario = {
+        "id": "create",
+        "method": "POST",
+        "path": "/records/?scope=mine",
+        "body": {"name": "sample"},
+        "headers": {"Authorization": "Custom sample"},
+        "setup": [{"method": "POST", "path": "/fixtures/"}],
+    }
+    before = copy.deepcopy(scenario)
+    detail = {"id": "detail", "method": "GET", "path": "/records/7/"}
+    probe = next(
+        p
+        for p in edge_probes_from_scan({}, [scenario, detail])
+        if p["method"] == "GET" and p["path"] == scenario["path"]
+    )
+    assert probe["path"] == scenario["path"]
+    assert probe["headers"] == scenario["headers"] and probe["setup"] == scenario["setup"]
+    assert not any(k in probe for k in ("body", "body_base64", "multipart"))
+    assert scenario == before
+    assert not any(p["method"] == "GET" for p in edge_probes_from_scan({}, [scenario]))
+    assert not any(
+        p["method"] == "GET" and p["path"] == scenario["path"]
+        for p in edge_probes_from_scan(
+            {}, [scenario, {"id": "list", "method": "GET", "path": scenario["path"]}]
+        )
+    )
+
+
+def test_nested_collection_omission_is_probed_on_partial_writes():
+    scenario = {
+        "id": "edit",
+        "method": "PATCH",
+        "path": "/records/7/",
+        "body": {"entries": [{"code": "A", "children": [{"value": "B"}]}]},
+    }
+    before = copy.deepcopy(scenario)
+    probes = edge_probes_from_scan({}, [scenario])
+    assert any(p.get("body") == {"entries": [{"code": "A"}]} for p in probes)
+    assert scenario == before
+    assert len(probes) <= 12
+
+
+def test_numeric_probes_preserve_other_fields_and_decimal_scale():
+    scenario = {
+        "id": "payment",
+        "method": "POST",
+        "path": "/payments/",
+        "body": {"payer": 7, "payee": 8, "value": "12.50", "reference": "sample"},
+    }
+    before = copy.deepcopy(scenario)
+    probes = edge_probes_from_scan({}, [scenario])
+    for name, value in (("payer", "7"), ("payee", "8"), ("value", "-12.50")):
+        assert any(p.get("body") == {**scenario["body"], name: value} for p in probes)
+    assert len(probes) <= 12
+    assert scenario == before

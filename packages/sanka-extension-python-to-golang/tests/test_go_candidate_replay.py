@@ -149,3 +149,41 @@ def test_go_candidate_response_parity(
         assert changed.outcome == "error"
         assert changed.data["candidate_digest"] != before
         assert not json.loads((artifacts / "verify.json").read_text())["ok"]
+
+
+@pytest.mark.parametrize(
+    "contents,category",
+    [
+        ('[{"id":"bad","path":"/records/","body":{},"multipart":null}]', "candidate_failure"),
+        (
+            '[{"id":"bad","path":"/records/","setup":[{"path":"/","body":{},"multipart":{}}]}]',
+            "candidate_failure",
+        ),
+        ("{", "candidate_failure"),
+        (None, "infrastructure_failure"),
+    ],
+)
+def test_invalid_scenarios_are_recoverable_without_running_candidate(tmp_path, contents, category):
+    if contents is not None:
+        (tmp_path / "cases.json").write_text(contents)
+    artifacts = tmp_path / ".sanka/go"
+    artifacts.mkdir(parents=True)
+    (artifacts / "verify.json").write_text('{"ok":true}')
+    response = handle(
+        ExtensionRequest(
+            "offline",
+            "verify",
+            str(tmp_path),
+            str(artifacts),
+            "sanka/python-to-golang",
+            "0.1.0a27",
+            "0" * 64,
+            {},
+            {"scenarios": "cases.json"},
+            (),
+            None,
+        )
+    )
+    assert response.outcome == "error"
+    assert response.error.details["failure_category"] == category
+    assert not (artifacts / "verify.json").exists()

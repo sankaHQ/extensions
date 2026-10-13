@@ -65,7 +65,18 @@ receives one numeric-path probe. It substitutes a large integer while preserving
 the supplied path shape, trailing slash, query, authentication and setup. The
 source response is the oracle: the value may exist, and no 404 is assumed. This
 probe shares the existing 12-request contract budget. Opaque identifiers and
-write paths are not guessed or changed. Passing replay covers these sampled
+write paths are not guessed or changed. If supplied requests include both a numeric detail GET and a POST to its parent
+path, replay also probes GET on that observed parent path, unless GET is already
+supplied there. It preserves the POST authentication and setup, removes its body,
+and does not assume GET succeeds. Unrelated POST-only action paths are not probed.
+
+Request-derived write probes also sample integer values as strings, negative
+fixed-point decimals, and omission of the first nested collection in the first
+record of a supplied collection. Fields and requests share the same 12-probe cap
+in round-robin order; adding these cases changes which variants fit within that
+cap. Explicit scenarios remain necessary for other fields and deeper nesting.
+
+Passing replay covers these sampled
 requests only; it does not establish capture or generation support.
 
 ## PostgreSQL replay
@@ -133,3 +144,12 @@ Identified script errors and SQLite database replacement return
 `failure_category: seed_failure`. Correct the seed and invoke verification again.
 Permission, connection, migration and unclassified database operational failures
 remain infrastructure failures. Failed verification never establishes parity.
+
+### Invalid scenario input
+
+Malformed JSON and invalid scenario shapes (including multiple body encodings)
+remain rejected before source or candidate execution. They return
+`failure_category: candidate_failure`, allowing the caller to correct the supplied
+scenario file within its existing limits. File access and environment failures
+remain infrastructure failures. No validation is relaxed. The Go candidate lifecycle removes its previous
+verification receipt before attempting verification.
