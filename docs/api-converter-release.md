@@ -1,5 +1,14 @@
 # API converter release
 
+## Nested transactional writes release 0.1.0a29
+
+Publish the absent immutable `api-converters-v0.1.0a29` tag from the reviewed
+merge. Go a29 supports bounded two-level nested serializers, captured composite
+uniqueness and atomic nested replacement writes for SQLite. Unsupported hooks,
+deeper graphs and PostgreSQL replacement remain blocked. Shared replay stays
+at a14. Qualify downloaded public artifacts before a separate benchmark retry;
+existing candidates, benchmark definitions and limits remain unchanged.
+
 ## Explicit anonymous DRF capture release 0.1.0a25
 
 Publish the absent immutable `api-converters-v0.1.0a25` tag from the reviewed
