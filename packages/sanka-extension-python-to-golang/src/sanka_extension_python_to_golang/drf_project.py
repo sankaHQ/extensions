@@ -236,6 +236,10 @@ if __name__ == "__main__":
             "database": database,
             "secret_environment": secret_environment,
             "page_size": page_size,
+            "debug": _literal(values["DEBUG"]),
+            "renders": ["application/json"]
+            if "DEFAULT_RENDERER_CLASSES" in rest
+            else ["application/json", "text/html"],
         },
         {"manage.py", filename},
     )
@@ -577,10 +581,15 @@ def summary(self, request):
 
             attrs = prefetch_queryset(attrs, contract)
             query = _view_query(attrs, model_map[contract["model"]], settings["page_size"], scope)
+            from .drf_metadata import serializer_info
+            from .drf_metadata import view_name as metadata_view_name
+
             contracts.append(
                 {
                     "path": registration["path"],
                     "basename": registration["basename"],
+                    "name": metadata_view_name(view_name),
+                    "metadata": serializer_info(contract),
                     "serializer": contract,
                     "query": query,
                     "read_only": read_only,
@@ -645,6 +654,8 @@ def summary(self, request):
                 "database": settings["database"],
                 "secret_environment": settings["secret_environment"],
                 "hosts": settings["hosts"],
+                "debug": settings["debug"],
+                "renders": settings["renders"],
                 "views": contracts,
                 "router_prefix": "/",
                 **({"authentication": "jwt-hs256-roles"} if auth_module else {}),
@@ -1050,6 +1061,7 @@ def _models(
                     ):
                         raise ValueError("choices require static string pairs")
                     field["choices"] = [v[0] for v in choices]
+                    field["choice_labels"] = [list(pair) for pair in choices]
             field.update(source_name=field_name, kind=kind)
             fields.append(field)
         if not any(f["primary_key"] for f in fields):
@@ -1205,6 +1217,10 @@ def _serializer(
                     raise ValueError("field validator must reject one literal string")
                 field.update(forbidden=forbidden, forbidden_error=message)
             field["read_only"] = name in readonly
+            from .drf_metadata import field_info
+
+            # Model storage range already reflects the captured source database.
+            field["metadata"] = field_info(field, declared=override is not None)
             selected.append(field)
         else:
             if (

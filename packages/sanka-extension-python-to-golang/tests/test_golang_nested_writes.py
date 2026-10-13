@@ -58,8 +58,18 @@ def test_nested_write_capture(tmp_path, annotated):
 @pytest.mark.slow
 @pytest.mark.skipif(os.getenv("SANKA_GO_TESTS") != "1", reason="requires cached Go toolchain")
 @pytest.mark.parametrize("target", ["fiber", "chi", "mux", "gin"])
-def test_nested_writes_replay(tmp_path, monkeypatch, target):
+@pytest.mark.parametrize("replay_mode", ["generated", "existing", "existing-json"])
+def test_nested_writes_replay(tmp_path, monkeypatch, target, replay_mode):
     base = project(tmp_path)
+    if replay_mode == "existing-json":
+        settings = tmp_path / "shop_config/settings.py"
+        settings.write_text(
+            settings.read_text().replace(
+                '"UNAUTHENTICATED_USER": None,',
+                '"UNAUTHENTICATED_USER": None, "DEFAULT_RENDERER_CLASSES": '
+                '["rest_framework.renderers.JSONRenderer"],',
+            )
+        )
     base = dataclasses.replace(
         base, configuration=base.configuration | {"target_framework": target}
     )
@@ -141,6 +151,33 @@ def test_nested_writes_replay(tmp_path, monkeypatch, target):
         scenarios.append(
             dict(create, id="identity-after-" + name, setup=[failed], expected_status=201)
         )
+    delete = {"method": "DELETE", "path": "/api/orders/1/", "expected_status": 204}
+    scenarios.append(dict(delete, id="delete-graph", setup=[create]))
+    scenarios.append(
+        dict(create, id="identity-after-delete", setup=[create, delete], expected_status=201)
+    )
+    if replay_mode.startswith("existing"):
+        for method, path, status, setup in [
+            ("OPTIONS", "/api/orders/", 200, []),
+            ("OPTIONS", "/api/orders/1/", 200, [create]),
+            ("OPTIONS", "/api/orders/9999/", 200, []),
+            ("HEAD", "/api/orders/", 200, []),
+            ("HEAD", "/api/orders/1/", 200, [create]),
+            ("TRACE", "/api/orders/", 405, []),
+            ("TRACE", "/api/orders/1/", 405, []),
+            ("GET", "/api/orders", 404, []),
+            ("GET", "/api/orders/1", 404, []),
+        ]:
+            scenarios.append(
+                {
+                    "id": method + path,
+                    "method": method,
+                    "path": path,
+                    "expected_status": status,
+                    "setup": setup,
+                    "capture_headers": ["allow", "content-type"],
+                }
+            )
     (tmp_path / "sanka-verify.json").write_text(json.dumps({"scenarios": scenarios}))
     planned = handle(dataclasses.replace(base, command="plan"))
     assert planned.outcome == "success", planned.error
@@ -153,6 +190,17 @@ def test_nested_writes_replay(tmp_path, monkeypatch, target):
         )
     )
     assert applied.outcome == "success", applied.error
+    if replay_mode.startswith("existing"):
+        base = dataclasses.replace(
+            base,
+            configuration=base.configuration
+            | {
+                "candidate": ".sanka/go/golang",
+                "entrypoint": "cmd/api/main.go",
+                "scenarios": "sanka-verify.json",
+                "db_env": "SHIPMENT_DB_PATH",
+            },
+        )
     verified = handle(dataclasses.replace(base, command="verify"))
     assert verified.outcome == "success", verified.error
     assert verified.data["ok"], verified.data

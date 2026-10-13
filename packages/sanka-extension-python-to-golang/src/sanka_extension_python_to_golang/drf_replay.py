@@ -641,6 +641,13 @@ func TestConventionalDRFReplay(t *testing.T) {
     if captured["configuration"]["database_layer"] == "sqlite":
         from .sqlite import adapt_go
 
+        probe = probe.replace(
+            '        if _,err:=pool.Exec(ctx,"UPDATE migration_identity SET value=0");err!=nil { t.Fatal(err) }',
+            "",
+        ).replace(
+            "SELECT value FROM migration_identity WHERE table_name=$1",
+            "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name=$1),0)",
+        )
         probe = adapt_go(probe)
         probe = probe.replace(
             'if _,err:=pool.Exec(ctx,"TRUNCATE "+strings.Join(tables,",")+" RESTART IDENTITY CASCADE");err!=nil { t.Fatal(err) }',

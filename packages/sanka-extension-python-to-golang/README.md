@@ -1302,10 +1302,12 @@ in SQL. Replay checks cross-identity reads and writes. Session authentication,
 custom permission classes, other JWT policies, and other identity-dependent
 querysets remain blockers. Anonymous projects retain their prior behavior.
 
-For SQLite sources, generated writes use transactional identity counters because SQLite rolls back
-AUTOINCREMENT allocation with failed writes. IDs are allocated by the generated
-handlers; direct SQL writers must not invent their own allocation. PostgreSQL sources
-retain native sequence allocation, including values consumed by rolled-back writes.
+SQLite destinations use native AUTOINCREMENT, including rollback and deleted-ID
+high-water behavior, on generated or existing Django schemas. SQLite-to-PostgreSQL
+writes use transactional identity counters to preserve SQLite rollback behavior;
+direct SQL writers on that destination must use the same allocation. PostgreSQL
+sources targeting PostgreSQL retain native sequences, including values consumed
+by rolled-back writes.
 Application startup, database migrations and shutdown reuse the existing runtime. No service
 or repository layer is added for this CRUD profile.
 
@@ -1394,7 +1396,7 @@ qualified cutover path.
 ### What this profile leaves out
 
 This profile retains `complete_backend=false`. Browsable HTML, form parsers,
-router root/OPTIONS/format suffixes, framework-specific malformed-JSON and
+router root/format suffixes, custom OPTIONS metadata, framework-specific malformed-JSON and
 unhandled-error bodies, host validation, arbitrary middleware, unrecognized
 validators and full application cutover remain outside it. Passing fixture replay
 does not qualify those paths or production deployment.
@@ -1506,7 +1508,14 @@ catching database integrity errors at each level. Update saves scalar fields and
 only when the collection is supplied, deletes and recreates its descendants inside
 the same atomic block. Omitted PATCH collections remain unchanged; an empty list
 clears the collection. A failed descendant write rolls back scalar changes, deleted
-rows, new descendants and SQLite identity counters together.
+rows, new descendants and SQLite identity allocation together. Generated handlers
+explicitly cascade captured relationships within that transaction, including on
+Django-created SQLite tables whose foreign keys use `NO ACTION`. Decimal reads
+restore the declared scale when existing numeric columns omit trailing zeros.
+
+Default anonymous DRF OPTIONS metadata, Allow headers and HEAD responses are
+qualified for the captured serializer subset. Unmatched paths preserve the default
+Django HTML 404 with `DEBUG=False`; custom error handlers remain unsupported.
 
 Child serializers must explicitly enforce required inputs in `to_internal_value`
 before delegating to the superclass, including during PATCH. Inert deferred method
