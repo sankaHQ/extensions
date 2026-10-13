@@ -13,6 +13,10 @@ from typing import cast
 def normalize(tree: ast.Module, module: str, symbols: dict[str, dict[str, str]]) -> ast.Module:
     """Resolve explicit aliases without importing or executing application code."""
     tree = copy.deepcopy(tree)
+    if module.endswith(".serializers"):
+        from .drf_nested import serializer_annotations
+
+        serializer_annotations(tree)
     names: dict[str, str] = {}
     bound: set[str] = set()
     for node in tree.body:

@@ -326,7 +326,11 @@ def capture_project(
         qualified = len(apps) > 1
         trees: dict[str, ast.Module] = {}
         symbols: dict[str, dict[str, str]] = {
-            "django.db": {"models": "models", "transaction": "transaction"},
+            "django.db": {
+                "models": "models",
+                "transaction": "transaction",
+                "IntegrityError": "IntegrityError",
+            },
             "rest_framework": {"serializers": "serializers"},
             "rest_framework.viewsets": {
                 "ModelViewSet": "ModelViewSet",
@@ -451,11 +455,19 @@ def capture_project(
         if len({m["table"] for m in models}) != len(models):
             raise ValueError("duplicate model database table")
         if config["database_layer"] == "sqlite" and any(
-            field["go_type"] not in {"int32", "int64", "bool", "string"}
+            field["go_type"] not in {"int32", "int64", "bool", "string", "DecimalValue"}
             for model in models
             for field in model["fields"]
         ):
-            raise ValueError("SQLite currently qualifies integer, boolean and text model fields")
+            raise ValueError(
+                "SQLite currently qualifies integer, boolean, decimal and text model fields"
+            )
+        if config["database_layer"] == "sqlite" and any(
+            f["go_type"] == "DecimalValue" and int(f["sql_type"].split("(")[1].split(",")[0]) > 15
+            for m in models
+            for f in m["fields"]
+        ):
+            raise ValueError("SQLite source decimals above 15 significant digits require capture")
         model_map = {m["name"]: m for m in models}
         serializers: dict[str, ast.ClassDef] = {}
         views: dict[str, ast.ClassDef] = {}
@@ -542,6 +554,11 @@ def capture_project(
             if serializer_name not in serializers:
                 raise ValueError("unresolved serializer")
             contract = _serializer(serializers[serializer_name], model_map, serializers)
+            if (
+                contract.get("nested", {}).get("update") == "replace"
+                and config["database_layer"] != "sqlite"
+            ):
+                raise ValueError("nested replacement currently qualifies SQLite destinations only")
             read_only = ast.unparse(views[view_name].bases[0]) == "ReadOnlyModelViewSet"
             actions = []
             if "summary" in methods:
@@ -556,6 +573,9 @@ def summary(self, request):
             scope = _view_scope(methods, model_map[contract["model"]], contract, read_only)
             if scope and "queryset" in attrs:
                 raise ValueError("claim-scoped queryset must not have a static queryset")
+            from .drf_nested import prefetch_queryset
+
+            attrs = prefetch_queryset(attrs, contract)
             query = _view_query(attrs, model_map[contract["model"]], settings["page_size"], scope)
             contracts.append(
                 {
@@ -575,12 +595,12 @@ def summary(self, request):
             or len({v["path"] for v in contracts}) != len(contracts)
         ):
             raise ValueError("unconsumed or duplicate viewsets")
-        used_serializers = {v["serializer"]["name"] for v in contracts}
-        used_serializers.update(
-            v["serializer"]["nested"]["serializer"]["name"]
-            for v in contracts
-            if v["serializer"].get("nested")
-        )
+        used_serializers = set()
+        for view in contracts:
+            serializer = view["serializer"]
+            while serializer:
+                used_serializers.add(serializer["name"])
+                serializer = serializer.get("nested", {}).get("serializer")
         if used_serializers != set(serializers):
             raise ValueError("unconsumed serializer classes require capture")
         tests: list[str] = []
@@ -874,6 +894,7 @@ def _models(
         fields: list[dict[str, Any]] = []
         constants = {}
         ordering = ["id"]
+        unique_together = []
         original_name = next((k for k, v in (identities or {}).items() if v == name), name)
         table = identifier(app + "_" + original_name.lower())
         for node in cls.body:
@@ -881,8 +902,12 @@ def _models(
                 if node.bases or node.decorator_list or node.keywords:
                     raise ValueError("unsupported model Meta")
                 meta = _assignments(node.body)
-                if set(meta) - {"ordering", "db_table", "app_label"}:
+                if set(meta) - {"ordering", "db_table", "app_label", "unique_together"}:
                     raise ValueError("unsupported model Meta setting")
+                if "unique_together" in meta:
+                    from .drf_nested import composite_groups
+
+                    unique_together = composite_groups(_literal(meta["unique_together"]))
                 if "ordering" in meta:
                     ordering = _literal(meta["ordering"])
                     if ordering not in (["id"], ("id",)):
@@ -1048,8 +1073,20 @@ def _models(
             or not fields[0]["auto"]
         ):
             raise ValueError("conventional models require auto id primary keys")
+        constraints = []
+        for group in unique_together:
+            by_source = {f["source_name"]: f for f in fields}
+            if any(n not in by_source or by_source[n]["primary_key"] for n in group):
+                raise ValueError("invalid composite uniqueness fields")
+            constraints.append(
+                {
+                    "name": identifier(table + "_" + "_".join(group) + "_uniq"),
+                    "columns": [by_source[n]["name"] for n in group],
+                }
+            )
         result.append(
             {
+                **({"constraints": constraints} if constraints else {}),
                 "name": name,
                 "table": table,
                 "fields": fields,
@@ -1062,7 +1099,11 @@ def _models(
 
 
 def _serializer(
-    cls: ast.ClassDef, models: dict[str, dict[str, Any]], classes: dict[str, ast.ClassDef]
+    cls: ast.ClassDef,
+    models: dict[str, dict[str, Any]],
+    classes: dict[str, ast.ClassDef],
+    *,
+    child_context: bool = False,
 ) -> dict[str, Any]:
     meta = [n for n in cls.body if isinstance(n, ast.ClassDef) and n.name == "Meta"]
     if len(meta) != 1 or meta[0].bases or meta[0].decorator_list or meta[0].keywords:
@@ -1178,7 +1219,12 @@ def _serializer(
                 or _literal(override.keywords[0].value) is not True
             ):
                 raise ValueError("only one explicit nested serializer is qualified")
-            child = _serializer(classes[override.func.id], models, {})
+            child = _serializer(
+                classes[override.func.id],
+                models,
+                {k: v for k, v in classes.items() if k != cls.name},
+                child_context=True,
+            )
             if any(f["unique"] for f in child["fields"]):
                 raise ValueError("nested uniqueness validators require separate capture")
             child_model = models[child["model"]]
@@ -1187,13 +1233,33 @@ def _serializer(
                 for f in child_model["fields"]
                 if f.get("reference_model") == model["name"] and f.get("related_name") == name
             ]
-            if len(foreign) != 1 or child.get("nested"):
+            if len(foreign) != 1:
                 raise ValueError("nested serializer requires one reverse foreign key")
             nested = {"name": name, "serializer": child, "foreign_key": foreign[0]["name"]}
-    if overrides or set(methods) - {"create", "update"}:
+    from .drf_nested import replacement_recipe, required_fields
+
+    required = required_fields(methods.pop("to_internal_value", None), names)
+    helper = next((n for n in methods if n.startswith("_create_")), None)
+    if overrides or set(methods) - {"create", "update", helper}:
         raise ValueError("unconsumed serializer fields or hooks")
     result = {"name": cls.name, "model": model["name"], "fields": selected}
+    if required:
+        result["always_required"] = required
+    if model.get("constraints") and not child_context:
+        raise ValueError("composite uniqueness currently requires a captured nested write")
+    if nested and child_context and not methods:
+        result["nested"] = nested
+        return result
+    if nested and helper:
+        replacement_recipe(methods, helper, model, nested, models)
+        nested["update"] = "replace"
+        result["nested"] = nested
+        return result
     if nested:
+        if nested["serializer"].get("nested") or models[nested["serializer"]["model"]].get(
+            "constraints"
+        ):
+            raise ValueError("recursive writes require the captured replacement recipe")
         if set(methods) != {"create", "update"}:
             raise ValueError("nested writes require explicit captured create/update")
         create: Any = methods["create"]
@@ -1475,7 +1541,7 @@ def _migration(
             args += [str(k) + "=" + ast.unparse(v) for k, v in keywords.items()]
             lines.append(f"    {field_name} = {ast.unparse(field.func)}({', '.join(args)})")
         meta = _literal(options["options"])
-        if not isinstance(meta, dict) or set(meta) - {"ordering", "db_table"}:
+        if not isinstance(meta, dict) or set(meta) - {"ordering", "db_table", "unique_together"}:
             raise ValueError("unsupported migration model options")
         lines.append("    class Meta:")
         lines.extend("        " + str(k) + "=" + repr(v) for k, v in meta.items())

@@ -1490,3 +1490,34 @@ padded text are checked against the running source, within the shared 12-probe
 budget. This does not enable generation for unsupported source behavior or claim
 full application parity. Changing these probes changes repair feedback, so compare
 new benchmark runs as a separate versioned cohort.
+
+
+### Nested transactional replacement on SQLite
+
+The conventional DRF profile additionally captures a parent with one child collection
+and one grandchild collection. Each child model must declare one parent-scoped
+`unique_together` pair, matching its initial migration. Native migrations enforce
+these constraints; indexed validation errors come from the source's captured
+`IntegrityError` handlers, not invented messages.
+
+The supported write recipe creates a parent inside `transaction.atomic()` and calls
+one `_create_*` helper. That helper creates children and grandchildren in order,
+catching database integrity errors at each level. Update saves scalar fields and,
+only when the collection is supplied, deletes and recreates its descendants inside
+the same atomic block. Omitted PATCH collections remain unchanged; an empty list
+clears the collection. A failed descendant write rolls back scalar changes, deleted
+rows, new descendants and SQLite identity counters together.
+
+Child serializers must explicitly enforce required inputs in `to_internal_value`
+before delegating to the superclass, including during PATCH. Inert deferred method
+annotations and literal `prefetch_related` paths along captured relationships are
+supported. SQLite decimals use the existing native decimal validator
+and canonical text storage, limited to source declarations with at most 15 significant
+digits. All four Go routers share the same transaction implementation.
+
+This is a bounded static recipe, not general execution of serializer Python. Extra
+hooks, filtered deletes, changed transaction options, recursive or deeper serializer
+graphs, multiple composite constraints, scalar/nested uniqueness validators, and
+PostgreSQL destinations for this replacement recipe remain blocked. The independent
+shipment/parcel/charge fixture covers HTTP responses, database state and rollback
+through the published plan/apply/verify lifecycle.

@@ -157,6 +157,7 @@ import (
     "context"
     _ "embed"
     "encoding/json"
+    "github.com/jackc/pgx/v5/pgconn"
     "errors"
     "fmt"
     "math"
@@ -203,10 +204,13 @@ type drfSerializer struct {
     Model string `json:"model"`
     Fields []drfField `json:"fields"`
     Nested *drfNested `json:"nested"`
+    AlwaysRequired []string `json:"always_required"`
 }
 type drfNested struct {
     Name string `json:"name"`
     ForeignKey string `json:"foreign_key"`
+    Update string `json:"update"`
+    IntegrityError []string `json:"integrity_error"`
     Serializer drfSerializer `json:"serializer"`
     Aggregate struct { Field string `json:"field"`; Limit int64 `json:"limit"`; Error map[string]any `json:"error"` } `json:"aggregate"`
 }
@@ -299,6 +303,10 @@ func drfValidate(raw []byte, schema drfSerializer, partial bool) (map[string]any
     if err := json.Unmarshal(raw, &data); err != nil || data == nil {
         return nil, map[string]any{"non_field_errors":drfMessages("Invalid data. Expected a dictionary, but got " + drfType(raw) + ".")}
     }
+    for _,name:=range schema.AlwaysRequired {
+        if _,present:=data[name];!present { invalid[name]=drfMessages("This field is required.") }
+    }
+    if len(invalid)>0 { return nil,invalid }
     values := map[string]any{}
     for _, field := range schema.Fields {
         if field.Primary || field.ReadOnly { continue }
@@ -438,6 +446,27 @@ func drfInsert(ctx context.Context, tx pgx.Tx, model drfModel, values map[string
     return id,err
 }
 
+// The caller owns one transaction, including deletes, every descendant and counters.
+func drfWriteChildren(ctx context.Context, tx pgx.Tx, nested *drfNested, parent int64, value any) (map[string]any,error) {
+    children,ok:=value.([]map[string]any);if !ok { return nil,fmt.Errorf("missing nested collection") }
+    for i,child:=range children {
+        child[nested.ForeignKey]=parent
+        id,err:=drfInsert(ctx,tx,drfModelFor(nested.Serializer.Model),child)
+        if err!=nil {
+            var constraint *pgconn.PgError
+            if errors.As(err,&constraint) && strings.HasPrefix(constraint.Code,"23") {
+                return map[string]any{nested.Name:map[string]any{strconv.Itoa(i):map[string]any{"non_field_errors":nested.IntegrityError}}},nil
+            }
+            return nil,err
+        }
+        if next:=nested.Serializer.Nested;next!=nil {
+            invalid,err:=drfWriteChildren(ctx,tx,next,id,child[next.Name]);if err!=nil { return nil,err }
+            if invalid!=nil { return map[string]any{nested.Name:map[string]any{strconv.Itoa(i):invalid}},nil }
+        }
+    }
+    return nil,nil
+}
+
 func drfWhere(query drfQuery, scope map[string]string, principal map[string]string) (string,[]any) {
     names:=[]string{};for name:=range query.Filters { names=append(names,name) };sort.Strings(names)
     terms,args:=[]string{},[]any{}
@@ -575,7 +604,7 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
     if !detail {
         for field,claim:=range view.Scope { values[field]=principal[claim] }
         id,err=drfInsert(ctx,tx,model,values)
-        if err==nil && schema.Nested!=nil {
+        if err==nil && schema.Nested!=nil && schema.Nested.Update!="replace" {
             nested:=schema.Nested;total:=int64(0)
             for _,child:=range values[nested.Name].([]map[string]any) {
                 child[nested.ForeignKey]=id
@@ -592,6 +621,14 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
             updateArgs=append(updateArgs,value);sets=append(sets,quoted(field.Name)+fmt.Sprintf("=$%d",len(updateArgs)))
         }
         if len(sets)>0 { _,err=tx.Exec(ctx,"UPDATE "+quoted(model.Table)+" SET "+strings.Join(sets,",")+where,updateArgs...) }
+    }
+    if err==nil && schema.Nested!=nil && schema.Nested.Update=="replace" {
+        nested:=schema.Nested
+        children,present:=values[nested.Name]
+        if present {
+            if detail { _,err=tx.Exec(ctx,"DELETE FROM "+quoted(drfModelFor(nested.Serializer.Model).Table)+" WHERE "+quoted(nested.ForeignKey)+"=$1",id) }
+            if err==nil { var invalid map[string]any;invalid,err=drfWriteChildren(ctx,tx,nested,id,children);if invalid!=nil { return 400,invalid } }
+        } else if !detail { err=fmt.Errorf("missing nested collection") }
     }
     if err!=nil { return 500,map[string]string{"detail":"Database write failed."} }
     saved,err:=drfRows(ctx,tx,schema," WHERE id=$1",id);if err!=nil || len(saved)!=1 { return 500,map[string]string{"detail":"Database read failed."} }
