@@ -68,24 +68,33 @@ class ReplayError(Exception):
 # Scenario loading
 
 
+class ScenarioError(ReplayError):
+    """Invalid supplied input can be corrected without retrying infrastructure."""
+
+    def __init__(self, message: str):
+        super().__init__(message, category="candidate_failure")
+
+
 def load_scenarios(path: Path) -> list[dict[str, Any]]:
     """Load and validate a scenario file (a list, or an object with ``scenarios``)."""
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+    except OSError as error:
         raise ReplayError(f"could not read scenarios from {path}: {error}") from error
+    except json.JSONDecodeError as error:
+        raise ScenarioError(f"could not read scenarios from {path}: {error}") from error
     items = payload.get("scenarios") if isinstance(payload, dict) else payload
     if not isinstance(items, list):
-        raise ReplayError("scenarios must be a JSON array or an object with a `scenarios` array")
+        raise ScenarioError("scenarios must be a JSON array or an object with a `scenarios` array")
     if not items:
-        raise ReplayError("scenarios must not be empty")
+        raise ScenarioError("scenarios must not be empty")
     scenarios: list[dict[str, Any]] = []
     seen: set[str] = set()
     for index, item in enumerate(items):
         scenario = _validated_request(item, f"scenarios[{index}]", require_id=True)
         identifier = str(scenario["id"])
         if identifier in seen:
-            raise ReplayError(f"duplicate scenario id: {identifier}")
+            raise ScenarioError(f"duplicate scenario id: {identifier}")
         seen.add(identifier)
         scenarios.append(scenario)
     return scenarios
@@ -93,45 +102,45 @@ def load_scenarios(path: Path) -> list[dict[str, Any]]:
 
 def _validated_request(item: object, label: str, *, require_id: bool) -> dict[str, Any]:
     if not isinstance(item, dict):
-        raise ReplayError(f"{label} must be an object")
+        raise ScenarioError(f"{label} must be an object")
     method = str(item.get("method", "GET")).upper()
     if method not in HTTP_METHODS:
-        raise ReplayError(f"{label}.method is not an HTTP method: {method}")
+        raise ScenarioError(f"{label}.method is not an HTTP method: {method}")
     path = item.get("path")
     if not isinstance(path, str) or not path.startswith("/"):
-        raise ReplayError(f"{label}.path must start with '/'")
+        raise ScenarioError(f"{label}.path must start with '/'")
     headers = item.get("headers") or {}
     if not isinstance(headers, dict) or not all(
         isinstance(key, str) and isinstance(value, str) for key, value in headers.items()
     ):
-        raise ReplayError(f"{label}.headers must map strings to strings")
+        raise ScenarioError(f"{label}.headers must map strings to strings")
     if sum(name in item for name in ("body", "body_base64", "multipart")) > 1:
-        raise ReplayError(f"{label} must use only one body encoding")
+        raise ScenarioError(f"{label} must use only one body encoding")
     if "body_base64" in item:
         try:
             base64.b64decode(item["body_base64"], validate=True)
         except (ValueError, TypeError) as error:
-            raise ReplayError(f"{label}.body_base64 must be valid base64") from error
+            raise ScenarioError(f"{label}.body_base64 must be valid base64") from error
     multipart = item.get("multipart")
     if multipart is not None and not isinstance(multipart, dict):
-        raise ReplayError(f"{label}.multipart must be an object")
+        raise ScenarioError(f"{label}.multipart must be an object")
     capture = item.get("capture_headers") or []
     if not isinstance(capture, list) or not all(isinstance(name, str) for name in capture):
-        raise ReplayError(f"{label}.capture_headers must be an array of header names")
+        raise ScenarioError(f"{label}.capture_headers must be an array of header names")
     response_body = item.get("response_body")
     if response_body not in (None, "base64"):
-        raise ReplayError(f"{label}.response_body must be omitted or 'base64'")
+        raise ScenarioError(f"{label}.response_body must be omitted or 'base64'")
     if "expected_source_status" in item:
         if not require_id:
-            raise ReplayError(
+            raise ScenarioError(
                 f"{label}.expected_source_status is supported only on top-level scenarios"
             )
         expected = item["expected_source_status"]
         if type(expected) is not int or not 100 <= expected <= 599:
-            raise ReplayError(f"{label}.expected_source_status must be an integer HTTP status")
+            raise ScenarioError(f"{label}.expected_source_status must be an integer HTTP status")
     setup_items = item.get("setup") or []
     if not isinstance(setup_items, list):
-        raise ReplayError(f"{label}.setup must be an array of requests")
+        raise ScenarioError(f"{label}.setup must be an array of requests")
     setup = [
         _validated_request(step, f"{label}.setup[{position}]", require_id=False)
         for position, step in enumerate(setup_items)
@@ -155,7 +164,7 @@ def _validated_request(item: object, label: str, *, require_id: bool) -> dict[st
     if require_id:
         identifier = item.get("id")
         if not isinstance(identifier, str) or not identifier:
-            raise ReplayError(f"{label}.id must be a non-empty string")
+            raise ScenarioError(f"{label}.id must be a non-empty string")
         validated["id"] = identifier
     elif "id" in item:
         validated["id"] = str(item["id"])
@@ -232,6 +241,16 @@ def _contract_probes(
         for s in (scan.get("serializer_details") or [])
         if isinstance(s, dict) and isinstance(s.get("name"), str)
     }
+    read_paths = {
+        str(scenario["path"])
+        for scenario in scenarios
+        if str(scenario.get("method", "GET")).upper() == "GET"
+    }
+    collections = set()
+    for path in read_paths:
+        parent, _, identifier = path.partition("?")[0].rstrip("/").rpartition("/")
+        if identifier.isascii() and identifier.isdigit():
+            collections.add(parent)
     probes: list[dict[str, Any]] = []
     groups: list[list[dict[str, Any]]] = []
     for scenario in scenarios:
@@ -263,6 +282,14 @@ def _contract_probes(
                 changes.append(
                     ("numeric-path", {"method": "GET", "path": changed_path + separator + query})
                 )
+        if (
+            request_only
+            and method == "POST"
+            and str(scenario["path"]).partition("?")[0].rstrip("/") in collections
+            and scenario["path"] not in read_paths
+        ):
+            # A supplied detail read corroborates the collection; the source decides GET support.
+            changes.append(("read-path", {"method": "GET"}))
         fields = serializers.get(route.get("serializer"), {}).get("fields", [])
         readonly = {
             f["name"]: {"sanka_read_only_probe": True}
@@ -308,6 +335,9 @@ def _contract_probes(
                 generated_from=route["path"],
                 context_from=scenario["id"],
             )
+            if kind == "read-path":
+                for encoding in ("body", "body_base64", "multipart"):
+                    probe.pop(encoding, None)
             group.append(probe)
         groups.append(group)
     seen: set[tuple[str, str, str]] = set()
@@ -345,16 +375,30 @@ def _write_probes(
     body = scenario.get("body")
     if isinstance(body, dict):
         if request_only:
+            field_groups = []
             for name, value in body.items():
+                field_changes: list[tuple[str, str, Any]] = []
                 variants: list[tuple[str, Any]] = []
                 if isinstance(value, list):
                     variants = [("null-collection", None)]
+                    if value and isinstance(value[0], dict):
+                        for nested_name, nested_value in value[0].items():
+                            if isinstance(nested_value, list):
+                                nested_list = copy.deepcopy(value)
+                                del nested_list[0][nested_name]
+                                field_changes.append(
+                                    (f"missing-collection:{name}:{nested_name}", name, nested_list)
+                                )
+                                break
                 elif isinstance(value, str | int | float | bool):
                     variants = [("null-scalar", None)]
+                    if type(value) is int:
+                        variants.append(("integer-string", str(value)))
                     if isinstance(value, str):
                         if re.fullmatch(r"[+-]?[0-9]+\.[0-9]+", value):
                             # Decimal scale can be significant even when the value is unchanged.
                             variants.append(("decimal-scale", value + "0"))
+                            variants.append(("decimal-sign", "-" + value.lstrip("+-")))
                             # Cross the 64-bit integer boundary without changing fractional scale.
                             variants.append(
                                 ("decimal-precision", "9" * 20 + "." + value.split(".")[1])
@@ -367,11 +411,21 @@ def _write_probes(
                             ]
                         )
                 for kind, replacement in variants:
-                    changes.append(
-                        (f"{kind}:{name}", {"body": {**copy.deepcopy(body), name: replacement}})
-                    )
-                    if len(changes) == 12:
-                        return changes
+                    field_changes.append((f"{kind}:{name}", name, replacement))
+                field_groups.append(field_changes)
+            # Give each supplied field coverage before spending the budget on more variants.
+            for batch in zip_longest(*field_groups):
+                for change in batch:
+                    if change is not None:
+                        kind, name, replacement = change
+                        changes.append(
+                            (
+                                kind,
+                                {"body": {**copy.deepcopy(body), name: copy.deepcopy(replacement)}},
+                            )
+                        )
+                        if len(changes) == 12:
+                            return changes
         # ponytail: two collection depths cover common nested writes; deeper graphs stay explicit.
         for depth in (0, 1):
             mutated = copy.deepcopy(body)

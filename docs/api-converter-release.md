@@ -195,3 +195,18 @@ unsupported capture still blocks generation. Offline replay of the unchanged
 Terra003 a26 candidate now exposes its missing-resource response-body mismatch
 instead of accepting all supplied checks. A fresh model attempt is required to
 measure whether the additional feedback changes the benchmark result.
+
+## Python-to-Go a28 / DRF replay a14
+
+Invalid scenario JSON and shapes remain rejected but return recoverable candidate
+feedback. File-access and environment failures remain infrastructure errors.
+Source-oracle probes now sample collection GET when supplied detail GET and POST
+paths corroborate it, omitted nested collections, integer strings and negative
+decimals. Requests and fields share the unchanged 12-probe cap, so sampled
+coverage changes. Unsupported capture safeguards and benchmark limits remain
+unchanged. Offline unchanged a27 candidates expose the previously missed
+validation and list-handler defects; this does not guarantee agent repair.
+
+Publish only the absent immutable api-converters-v0.1.0a28 tag on the reviewed
+merge after final-head CI passes. Qualify downloaded public wheels before a fresh
+retry cohort. Historical attempts and candidates stay unchanged.
