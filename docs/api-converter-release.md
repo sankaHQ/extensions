@@ -1,5 +1,14 @@
 # API converter release
 
+## Existing Django schema parity release 0.1.0a30
+
+Publish the absent immutable `api-converters-v0.1.0a30` tag from the reviewed
+merge. Go a30 fixes native SQLite identity allocation, transactional cascade
+deletes, decimal read scale and default DRF HTTP metadata on existing Django
+schemas. Shared replay stays a14 and unsupported hooks remain blocked. Qualify
+downloaded public assets before a separately recorded benchmark retry; keep
+task definitions, limits, previous candidates and scores unchanged.
+
 ## Nested transactional writes release 0.1.0a29
 
 Publish the absent immutable `api-converters-v0.1.0a29` tag from the reviewed
