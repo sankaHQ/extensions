@@ -4,7 +4,9 @@ from django.db import models
 
 class Shipment(models.Model):
     reference = models.CharField(max_length=30, unique=True)
-    memo = models.TextField(blank=True, default="")
+    memo = models.TextField(
+        blank=True, default="", choices=[("", "Unspecified"), ("updated", "Updated note")]
+    )
 
     class Meta:
         ordering = ["id"]

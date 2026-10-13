@@ -25,7 +25,7 @@ from urllib.parse import urlsplit, unquote
 CONTRACT = json.loads((Path(__file__).resolve().parents[1] / "contract.json").read_text())
 MODELS = CONTRACT["models"]
 SQLITE_TARGET = CONTRACT["configuration"]["database_layer"] == "sqlite"
-COUNTERS = "drf_project" in CONTRACT
+COUNTERS = "drf_project" in CONTRACT and not SQLITE_TARGET
 DRF_SOURCE = CONTRACT["configuration"]["source_framework"] == "drf"
 DEFAULTS = {(step["table"], step["column"]): step["server_default"] for revision in CONTRACT.get("fastapi_persistence", {}).get("lowered_migrations", []) for step in revision["steps"] if step["name"] == "add_column" and step["server_default"] is not None}
 
@@ -120,7 +120,7 @@ def check_sqlite(connection, model, *, source):
     keys = connection.execute("PRAGMA foreign_key_list(" + quote(table) + ")").fetchall()
     if any(row[5] != "NO ACTION" or row[7] != "NONE" for row in keys):
         fail(table + " has unsupported foreign key actions")
-    actual = {(row[3], row[2], row[4], "CASCADE" if source and COUNTERS and row[6] == "NO ACTION" and any(f["name"] == row[3] and f.get("references", {}).get("on_delete") == "CASCADE" for f in model["fields"]) else row[6]) for row in keys}
+    actual = {(row[3], row[2], row[4], "CASCADE" if source and "drf_project" in CONTRACT and row[6] == "NO ACTION" and any(f["name"] == row[3] and f.get("references", {}).get("on_delete") == "CASCADE" for f in model["fields"]) else row[6]) for row in keys}
     if actual != expected:
         fail(table + " foreign keys differ")
     deferred = [match[1].upper() == "DEFERRED" for match in re.findall(r"\b((?:NOT\s+)?DEFERRABLE)(?:\s+INITIALLY\s+(DEFERRED|IMMEDIATE))?", ddl, re.I) if not match[0].upper().startswith("NOT")]
