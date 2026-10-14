@@ -31,6 +31,7 @@ from sanka_extensions.code import ExtensionRequest
         "interrupted",
         "response-timeout",
         "decimal-zero",
+        "decimal-zero-integer",
     ],
 )
 def test_go_candidate_response_parity(
@@ -68,6 +69,13 @@ def test_go_candidate_response_parity(
             'if body["value"]=="0.00" { panic("zero decimal") };'
         )
 
+    if mode == "decimal-zero-integer":
+        mutation = (
+            "var body map[string]any; json.NewDecoder(r.Body).Decode(&body);"
+            'if body["value"]=="0" { w.WriteHeader(400); '
+            'w.Write([]byte(`{"wrong_validation":true}`)); return };'
+        )
+
     (candidate / "ready.csv").write_text('{"ready":true}')
     (candidate / "main.go").write_text(
         'package main\nimport ("net/http"; "os"; "database/sql"; '
@@ -97,7 +105,7 @@ def test_go_candidate_response_parity(
                     "path": "/health/",
                     "body": (
                         {"payer": 7, "payee": 8, "value": "8.25", "reference": "example"}
-                        if mode == "decimal-zero"
+                        if mode.startswith("decimal-zero")
                         else {}
                     ),
                     "setup": [{"method": "GET", "path": "/health/"}],
@@ -112,7 +120,7 @@ def test_go_candidate_response_parity(
         (candidate / "main.go").unlink()
     elif mode == "syntax":
         (candidate / "main.go").write_text("not Go code")
-    if mode == "decimal-zero":
+    if mode.startswith("decimal-zero"):
         (artifacts / "scan.json").write_text('{"routes": []}')
     request = ExtensionRequest(
         "offline",
@@ -120,12 +128,12 @@ def test_go_candidate_response_parity(
         str(tmp_path),
         str(artifacts),
         "sanka/python-to-golang",
-        "0.1.0a31",
+        "0.1.0a32",
         "0" * 64,
         {},
         {
             "scenarios": "cases.json",
-            "edge_probes": mode == "decimal-zero",
+            "edge_probes": mode.startswith("decimal-zero"),
             "settings_module": "settings",
             "candidate": "candidate",
             "entrypoint": "main.go",
@@ -162,6 +170,12 @@ def test_go_candidate_response_parity(
         return
     assert (response.outcome == "success") is (mode == "match"), response.error
     report = json.loads(Path(response.data["report_path"]).read_text())
+    if mode == "decimal-zero-integer":
+        failures = [case for case in report["scenarios"] if not case["match"]]
+        assert len(failures) == 1
+        assert failures[0]["probe_kind"] == "decimal-zero-integer:value"
+        assert failures[0]["status_match"] and not failures[0]["body_match"]
+        assert not json.loads((artifacts / "verify.json").read_text())["ok"]
     assert report["summary"]["status_mismatches"] == (1 if mode == "status" else 0)
     assert report["summary"]["database_mismatches"] == (1 if mode == "write" else 0)
     assert not list(candidate.glob("*.sqlite3"))
@@ -199,7 +213,7 @@ def test_invalid_scenarios_are_recoverable_without_running_candidate(tmp_path, c
             str(tmp_path),
             str(artifacts),
             "sanka/python-to-golang",
-            "0.1.0a31",
+            "0.1.0a32",
             "0" * 64,
             {},
             {"scenarios": "cases.json"},

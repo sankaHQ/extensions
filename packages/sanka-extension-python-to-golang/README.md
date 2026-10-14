@@ -1489,7 +1489,11 @@ keep previous candidates and results unchanged.
 With `--edge-probes`, supplied write requests also provide bounded replay coverage
 when static capture reports an unsupported route. Null collections and blank or
 padded text are checked against the running source, within the shared 12-probe
-budget. This does not enable generation for unsupported source behavior or claim
+budget. Decimal strings also sample zero with and without a fractional part
+(for example, `"0.00"` and `"0"`); parsers can reject these differently. The source
+response determines correctness, including the error body. Under this fixed cap,
+additional representations can displace later sign or precision probes in wide
+requests. Supply explicit scenarios for boundaries that require guaranteed coverage. This does not enable generation for unsupported source behavior or claim
 full application parity. Changing these probes changes repair feedback, so compare
 new benchmark runs as a separate versioned cohort.
 
