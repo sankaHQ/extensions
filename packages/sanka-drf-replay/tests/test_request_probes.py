@@ -172,7 +172,7 @@ def test_numeric_probes_preserve_other_fields_and_decimal_scale():
         "id": "payment",
         "method": "POST",
         "path": "/payments/",
-        "body": {"payer": 7, "payee": 8, "value": "12.50", "reference": "sample"},
+        "body": {"payer": 7, "payee": 8, "value": "12.50"},
     }
     before = copy.deepcopy(scenario)
     probes = edge_probes_from_scan({}, [scenario])

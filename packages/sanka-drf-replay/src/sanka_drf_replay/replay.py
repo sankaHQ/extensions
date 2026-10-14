@@ -400,6 +400,8 @@ def _write_probes(
                             variants.append(("decimal-scale", value + "0"))
                             # Zero reaches different parsing/minimum branches; keep scale.
                             variants.append(("decimal-zero", "0." + "0" * len(value.split(".")[1])))
+                            # A whole-number spelling exercises parsers without a fraction.
+                            variants.append(("decimal-zero-integer", "0"))
                             variants.append(("decimal-sign", "-" + value.lstrip("+-")))
                             # Cross the 64-bit integer boundary without changing fractional scale.
                             variants.append(
