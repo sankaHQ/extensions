@@ -253,3 +253,17 @@ guards or repairing the benchmark candidates. No new benchmark score is claimed.
 Publish only the absent immutable `api-converters-v0.1.0a31` tag on the reviewed
 merge after final-head CI passes. Qualify downloaded public assets before the
 authorized, separately recorded retry attempts. CLI remains 0.3.11.
+
+## Python-to-Go a32 / DRF replay a16
+
+Fallback replay samples both scaled and whole-number zero representations of
+observed decimal strings. The source remains the response/database oracle. This
+catches parsers that reject `"0"` differently from `"0.00"`; it does not generate
+unsupported applications or repair model-written candidates. The 12-probe cap
+remains unchanged, so wide requests can lose later sign/precision samples.
+
+Publish only the absent immutable `api-converters-v0.1.0a32` tag from the reviewed
+merge after final-head CI passes. Qualify downloaded public assets before the
+separately authorized GLM task004 retry with CLI 0.3.11. Preserve the benchmark,
+historical candidate and score. A verification improvement does not guarantee
+model repair or a benchmark pass.
