@@ -102,7 +102,7 @@ def test_decimal_request_probes_cover_precision_without_changing_scale():
         "id": "payment",
         "method": "POST",
         "path": "/payments/",
-        "body": {"payer": 1, "payee": 2, "value": "12.50", "reference": "sample"},
+        "body": {"value": "12.50", "reference": "sample"},
         "headers": {"Authorization": "Custom sample"},
         "setup": [{"method": "POST", "path": "/fixtures/"}],
     }

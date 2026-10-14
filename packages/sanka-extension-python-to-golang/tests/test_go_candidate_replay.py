@@ -21,7 +21,17 @@ from sanka_extensions.code import ExtensionRequest
 )
 @pytest.mark.parametrize(
     "mode",
-    ["match", "status", "write", "missing", "syntax", "cache", "interrupted", "response-timeout"],
+    [
+        "match",
+        "status",
+        "write",
+        "missing",
+        "syntax",
+        "cache",
+        "interrupted",
+        "response-timeout",
+        "decimal-zero",
+    ],
 )
 def test_go_candidate_response_parity(
     tmp_path: Path, mode: str, monkeypatch: pytest.MonkeyPatch
@@ -52,11 +62,17 @@ def test_go_candidate_response_parity(
     )
     status = 503 if mode == "status" else 200
     mutation = 'db.Exec("INSERT INTO audit VALUES (1)");' if mode == "write" else ""
+    if mode == "decimal-zero":
+        mutation = (
+            "var body map[string]any; json.NewDecoder(r.Body).Decode(&body);"
+            'if body["value"]=="0.00" { panic("zero decimal") };'
+        )
 
     (candidate / "ready.csv").write_text('{"ready":true}')
     (candidate / "main.go").write_text(
         'package main\nimport ("net/http"; "os"; "database/sql"; '
-        '_ "modernc.org/sqlite"; _ "embed")\n'
+        '_ "modernc.org/sqlite"; _ "embed"; "encoding/json")\n'
+        "var _ = json.Valid\n"
         "//go:embed ready.csv\nvar reply []byte\n"
         "func main() {\n"
         'db,err:=sql.Open("sqlite",os.Getenv("DATABASE_URL"));'
@@ -79,7 +95,11 @@ def test_go_candidate_response_parity(
                     "id": "reject",
                     "method": "POST",
                     "path": "/health/",
-                    "body": {},
+                    "body": (
+                        {"payer": 7, "payee": 8, "value": "8.25", "reference": "example"}
+                        if mode == "decimal-zero"
+                        else {}
+                    ),
                     "setup": [{"method": "GET", "path": "/health/"}],
                 },
             ]
@@ -92,17 +112,20 @@ def test_go_candidate_response_parity(
         (candidate / "main.go").unlink()
     elif mode == "syntax":
         (candidate / "main.go").write_text("not Go code")
+    if mode == "decimal-zero":
+        (artifacts / "scan.json").write_text('{"routes": []}')
     request = ExtensionRequest(
         "offline",
         "verify",
         str(tmp_path),
         str(artifacts),
         "sanka/python-to-golang",
-        "0.1.0a30",
+        "0.1.0a31",
         "0" * 64,
         {},
         {
             "scenarios": "cases.json",
+            "edge_probes": mode == "decimal-zero",
             "settings_module": "settings",
             "candidate": "candidate",
             "entrypoint": "main.go",
@@ -129,12 +152,12 @@ def test_go_candidate_response_parity(
 
         monkeypatch.setattr(http.client.HTTPConnection, "getresponse", timeout)
     response = handle(request)
-    if mode in {"missing", "syntax", "cache", "interrupted", "response-timeout"}:
+    if mode in {"missing", "syntax", "cache", "interrupted", "response-timeout", "decimal-zero"}:
         assert response.outcome == "error"
         assert response.error.code == "SANKA_EXTENSION_REPLAY_INVALID"
         assert response.error.details["failure_category"] == (
             "infrastructure_failure" if mode in {"cache", "interrupted"} else "candidate_failure"
-        )
+        ), response.error
         assert not (artifacts / "verify.json").exists()
         return
     assert (response.outcome == "success") is (mode == "match"), response.error
@@ -176,7 +199,7 @@ def test_invalid_scenarios_are_recoverable_without_running_candidate(tmp_path, c
             str(tmp_path),
             str(artifacts),
             "sanka/python-to-golang",
-            "0.1.0a30",
+            "0.1.0a31",
             "0" * 64,
             {},
             {"scenarios": "cases.json"},
