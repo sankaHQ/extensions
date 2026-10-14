@@ -398,6 +398,8 @@ def _write_probes(
                         if re.fullmatch(r"[+-]?[0-9]+\.[0-9]+", value):
                             # Decimal scale can be significant even when the value is unchanged.
                             variants.append(("decimal-scale", value + "0"))
+                            # Zero reaches different parsing/minimum branches; preserve source scale.
+                            variants.append(("decimal-zero", "0." + "0" * len(value.split(".")[1])))
                             variants.append(("decimal-sign", "-" + value.lstrip("+-")))
                             # Cross the 64-bit integer boundary without changing fractional scale.
                             variants.append(
