@@ -229,7 +229,7 @@ Publish only the absent immutable api-converters-v0.1.0a28 tag on the reviewed
 merge after final-head CI passes. Qualify downloaded public wheels before a fresh
 retry cohort. Historical attempts and candidates stay unchanged.
 
-## Unreleased: decimal zero replay coverage
+## Python-to-Go a31 / DRF replay a15
 
 When static capture is unavailable, `--edge-probes` now mutates supplied decimal
 strings to zero while preserving fractional scale. This exercises zero parsing
@@ -249,3 +249,7 @@ it; afterward, verification reports a candidate failure and clears stale success
 Saved DeepSeek a30 task002/004 failures were already identified by CLI replay
 (missing Allow headers and untrimmed text); neither justifies changing generation
 guards or repairing the benchmark candidates. No new benchmark score is claimed.
+
+Publish only the absent immutable `api-converters-v0.1.0a31` tag on the reviewed
+merge after final-head CI passes. Qualify downloaded public assets before the
+authorized, separately recorded retry attempts. CLI remains 0.3.11.

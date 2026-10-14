@@ -120,7 +120,7 @@ def test_go_candidate_response_parity(
         str(tmp_path),
         str(artifacts),
         "sanka/python-to-golang",
-        "0.1.0a30",
+        "0.1.0a31",
         "0" * 64,
         {},
         {
@@ -199,7 +199,7 @@ def test_invalid_scenarios_are_recoverable_without_running_candidate(tmp_path, c
             str(tmp_path),
             str(artifacts),
             "sanka/python-to-golang",
-            "0.1.0a30",
+            "0.1.0a31",
             "0" * 64,
             {},
             {"scenarios": "cases.json"},
