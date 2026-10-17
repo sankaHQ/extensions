@@ -62,7 +62,7 @@ func TestMissingPrincipal(t *testing.T) {
     authentication := view.Authentication
     view.Authentication = ""
     for _, method := range []string{"GET", "POST", "PATCH", "DELETE"} {
-        path := "/"+view.Path
+        path := view.Path
         if method=="PATCH" || method=="DELETE" { path += "1/" }
         status,_ := drfRequest(context.Background(),nil,method,path,
             []byte(`{"content":"x"}`),"application/json","application/json","","")
@@ -71,7 +71,7 @@ func TestMissingPrincipal(t *testing.T) {
     view.Authentication = authentication
     view.Scope["owner"] = "missing-claim"
     SET_ENV
-    status,_ := drfRequest(context.Background(),nil,"GET","/"+view.Path,nil,
+    status,_ := drfRequest(context.Background(),nil,"GET",view.Path,nil,
         "application/json","application/json",TOKEN,"")
     if status!=403 { t.Fatalf("missing claim returned %d",status) }
 }
