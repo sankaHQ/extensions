@@ -495,6 +495,10 @@ def _scan(root: Path, config: dict[str, JsonValue]) -> dict[str, Any]:
                     )
                 if stock_root:
                     source, reason = root_handler(callback, method.upper())
+                from sanka_code_migration.drf.callbacks import stock_callback
+
+                if not stock_callback(callback):
+                    source, reason = None, "custom URL callback wrapper requires manual migration"
                 initialization = getattr(callback, "initkwargs", {})
                 if (
                     initialization
@@ -575,7 +579,7 @@ from flask.json.provider import DefaultJSONProvider
 from sanka_form import parse_form, FormError
 from django.db.models.query import QuerySet
 from sanka_native import (
-    _Input, _ValidationError, _exceptions, AuthenticationFailed, SimpleNamespace,
+    _Input, _ValidationError, _exceptions, AuthenticationFailed, SimpleNamespace, request_encoding,
 )
 
 class _OrmJSON(DefaultJSONProvider):
@@ -668,7 +672,7 @@ def _json_data():
     def reject_constant(value):
         raise ValueError("Out of range float values are not JSON compliant: " + repr(value))
     try:
-        decoded = raw.decode(request.mimetype_params.get("charset", "utf-8"))
+        decoded = raw.decode(request_encoding(request.mimetype_params.get("charset", "utf-8")))
         g._sanka_json_data = json.loads(decoded, parse_constant=reject_constant)
         return g._sanka_json_data
     except (ValueError, UnicodeError) as error:
@@ -802,7 +806,10 @@ urlpatterns = []
     return {
         "target_app.py": "\n\n".join(pieces) + "\n",
         "sanka_native.py": Path(__file__).with_name("native_runtime.py").read_text(),
-        "sanka_form.py": Path(__file__).with_name("form_runtime.py").read_text(),
+        "sanka_form.py": Path(__file__)
+        .with_name("form_runtime.py")
+        .read_text()
+        .replace("from .native_runtime import", "from sanka_native import"),
         "sanka_model.py": Path(__file__)
         .with_name("model_runtime.py")
         .read_text()

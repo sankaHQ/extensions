@@ -31,7 +31,7 @@ assert all(route.options for route in empty_scan.routes), [
 ]
 call_command("migrate", run_syncdb=True, verbosity=0)
 from bulletins.models import Account, Collection, Entry
-from bulletins.permissions import CollectionMembers, EntryMembers, ParentMembers
+from bulletins.permissions import CollectionMembers, EntryMembers, EntryParentMembers, ParentMembers
 from bulletins.views import (
     AddMember,
     Collections,
@@ -64,6 +64,27 @@ assert (
     capture_membership_permission(EntryMembers, Entry)["relation"]["foreign_key"] == "collection_id"
 )
 assert capture_membership_permission(ParentMembers, Entry)["parent_param"] == "pk"
+assert capture_membership_permission(EntryParentMembers, Entry) is None
+from functools import wraps
+
+from django.urls import path as url_path
+from sanka_code_migration.drf.callbacks import stock_callback
+
+original = Collections.as_view()
+
+
+@wraps(original)
+def guarded(*args, **kwargs):
+    raise PermissionError("URL guard")
+
+
+assert stock_callback(original)
+assert not stock_callback(guarded)
+wrapped_scan = _walk_patterns(
+    [url_path("guarded/", guarded)], root_path=Path(fixture), middleware=()
+)
+assert all(not route.native for route in wrapped_scan.routes)
+
 for view, model in [
     (Collections, Collection),
     (Entries, Entry),
@@ -336,3 +357,43 @@ async def check():
 asyncio.run(check())
 assert database_state() == expected_state, (database_state(), expected_state)
 print("Membership, superuser, anonymous lookup order, and cross-parent request parity passed")
+
+if not generated:
+
+    class Edited(runtime.CarryoverView):
+        def create(self, request, **kwargs):
+            request.data["name"] = "changed-by-view"
+            return super().create(request, **kwargs)
+
+    spec = next(item for item in runtime.MANIFEST["resources"] if item["view"].endswith(".Entries"))
+    spec["view_carryover"] = {"class": "Edited", "operations": ["create"]}
+    runtime._USER_VIEWS = types.SimpleNamespace(Edited=Edited)
+
+    async def check_carried():
+        await store.init_db()
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://testserver"
+            ) as client:
+                response = await client.post(
+                    f"/collections/{b.pk}/entries/",
+                    json={"name": "attacker-input", "purchased": False},
+                    headers={"Authorization": "Token " + tokens["bob"]},
+                )
+                assert response.status_code == 201, response.text
+                assert response.json()["name"] == "changed-by-view", response.text
+                malformed = await client.post(
+                    f"/collections/{b.pk}/entries/",
+                    content=b"{bad",
+                    headers={
+                        "Authorization": "Token " + tokens["bob"],
+                        "Content-Type": "application/json",
+                    },
+                )
+                assert malformed.status_code == 400, malformed.text
+        finally:
+            await store.close_db()
+
+    asyncio.run(check_carried())
+    assert Entry.objects.filter(name="changed-by-view", collection=b).count() == 1
+    assert not Entry.objects.filter(name="attacker-input").exists()

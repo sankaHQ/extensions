@@ -155,6 +155,7 @@ class SerializerFieldIR:
     kind: str
     required: bool = False
     read_only: bool = False
+    write_only: bool = False
     allow_null: bool = False
     allow_blank: bool = False
     trim_whitespace: bool = True

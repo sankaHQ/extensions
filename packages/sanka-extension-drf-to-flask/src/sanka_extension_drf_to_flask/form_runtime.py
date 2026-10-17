@@ -6,8 +6,9 @@ multipart behavior. This includes legacy boundary-token truncation: compatibilit
 is not a claim that the source preserves every uploaded byte.
 """
 
-import codecs
 from typing import Any
+
+from .native_runtime import request_encoding
 
 
 class FormError(Exception):
@@ -35,9 +36,9 @@ def parse_form(
         return g._sanka_form
     encoding = request.mimetype_params.get("charset") or settings.DEFAULT_CHARSET
     try:
-        codecs.lookup(encoding)
-    except LookupError:
-        encoding = settings.DEFAULT_CHARSET
+        encoding = request_encoding(encoding)
+    except ValueError as error:
+        raise FormError("Unsupported request charset") from error
     if not request.content_length:
         data = QueryDict("", mutable=True)
     elif request.mimetype not in media_types:

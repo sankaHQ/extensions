@@ -156,10 +156,12 @@ async def _access_permission(spec, request, auth, user_id, allow, instance=None)
     parent_param = permission.get("parent_param")
     if (instance is None) != bool(parent_param):
         return None
+    relation = permission["relation"]
+    if parent_param and relation.get("foreign_key"):
+        raise ValueError("Unsupported URL-parent membership traversal")
     user = await store.access_user(auth, user_id) if user_id is not None else None
     if user and user["superuser"]:
         return None
-    relation = permission["relation"]
     if parent_param:
         parent = _relation_key(relation, request.path_params.get(parent_param))
         q = store.quote_identifier

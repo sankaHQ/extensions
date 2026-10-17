@@ -335,6 +335,29 @@ def test_capture_listing_qualifies_stock_search_ordering_and_page_pagination() -
     assert listing["pagination"]["kind"] == "page"
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+def test_default_ordering_excludes_private_fields(explicit: bool) -> None:
+    from django.conf import settings
+
+    if not settings.configured:
+        settings.configure()
+    from rest_framework import filters, serializers
+
+    class RecordSerializer(serializers.Serializer):
+        id = serializers.IntegerField()
+        label = serializers.CharField()
+        secret = serializers.CharField(write_only=True)
+
+    class View:
+        serializer_class = RecordSerializer
+        filter_backends = (filters.OrderingFilter,)
+        pagination_class = None
+        ordering_fields = ("secret",) if explicit else None
+
+    listing = capture_listing(View, None)
+    assert listing["ordering"]["fields"] == (["secret"] if explicit else ["id", "label"])
+
+
 def test_capture_listing_rejects_custom_pagination_and_unknown_filter_backends() -> None:
     from rest_framework import filters, serializers
     from rest_framework.pagination import PageNumberPagination

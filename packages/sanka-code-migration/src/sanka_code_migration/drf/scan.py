@@ -479,6 +479,14 @@ def _native_route_support(
     ModelSerializer, or the router API root. Anything else must be adapted by
     a human, never silently bridged in a native plan.
     """
+    from .callbacks import stock_callback
+
+    if not stock_callback(callback):
+        return _not_native(
+            "SANKA_DRF_CALLBACK_UNSUPPORTED",
+            "url-callback",
+            "Custom URL callback wrappers require manual migration.",
+        )
     if _is_format_alias_path(path):
         return False, (), {}
     if not supported:
@@ -1101,8 +1109,8 @@ def _listing_support(
                 )
             names = (
                 [str(item) if isinstance(item, str) else str(item[0]) for item in declared]
-                if declared
-                else [field.name for field in ir.fields]
+                if declared is not None
+                else [field.name for field in ir.fields if not field.write_only]
             )
             default = getattr(view_class, "ordering", None)
             default_terms = (
@@ -2076,6 +2084,7 @@ def _nested_many_field_ir(name: str, field: Any, parent_model: Any) -> Serialize
         kind="nested_many",
         required=bool(field.required),
         read_only=bool(field.read_only),
+        write_only=bool(field.write_only),
         allow_null=bool(field.allow_null),
         attname=str(parent_fk),
         child=child_ir,
@@ -2285,6 +2294,7 @@ def _serializer_field_ir(name: str, field: Any, model: Any) -> SerializerFieldIR
         kind=kind,
         required=bool(field.required),
         read_only=bool(field.read_only),
+        write_only=bool(field.write_only),
         allow_null=bool(field.allow_null),
         allow_blank=bool(getattr(field, "allow_blank", False)),
         trim_whitespace=bool(getattr(field, "trim_whitespace", True)),

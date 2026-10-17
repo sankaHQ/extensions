@@ -282,9 +282,14 @@ def capture_membership_permission(permission: Any, model: Any) -> dict[str, Any]
             and body[1].value.value is False
         ):
             return None
+        relation = membership(model, path[1:-1])
+        # The current IR retains the target model, not the URL parent's model.
+        # Object permissions already have its FK value; URL lookups do not.
+        if parent_param is not None and relation.get("foreign_key"):
+            return None
         return {
             "kind": "membership",
-            "relation": membership(model, path[1:-1]),
+            "relation": relation,
             "parent_param": parent_param,
             "superuser": True,
         }

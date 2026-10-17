@@ -59,7 +59,11 @@ repeated parameters, CSV inputs and detail filtering. Custom filtersets, related
 filters and unsupported lookups remain blocking gaps. Filter errors preserve field
 order and source validation messages. JSON body-limit behavior is captured from the
 source parser. Enforced limits preserve the source error response without writes;
-a source parser that accepts the request does not acquire an invented rejection.
+a source parser that accepts the request does not acquire an invented body-limit rejection.
+Request text decoding is limited to UTF-8, UTF-16, UTF-32, ASCII and Latin-1, including
+standard aliases and endian variants. Other charsets return 400 rather than invoking
+arbitrary Python transform codecs. Custom URL callback wrappers require manual
+adaptation; stock DRF wrappers and Django's `no_append_slash` remain supported.
 
 Stock database sessions are supported when every migrated view uses exact
 `SessionAuthentication` with `IsAuthenticated`, the stock database session backend,
