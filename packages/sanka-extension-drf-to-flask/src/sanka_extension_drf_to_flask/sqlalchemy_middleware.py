@@ -40,7 +40,8 @@ def install_middleware(app: Flask, contract: dict[str, Any], patterns: Any) -> N
 
     def full_path(slash: bool = False) -> str:
         path = quote(
-            (get_path_info(request.environ) or "/") + ("/" if slash else ""), safe="/:@&+$,-_.!~*'()"
+            (get_path_info(request.environ) or "/") + ("/" if slash else ""),
+            safe="/:@&+$,-_.!~*'()",
         )
         path = path.replace("//", "/%2F", 1) if path.startswith("//") else path
         return path + ("?" + request.query_string.decode("latin1") if request.query_string else "")
