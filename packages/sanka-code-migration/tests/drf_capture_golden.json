@@ -84,7 +84,7 @@
     "permissions": "sha256:3ee793ad095a2790d9efedb746dc81da6abed053d393f7343e672d4a68f81e56",
     "risks": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "root_urlconf": "sha256:c80374a8e30c65c5795a451e252868b7a19f0ea3b74552b1240ed0c967bd9e41",
-    "routes": "sha256:756b860d9699133d57a5ae4a98c87f1a3d575aee0ff4b2b8cf9955d061ac2c66",
+    "routes": "sha256:935116d6ce77c63ea5bc20bab81c5dadfd67b48d106014ce307f0b71cee08262",
     "schema_version": "sha256:4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
     "serializer_details": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     "serializers": "sha256:5182456cba796ade6dd4452743bb02a5ad52670a59ac95202f6879982c2957d3",
@@ -93,7 +93,7 @@
     "source": "sha256:7299b59de0b5dad3b622afc3bdf57544e505249c77a6d4254bd14b1fc9a4ade8",
     "status_codes": "sha256:4afdc6cc10590876bbe55cfccd6347876c6611168643ec953b2aaa47a9bb86bc",
     "test_files": "sha256:5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
-    "view_details": "sha256:95933595b04038da0685ed8696310184120f632d5efe2e950d3f647f7f6a2730"
+    "view_details": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
   },
   "drf_membership_project": {
     "api_roots": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",

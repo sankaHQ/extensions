@@ -112,6 +112,7 @@ def configuration(raw: dict[str, Any]) -> dict[str, str]:
 
 
 def _relative_module(value: str) -> bool:
+    _validate_module_path(value)
     pure = PurePosixPath(value)
     return (
         not pure.is_absolute()
@@ -120,6 +121,13 @@ def _relative_module(value: str) -> bool:
         and pure.suffix in {".tsx", ".ts"}
         and value == pure.as_posix()
     )
+
+
+def _validate_module_path(value: str) -> None:
+    if any(
+        ord(char) < 0x20 or 0x7F <= ord(char) <= 0x9F or char in "\u2028\u2029" for char in value
+    ):
+        raise ValueError("module paths must not contain control characters or line separators")
 
 
 def capture(root: Path, config: dict[str, str]) -> dict[str, Any]:
@@ -240,6 +248,7 @@ def _walk(root: Path) -> tuple[dict[str, str], list[str]]:
             records[rel] = hashlib.sha256(source.read_bytes()).hexdigest()
             top = rel.split("/", 1)[0]
             if source.suffix.lower() in SOURCE_SUFFIXES and top not in {"ios", "android"}:
+                _validate_module_path(rel)
                 modules.append(rel)
     return records, modules
 
@@ -308,6 +317,8 @@ def _detect(package: dict[str, Any], files: frozenset[str]) -> str | None:
 
 
 def _resolve(importer: str, specifier: str, modules: list[str]) -> str | None:
+    _validate_module_path(importer)
+    _validate_module_path(specifier)
     base = PurePosixPath(importer).parent
     parts = list(base.parts)
     for segment in specifier.split("/"):

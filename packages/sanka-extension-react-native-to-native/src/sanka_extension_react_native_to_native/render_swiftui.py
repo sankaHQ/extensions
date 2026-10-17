@@ -1308,7 +1308,7 @@ class ScreenEmitter:
         submits = ", ".join(swift_string(item) for item in self.submit_effects)
         task = "" if not self.appear else "        .task { await appear() }\n"
         return (
-            HEADER + f"// Screen {self.screen['name']} from {self.screen['module']}.\n"
+            HEADER + "// Generated screen.\n"
             "import SwiftUI\n\n"
             f"public struct {self.state_type}: Equatable {{\n"
             + ("\n".join(state_lines) + "\n\n" if state_lines else "")
@@ -1448,7 +1448,7 @@ def _placeholder(
     params_assign = "".join(f"\n        self.{name} = {name}" for name in params)
     message = "; ".join(f"{reason['code']}: {reason['message']}" for reason in reasons)
     source = (
-        HEADER + f"// Screen {screen['name']} from {screen['module']} needs manual adaptation.\n"
+        HEADER + "// Generated screen needs manual adaptation.\n"
         "import SwiftUI\n\n"
         f"public struct {type_name}Params: Equatable {{\n"
         + ("\n".join(params_lines) + "\n\n" if params_lines else "")

@@ -482,13 +482,21 @@ def _native_route_support(
     from .callbacks import stock_callback
 
     if not stock_callback(callback):
+        # DRF copies decorated dispatch onto its callback's __wrapped__ attribute.
+        # Preserve the more specific request-policy diagnostic for that case.
+        viewsets = importlib.import_module("rest_framework.viewsets")
+        if inspect.isclass(view_class) and issubclass(view_class, viewsets.ModelViewSet):
+            reason = _viewset_adaptation_reason(view_class, callback)
+            if reason is not None:
+                return False, (reason,), {}
         return _not_native(
             "SANKA_DRF_CALLBACK_UNSUPPORTED",
             "url-callback",
             "Custom URL callback wrappers require manual migration.",
         )
-    if _is_format_alias_path(path):
-        return False, (), {}
+    # Other targets support format aliases and waive listing/auth limitations.
+    # They still need every policy reason even though FastAPI omits these aliases.
+    format_alias = _is_format_alias_path(path)
     if not supported:
         return _not_native(
             "SANKA_DRF_ROUTE_PATTERN_UNSUPPORTED",
@@ -535,9 +543,9 @@ def _native_route_support(
             )
         if middleware_reasons:
             return False, middleware_reasons, {}
-        if all(root.path != path for root in result.api_roots):
+        if not format_alias and all(root.path != path for root in result.api_roots):
             result.api_roots.append(ApiRootIR(path=path, links=links))
-        return True, (), {}
+        return not format_alias, (), {}
     from sanka_code_migration.drf.access_contracts import (
         capture_member_action,
         capture_membership_permission,
@@ -589,7 +597,7 @@ def _native_route_support(
             lookup_url_kwarg=contract["param"],
             access={"permission": rule, "member_action": contract, "serializer": serializer_name},
         )
-        return True, (), {}
+        return not format_alias, (), {}
     generics = importlib.import_module("rest_framework.generics")
     generic_view = issubclass(view_class, generics.GenericAPIView) and not hasattr(
         callback, "actions"
@@ -619,6 +627,10 @@ def _native_route_support(
             "view-kind",
             f"{view_class.__module__}.{view_class.__qualname__} is not a ModelViewSet.",
         )
+    if not generic_view:
+        viewset_reason = _viewset_adaptation_reason(view_class, callback)
+        if viewset_reason is not None:
+            return False, (*middleware_reasons, viewset_reason), {}
     from sanka_code_migration.drf.access_contracts import capture_query
 
     source_model = getattr(
@@ -626,6 +638,13 @@ def _native_route_support(
     )
     access: dict[str, Any] = {}
     overrides = _viewset_overrides(view_class, allow_missing=generic_view)
+    # An uncaptured create hook only affects creation; other actions never invoke it.
+    # Keep creation manual even when a target can capture the class-level session policy.
+    manual_create = "perform_create" in overrides and (
+        _view_auth_support(view_class, source_model) is None
+    )
+    if "perform_create" in overrides:
+        overrides = tuple(name for name in overrides if name != "perform_create")
     if "get_queryset" in overrides:
         query = capture_query(view_class, source_model)
         if query is not None:
@@ -653,11 +672,21 @@ def _native_route_support(
         )
         for name in operation_overrides
     }
+    if manual_create and "create" in actions.values():
+        manual_operations["create"] = (
+            _adaptation_reason(
+                "SANKA_DRF_VIEWSET_OVERRIDES_UNSUPPORTED",
+                "viewset-overrides",
+                "Viewset override requires manual carryover: perform_create",
+            ),
+        )
     view_name = f"{view_class.__module__}.{view_class.__qualname__}"
     if view_name not in result.view_details:
         queryset = getattr(view_class, "queryset", None)
         model = getattr(queryset, "model", None) or source_model
         auth_ir = _view_auth_support(view_class, model)
+        if auth_ir is None and manual_create:
+            auth_ir = _view_auth_support(view_class, model, include_create=False)
         from sanka_code_migration.drf.access_contracts import (
             capture_creator_membership,
             capture_membership_permission,
@@ -730,13 +759,19 @@ def _native_route_support(
         )
     listing, listing_reason = _listing_support(view_class, ir)
     if listing_reason is not None:
-        return False, (*middleware_reasons, listing_reason), {}
+        # Targets that capture the listing themselves may waive this reason, so the
+        # overridden-action reasons must still reach their routes.
+        return False, (*middleware_reasons, listing_reason), manual_operations
     carryover: dict[str, Any] = {}
-    if manual_operations:
-        carried = _analyze_view_carryover(view_class, list(manual_operations))
+    if operation_overrides:
+        carried = _analyze_view_carryover(view_class, operation_overrides)
         if carried is not None:
             carryover = carried
-            manual_operations = {}
+            manual_operations = {
+                name: reasons
+                for name, reasons in manual_operations.items()
+                if name == "create" and manual_create
+            }
     result.view_details[view_name] = replace_dataclass(
         result.view_details[view_name],
         listing=listing,
@@ -779,10 +814,10 @@ def _native_route_support(
         serializer=ir,
     )
     if lookup_reason is not None:
-        return False, (*middleware_reasons, lookup_reason), {}
+        return False, (*middleware_reasons, lookup_reason), manual_operations
     if middleware_reasons:
-        return False, middleware_reasons, {}
-    return True, (), manual_operations
+        return False, middleware_reasons, manual_operations
+    return not format_alias, (), manual_operations
 
 
 def _custom_lookup_adaptation_reason(
@@ -917,10 +952,55 @@ def _generic_actions(view_class: type[Any]) -> dict[str, str] | None:
     return actions or None
 
 
+# Request-cycle hooks that decide authentication, permissions, throttling, parsing or
+# response handling. The scan reads the matching class attributes, so an override means
+# DRF may enforce something other than what was captured.
+_REQUEST_HOOKS = (
+    "dispatch",
+    "initial",
+    "initialize_request",
+    "finalize_response",
+    "get_authenticators",
+    "get_permissions",
+    "get_throttles",
+    "get_parsers",
+    "get_renderers",
+    "perform_authentication",
+    "check_permissions",
+    "check_object_permissions",
+    "check_throttles",
+    "handle_exception",
+    "get_exception_handler",
+    "get_content_negotiator",
+    "perform_content_negotiation",
+    "determine_version",
+    "permission_denied",
+    "throttled",
+    "http_method_not_allowed",
+    "__init__",
+    "setup",
+    "options",
+    "paginate_queryset",
+    "get_paginated_response",
+)
+
+
+# The keywords DRF routers pass to ``ViewSet.as_view()``; they only name and reverse
+# routes. Any other keyword replaces a class attribute for that URL alone.
+_ROUTER_INITKWARGS = frozenset({"basename", "detail", "suffix", "name", "description"})
+
+
+def _request_hook_overrides(view_class: type[Any], base: type[Any]) -> list[str]:
+    return [
+        name
+        for name in _REQUEST_HOOKS
+        if getattr(view_class, name, None) is not getattr(base, name, None)
+    ]
+
+
 def _generic_view_adaptation_reason(
     view_class: type[Any], callback: Any
 ) -> RouteAdaptationReason | None:
-    views = importlib.import_module("rest_framework.views")
     # Per-URL constructor overrides must not be lost when reading class-level
     # queryset, serializer, permissions or pagination configuration.
     if getattr(callback, "view_initkwargs", None) or getattr(callback, "initkwargs", None):
@@ -929,41 +1009,8 @@ def _generic_view_adaptation_reason(
             "view-configuration",
             "Generic view as_view() overrides require manual adaptation.",
         )
-    hooks = (
-        "dispatch",
-        "initial",
-        "initialize_request",
-        "finalize_response",
-        "get_authenticators",
-        "get_permissions",
-        "get_throttles",
-        "get_parsers",
-        "get_renderers",
-        "perform_authentication",
-        "check_permissions",
-        "check_object_permissions",
-        "check_throttles",
-        "handle_exception",
-        "get_exception_handler",
-        "get_content_negotiator",
-        "perform_content_negotiation",
-        "determine_version",
-        "permission_denied",
-        "throttled",
-        "http_method_not_allowed",
-        "__init__",
-        "setup",
-        "options",
-    )
-    overrides = [
-        name for name in hooks if getattr(view_class, name) is not getattr(views.APIView, name)
-    ]
     generics = importlib.import_module("rest_framework.generics")
-    overrides.extend(
-        name
-        for name in ("paginate_queryset", "get_paginated_response")
-        if getattr(view_class, name) is not getattr(generics.GenericAPIView, name)
-    )
+    overrides = _request_hook_overrides(view_class, generics.GenericAPIView)
     overrides.extend(
         name for name in ("head", "trace") if callable(getattr(view_class, name, None))
     )
@@ -977,12 +1024,46 @@ def _generic_view_adaptation_reason(
     return None
 
 
+def _viewset_adaptation_reason(
+    view_class: type[Any], callback: Any
+) -> RouteAdaptationReason | None:
+    """Keep viewset routes manual when DRF could enforce a different contract.
+
+    Native generation reads ``permission_classes``, ``authentication_classes``,
+    ``queryset`` and ``serializer_class`` from the class. Per-URL ``as_view()``
+    keywords and overridden request hooks (``get_permissions``, ``initial``,
+    a decorated ``dispatch`` and so on) can replace them at request time.
+    """
+    initkwargs = {
+        **(getattr(callback, "view_initkwargs", None) or {}),
+        **(getattr(callback, "initkwargs", None) or {}),
+    }
+    configured = sorted(set(initkwargs) - _ROUTER_INITKWARGS)
+    if configured:
+        return _adaptation_reason(
+            "SANKA_DRF_VIEWSET_INITKWARGS_UNSUPPORTED",
+            "view-configuration",
+            "Viewset as_view() overrides require manual adaptation: " + ", ".join(configured),
+        )
+    viewsets = importlib.import_module("rest_framework.viewsets")
+    overrides = _request_hook_overrides(view_class, viewsets.ModelViewSet)
+    if overrides:
+        return _adaptation_reason(
+            "SANKA_DRF_VIEWSET_REQUEST_HOOKS_UNSUPPORTED",
+            "view-handlers",
+            "Viewset request, authentication or permission hooks require manual "
+            "adaptation: " + ", ".join(overrides),
+        )
+    return None
+
+
 def _viewset_overrides(view_class: type[Any], *, allow_missing: bool = False) -> tuple[str, ...]:
     generics = importlib.import_module("rest_framework.generics")
     mixins = importlib.import_module("rest_framework.mixins")
     expected = {
         "list": mixins.ListModelMixin.list,
         "create": mixins.CreateModelMixin.create,
+        "perform_create": mixins.CreateModelMixin.perform_create,
         "retrieve": mixins.RetrieveModelMixin.retrieve,
         "update": mixins.UpdateModelMixin.update,
         "partial_update": mixins.UpdateModelMixin.partial_update,
@@ -1370,18 +1451,23 @@ def _analyze_view_carryover(view_class: type[Any], operations: list[str]) -> dic
     }
 
 
-def _view_auth_support(view_class: type[Any], model: Any) -> ViewAuthIR | None:
+def _view_auth_support(
+    view_class: type[Any], model: Any, *, include_create: bool = True
+) -> ViewAuthIR | None:
     """Capture the view's auth semantics, or None when outside the envelope.
 
     Recognized exactly: AllowAny (no enforcement, no perform_create override);
     or IsAuthenticated with DRF TokenAuthentication, optionally one
     owner-or-read-only object permission (matched structurally) and the
     ``serializer.save(field=self.request.user)`` perform_create idiom.
+    Only class attributes are read: callers must first reject per-URL
+    ``as_view()`` keywords and overridden request hooks, which can replace them.
+    When include_create is false, the caller must keep uncaptured creation manual.
     """
     permissions_module = importlib.import_module("rest_framework.permissions")
     mixins = importlib.import_module("rest_framework.mixins")
     permissions = list(view_class.permission_classes)
-    create_overridden = (
+    create_overridden = include_create and (
         getattr(view_class, "perform_create", mixins.CreateModelMixin.perform_create)
         is not mixins.CreateModelMixin.perform_create
     )

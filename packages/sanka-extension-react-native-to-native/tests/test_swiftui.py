@@ -15,7 +15,8 @@ from pathlib import Path
 import pytest
 
 from sanka_extension_react_native_to_native.adapter import handle
-from sanka_extension_react_native_to_native.capture import canonical
+from sanka_extension_react_native_to_native.capture import canonical, capture, configuration
+from sanka_extension_react_native_to_native.render_swiftui import render_swiftui
 from sanka_extension_react_native_to_native.tree import NODE_KEYS, ROLES
 from sanka_extensions.code import ExtensionRequest, encode_request
 from sanka_ts_capture import MIN_NODE_MAJOR, TypeScriptDriverError, node_executable, node_version
@@ -204,6 +205,33 @@ def test_emitter_gaps_become_dispositions(tmp_path: Path) -> None:
     dump = planned.data["files"]["Sources/SankaTreeDump/main.swift"]
     assert "DetailScreen.replay(" not in dump
     assert "HomeScreen.replay(fixtures: fixtures)" in dump
+
+
+@needs_node
+@pytest.mark.parametrize("manual", [False, True])
+def test_emitter_keeps_captured_module_paths_out_of_swift_comments(
+    tmp_path: Path, manual: bool
+) -> None:
+    captured = capture(fixture(tmp_path, "rn-todo"), configuration({}))
+    screen = captured["screens"][0]
+    original = screen["module"]
+    module = original + "\nlet unexpectedModuleCode = 1\n//"
+    screen["module"] = module
+    for navigator in captured["navigators"]:
+        for route in navigator["screens"]:
+            if route.get("module") == original:
+                route["module"] = module
+    if manual:
+        screen["disposition"] = "needs-manual-adaptation"
+    rendered = render_swiftui(captured)
+    assert not rendered.gaps
+    assert rendered.files
+    assert all(
+        module not in source for name, source in rendered.files.items() if name.endswith(".swift")
+    )
+    assert sum(item["disposition"] == "native-screen" for item in rendered.dispositions) == (
+        1 if manual else 2
+    )
 
 
 @needs_node
