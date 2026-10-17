@@ -1223,9 +1223,10 @@ class CarryoverView:
         self._raw_body = raw_body
         self._loop = loop
 
-    def _run(self, operation: str) -> CarryResponse:
+    def _run(self, operation: str, request: CarryRequest) -> CarryResponse:
         future = asyncio.run_coroutine_threadsafe(
-            handle(self._spec, operation, self._native, raw_body=self._raw_body, carry=False),
+            handle(self._spec, operation, self._native, raw_body=self._raw_body,
+                   carried_data=request.data, carry=False),
             self._loop,
         )
         rendered = future.result()
@@ -1241,24 +1242,24 @@ class CarryoverView:
         return CarryResponse(data, status=rendered.status_code, headers=headers)
 
     def list(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
-        return self._run("list")
+        return self._run("list", request)
 
     def create(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
-        return self._run("create")
+        return self._run("create", request)
 
     def retrieve(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
-        return self._run("retrieve")
+        return self._run("retrieve", request)
 
     def update(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
         partial = kwargs.pop("partial", False)
-        return self._run("partial_update" if partial else "update")
+        return self._run("partial_update" if partial else "update", request)
 
     def partial_update(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
 
     def destroy(self, request: Any, *args: Any, **kwargs: Any) -> CarryResponse:
-        return self._run("destroy")
+        return self._run("destroy", request)
 
 
 _USER_VIEWS = import_module("sanka_user_views") if MANIFEST.get("has_user_views") else None
@@ -1273,10 +1274,10 @@ async def _carried(spec: dict[str, Any], operation: str, request: Request, allow
     carry = spec["view_carryover"]
     view_class = getattr(_USER_VIEWS, str(carry["class"]))
     raw_body = await read_raw_body(request) if request.method in {"POST", "PUT", "PATCH"} else b""
-    try:
-        data = json.loads(raw_body) if raw_body else None
-    except json.JSONDecodeError:
-        data = None
+    data, parse_error = _parse_json(raw_body) if raw_body else ({}, None)
+    if parse_error is not None:
+        parse_error.headers["Allow"] = allow
+        return parse_error
     view = view_class(spec, request, raw_body, asyncio.get_running_loop())
     shim = CarryRequest(request, data)
     action = getattr(view, operation)
@@ -1396,6 +1397,8 @@ def _represent(spec: dict[str, Any], value: Any) -> Any:
 async def _serialize_fields(fields: list[dict[str, Any]], instance: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     for spec in fields:
+        if spec.get("write_only", False):
+            continue
         if spec["kind"] in {"membership_read", "related_preview"}:
             payload[spec["name"]] = await _access_representation(spec, instance)
         elif spec["kind"] == "nested_many":
@@ -2073,7 +2076,7 @@ async def _validate(
 def _parse_json(raw: bytes) -> tuple[Any, Response | None]:
     try:
         return json.loads(raw), None
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         return None, JSONResponse({"detail": f"JSON parse error - {exc}"}, status_code=400)
 
 
@@ -2154,6 +2157,7 @@ async def handle(
     request: Request,
     *,
     raw_body: bytes | None = None,
+    carried_data: Any = None,
     carry: bool = True,
 ) -> Any:
     path = next(route["path"] for route in spec["routes"] if route["operation"] == operation)
@@ -2243,6 +2247,8 @@ async def handle(
     if parse_error is not None:
         parse_error.headers["Allow"] = allow
         return parse_error
+    if not carry:
+        payload = carried_data
     if operation == "create":
         validated, nested, errors = await _validate(spec, payload, partial=False, instance=None)
         if errors:
@@ -2365,13 +2371,16 @@ def not_found_response(request: Request, page: str) -> Response:
     the generated app is built with redirect_slashes=False.
     """
     security = MANIFEST.get("http_security", {})
-    path = request.url.path
+    path = request.scope["path"]
     if (
         security.get("append_slash")
         and not path.endswith("/")
         and _route_match(request, path + "/") != "none"
     ):
-        target = path + "/" + (f"?{request.url.query}" if request.url.query else "")
+        target = _urlparse.quote(path + "/", safe="/:@&+$,-_.!~*'()")
+        if target.startswith("//"):
+            target = "/%2F" + target[2:]
+        target += f"?{request.url.query}" if request.url.query else ""
         return Response(
             status_code=301,
             headers={"Location": target, "Content-Type": "text/html; charset=utf-8"},

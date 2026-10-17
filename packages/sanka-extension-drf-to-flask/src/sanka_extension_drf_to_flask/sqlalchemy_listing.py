@@ -142,8 +142,12 @@ def _capture_backends(view_class: type[Any]) -> dict[str, Any]:
                 raise ValueError("unbounded ordering fields require manual adaptation")
             names = (
                 [str(item) if isinstance(item, str) else str(item[0]) for item in declared]
-                if declared
-                else sorted(field_names)
+                if declared is not None
+                else sorted(
+                    name
+                    for name, field in fields.items()
+                    if not field.write_only and field.source != "*"
+                )
             )
             default = getattr(view_class, "ordering", None)
             defaults = (

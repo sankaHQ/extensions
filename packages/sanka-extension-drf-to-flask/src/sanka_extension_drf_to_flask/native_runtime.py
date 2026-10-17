@@ -1,9 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
 """Copied into generated targets; no DRF or Sanka runtime imports."""
 
+import codecs
 import re
 from types import SimpleNamespace
 from typing import Any, ClassVar
+
+
+def request_encoding(value: str) -> str:
+    try:
+        name = codecs.lookup(value).name
+    except LookupError as error:
+        raise ValueError("Unsupported request charset") from error
+    if name not in {
+        "utf-8",
+        "utf-8-sig",
+        "ascii",
+        "iso8859-1",
+        "utf-16",
+        "utf-16-le",
+        "utf-16-be",
+        "utf-32",
+        "utf-32-le",
+        "utf-32-be",
+    }:
+        raise ValueError("Unsupported request charset")
+    return name
 
 
 class _ValidationError(Exception):

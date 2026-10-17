@@ -8,8 +8,11 @@ execute the source application's permission or serializer methods.
 
 - Object permissions with a superuser short circuit followed by membership in an
   automatic many-to-many user relation, directly or through one parent foreign key.
-- The equivalent view permission that looks up a parent from a URL parameter before
-  checking membership. Both Django's and DRF's stock `get_object_or_404` are recognized.
+- A view permission that looks up a parent from a URL parameter before checking that
+  parent's direct membership relation. Both Django's and DRF's stock
+  `get_object_or_404` are recognized. Traversing another foreign key after the URL
+  lookup requires manual adaptation because the current contract does not retain
+  both model identities.
 - Querysets filtered by the authenticated user's membership, a URL parent value, or
   a membership-filtered parent subquery. Ordering is captured independently of the
   response fields. Object lookups retain these filters, including nested URLs whose
