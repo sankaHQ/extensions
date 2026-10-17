@@ -754,6 +754,45 @@ def test_url_policy_is_checked_even_after_capturing_the_same_viewset(crud_projec
     )
 
 
+@pytest.mark.parametrize("expose_create", [False, True])
+@pytest.mark.parametrize("carryover", [False, True])
+def test_perform_create_only_blocks_creation(
+    crud_project: Path, expose_create: bool, carryover: bool
+) -> None:
+    views = crud_project / "inventory/views.py"
+    views.write_text(
+        views.read_text() + "\n    def perform_create(self, serializer):\n"
+        "        from rest_framework.exceptions import PermissionDenied\n"
+        "        raise PermissionDenied()\n"
+    )
+    if carryover:
+        views.write_text(
+            views.read_text() + "\n    def retrieve(self, request, *args, **kwargs):\n"
+            "        response = super().retrieve(request, *args, **kwargs)\n"
+            "        response['X-Stage'] = 'retrieve'\n"
+            "        return response\n"
+        )
+    if not expose_create:
+        urls = _HAND_WIRED_URLS.format(kwargs="basename='gadget'")
+        (crud_project / "crud_config/urls.py").write_text(urls.replace(', "post": "create"', ""))
+    scan = _run_cli(["scan", str(crud_project)], crud_project)
+    assert scan.returncode == 0, scan.stderr
+    result = _run_cli(["plan", str(crud_project), "--to", "fastapi", "--json"], crud_project)
+    assert result.returncode == 0, result.stderr
+    routes = [
+        route
+        for route in json.loads(result.stdout)["routes"]
+        if route["path"] in {"/api/gadgets/", "/api/gadgets/{pk}/"}
+    ]
+    creates = [route for route in routes if route["operation"] == "create"]
+    assert bool(creates) is expose_create
+    assert all(route["strategy"] == "needs-manual-adaptation" for route in creates), creates
+    other_actions = [route for route in routes if route["operation"] != "create"]
+    assert other_actions and all(
+        route["strategy"] == "native-fastapi-crud" for route in other_actions
+    ), routes
+
+
 @pytest.mark.parametrize("app", sorted(EXPECTED_UNSUPPORTED_MIDDLEWARE_COUNTS))
 def test_real_world_middleware_stacks_only_reject_classes_outside_allowlist(app: str) -> None:
     stack = tuple(REAL_WORLD_MIDDLEWARE_STACKS[app])

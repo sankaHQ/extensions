@@ -70,7 +70,10 @@ def test_listing_waiver_keeps_overridden_actions_manual(
 
 
 @pytest.mark.parametrize("policy", ["staff-check", "owner-assignment", "stock"])
-def test_session_auth_waiver_requires_stock_perform_create(tmp_path: Path, policy: str) -> None:
+@pytest.mark.parametrize("expose_create", [False, True])
+def test_session_auth_waiver_requires_stock_perform_create(
+    tmp_path: Path, policy: str, expose_create: bool
+) -> None:
     _session_project(tmp_path)
     models = tmp_path / "catalog/models.py"
     models.write_text(
@@ -91,9 +94,18 @@ def test_session_auth_waiver_requires_stock_perform_create(tmp_path: Path, polic
         )
         views = tmp_path / "catalog/views.py"
         views.write_text(views.read_text() + "    def perform_create(self, serializer):\n" + body)
+    if not expose_create:
+        (tmp_path / "urls.py").write_text(
+            "from django.urls import path\nfrom catalog.views import NoteViewSet\n"
+            "urlpatterns = [path('notes/', NoteViewSet.as_view({'get': 'list'})),\n"
+            "    path('notes/<int:pk>/', NoteViewSet.as_view({'get': 'retrieve', "
+            "'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}))]\n"
+        )
     rows = qualified(tmp_path, "settings")
     creates = [row for row in rows if row["operation"] == "create"]
-    assert creates
+    assert bool(creates) is expose_create
+    other_actions = [row for row in rows if row["operation"] != "create"]
+    assert other_actions and all(row["native"] for row in other_actions), rows
     if policy == "stock":
         assert all(row["native"] for row in rows), rows
     else:

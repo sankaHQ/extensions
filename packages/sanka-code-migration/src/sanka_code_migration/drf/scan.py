@@ -623,9 +623,12 @@ def _native_route_support(
     )
     access: dict[str, Any] = {}
     overrides = _viewset_overrides(view_class, allow_missing=generic_view)
-    # Only the captured token-auth owner/creator contracts reproduce perform_create.
-    # Keep every other override blocking even when a target supports session auth.
-    if "perform_create" in overrides and _view_auth_support(view_class, source_model) is not None:
+    # An uncaptured create hook only affects creation; other actions never invoke it.
+    # Keep creation manual even when a target can capture the class-level session policy.
+    manual_create = "perform_create" in overrides and (
+        _view_auth_support(view_class, source_model) is None
+    )
+    if "perform_create" in overrides:
         overrides = tuple(name for name in overrides if name != "perform_create")
     if "get_queryset" in overrides:
         query = capture_query(view_class, source_model)
@@ -654,11 +657,21 @@ def _native_route_support(
         )
         for name in operation_overrides
     }
+    if manual_create and "create" in actions.values():
+        manual_operations["create"] = (
+            _adaptation_reason(
+                "SANKA_DRF_VIEWSET_OVERRIDES_UNSUPPORTED",
+                "viewset-overrides",
+                "Viewset override requires manual carryover: perform_create",
+            ),
+        )
     view_name = f"{view_class.__module__}.{view_class.__qualname__}"
     if view_name not in result.view_details:
         queryset = getattr(view_class, "queryset", None)
         model = getattr(queryset, "model", None) or source_model
         auth_ir = _view_auth_support(view_class, model)
+        if auth_ir is None and manual_create:
+            auth_ir = _view_auth_support(view_class, model, include_create=False)
         from sanka_code_migration.drf.access_contracts import (
             capture_creator_membership,
             capture_membership_permission,
@@ -735,11 +748,15 @@ def _native_route_support(
         # overridden-action reasons must still reach their routes.
         return False, (*middleware_reasons, listing_reason), manual_operations
     carryover: dict[str, Any] = {}
-    if manual_operations:
-        carried = _analyze_view_carryover(view_class, list(manual_operations))
+    if operation_overrides:
+        carried = _analyze_view_carryover(view_class, operation_overrides)
         if carried is not None:
             carryover = carried
-            manual_operations = {}
+            manual_operations = {
+                name: reasons
+                for name, reasons in manual_operations.items()
+                if name == "create" and manual_create
+            }
     result.view_details[view_name] = replace_dataclass(
         result.view_details[view_name],
         listing=listing,
@@ -1419,7 +1436,9 @@ def _analyze_view_carryover(view_class: type[Any], operations: list[str]) -> dic
     }
 
 
-def _view_auth_support(view_class: type[Any], model: Any) -> ViewAuthIR | None:
+def _view_auth_support(
+    view_class: type[Any], model: Any, *, include_create: bool = True
+) -> ViewAuthIR | None:
     """Capture the view's auth semantics, or None when outside the envelope.
 
     Recognized exactly: AllowAny (no enforcement, no perform_create override);
@@ -1428,11 +1447,12 @@ def _view_auth_support(view_class: type[Any], model: Any) -> ViewAuthIR | None:
     ``serializer.save(field=self.request.user)`` perform_create idiom.
     Only class attributes are read: callers must first reject per-URL
     ``as_view()`` keywords and overridden request hooks, which can replace them.
+    When include_create is false, the caller must keep uncaptured creation manual.
     """
     permissions_module = importlib.import_module("rest_framework.permissions")
     mixins = importlib.import_module("rest_framework.mixins")
     permissions = list(view_class.permission_classes)
-    create_overridden = (
+    create_overridden = include_create and (
         getattr(view_class, "perform_create", mixins.CreateModelMixin.perform_create)
         is not mixins.CreateModelMixin.perform_create
     )
