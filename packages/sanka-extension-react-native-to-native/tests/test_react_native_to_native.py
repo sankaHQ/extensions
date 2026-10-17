@@ -67,6 +67,7 @@ def test_configuration_boundaries() -> None:
         {"navigation": "drawer"},
         {"entry": "../App.tsx"},
         {"entry": "App.js"},
+        {"entry": "App\n.tsx"},
         {"bundle_id": "not an id"},
         {"min_ios": "15.0"},
         {"min_sdk": "21"},
@@ -74,6 +75,34 @@ def test_configuration_boundaries() -> None:
     ):
         with pytest.raises(ValueError):
             configuration(config)
+
+
+@needs_node
+@pytest.mark.parametrize("control", ["\n", "\r", "\t", "\x1b", "\x7f", "\x85", "\u2028", "\u2029"])
+@pytest.mark.parametrize("origin", ["filename", "import"])
+def test_capture_rejects_module_path_controls(tmp_path: Path, control: str, origin: str) -> None:
+    root = fixture(tmp_path, "rn-todo")
+    module = f"./src/screens/Home{control}Screen"
+    if origin == "filename":
+        (root / (module + ".tsx")).write_text("export default function Home() { return null; }")
+    else:
+        app = root / "App.tsx"
+        app.write_text(app.read_text().replace('"./src/screens/HomeScreen"', json.dumps(module)))
+    with pytest.raises(ValueError):
+        capture(root, configuration({}))
+
+
+@needs_node
+def test_capture_preserves_module_paths_with_spaces_and_unicode(tmp_path: Path) -> None:
+    root = fixture(tmp_path, "rn-todo")
+    original = root / "src/screens/HomeScreen.tsx"
+    module = "./src/screens/Home 日本語"
+    original.rename(root / (module + ".tsx"))
+    app = root / "App.tsx"
+    app.write_text(app.read_text().replace("./src/screens/HomeScreen", module))
+    captured = capture(root, configuration({}))
+    assert captured["gaps"] == []
+    assert any(item["module"] == module[2:] + ".tsx" for item in captured["screens"])
 
 
 @needs_node

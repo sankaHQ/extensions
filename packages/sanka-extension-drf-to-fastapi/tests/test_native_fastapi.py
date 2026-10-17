@@ -602,6 +602,158 @@ def test_native_plan_refuses_routes_outside_the_envelope(tmp_path: Path) -> None
     assert "SANKA_DRF_CUSTOM_ACTION_UNSUPPORTED" in reason_codes
 
 
+_VIEWSET_HEADER = """
+from django.contrib.admin.views.decorators import staff_member_required
+from django.utils.decorators import method_decorator
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.viewsets import ModelViewSet
+from inventory.models import Gadget
+from inventory.serializers import GadgetSerializer
+"""
+_VIEWSET_BODY = """
+    queryset = Gadget.objects.all()
+    serializer_class = GadgetSerializer
+"""
+_HAND_WIRED_URLS = """
+from django.urls import path
+from rest_framework.permissions import IsAdminUser
+from inventory.models import Gadget
+from inventory.views import GadgetViewSet
+detail = {{"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}}
+urlpatterns = [
+    path("api/gadgets/", GadgetViewSet.as_view({{"get": "list", "post": "create"}}, {kwargs})),
+    path("api/gadgets/<str:pk>/", GadgetViewSet.as_view(detail, {kwargs})),
+]
+"""
+
+
+@pytest.mark.parametrize(
+    ("views", "urls", "code"),
+    [
+        pytest.param(
+            "class GadgetViewSet(ModelViewSet):"
+            + _VIEWSET_BODY
+            + "    def get_permissions(self):\n"
+            "        if self.action in ('list', 'retrieve'):\n"
+            "            return [AllowAny()]\n"
+            "        return [IsAdminUser()]\n",
+            None,
+            "SANKA_DRF_VIEWSET_REQUEST_HOOKS_UNSUPPORTED",
+            id="action-based-get-permissions",
+        ),
+        pytest.param(
+            "class GadgetViewSet(ModelViewSet):"
+            + _VIEWSET_BODY
+            + "    def initial(self, request, *args, **kwargs):\n"
+            "        super().initial(request, *args, **kwargs)\n"
+            "        if request.method != 'GET':\n"
+            "            raise PermissionDenied()\n",
+            None,
+            "SANKA_DRF_VIEWSET_REQUEST_HOOKS_UNSUPPORTED",
+            id="overridden-initial",
+        ),
+        pytest.param(
+            "class GadgetViewSet(ModelViewSet):"
+            + _VIEWSET_BODY
+            + "    def check_permissions(self, request):\n"
+            "        if request.method != 'GET':\n"
+            "            self.permission_denied(request)\n",
+            None,
+            "SANKA_DRF_VIEWSET_REQUEST_HOOKS_UNSUPPORTED",
+            id="overridden-check-permissions",
+        ),
+        pytest.param(
+            "@method_decorator(staff_member_required, name='dispatch')\n"
+            "class GadgetViewSet(ModelViewSet):" + _VIEWSET_BODY,
+            None,
+            "SANKA_DRF_VIEWSET_REQUEST_HOOKS_UNSUPPORTED",
+            id="decorated-dispatch",
+        ),
+        pytest.param(
+            "class GadgetViewSet(ModelViewSet):" + _VIEWSET_BODY,
+            _HAND_WIRED_URLS.format(kwargs="permission_classes=[IsAdminUser]"),
+            "SANKA_DRF_VIEWSET_INITKWARGS_UNSUPPORTED",
+            id="as-view-permission-classes",
+        ),
+        pytest.param(
+            "class GadgetViewSet(ModelViewSet):" + _VIEWSET_BODY,
+            _HAND_WIRED_URLS.format(kwargs="queryset=Gadget.objects.filter(quantity__gt=0)"),
+            "SANKA_DRF_VIEWSET_INITKWARGS_UNSUPPORTED",
+            id="as-view-queryset",
+        ),
+        *[
+            pytest.param(
+                "class GadgetViewSet(ModelViewSet):" + _VIEWSET_BODY,
+                _HAND_WIRED_URLS.format(kwargs=kwargs),
+                "SANKA_DRF_VIEWSET_INITKWARGS_UNSUPPORTED",
+                id=f"as-view-{name}",
+            )
+            for name, kwargs in (
+                ("authentication", "authentication_classes=[]"),
+                ("serializer", "serializer_class=GadgetViewSet.serializer_class"),
+            )
+        ],
+        *[
+            pytest.param(
+                "class GadgetViewSet(ModelViewSet):"
+                + _VIEWSET_BODY
+                + f"    def {hook}(self, *args, **kwargs):\n"
+                + f"        return super().{hook}(*args, **kwargs)\n",
+                None,
+                "SANKA_DRF_VIEWSET_REQUEST_HOOKS_UNSUPPORTED",
+                id=f"overridden-{hook}",
+            )
+            for hook in ("get_authenticators", "check_object_permissions", "permission_denied")
+        ],
+    ],
+)
+def test_native_plan_refuses_viewsets_whose_access_policy_is_not_the_class_attributes(
+    crud_project: Path, views: str, urls: str | None, code: str
+) -> None:
+    (crud_project / "inventory/views.py").write_text(_VIEWSET_HEADER + views)
+    if urls is not None:
+        (crud_project / "crud_config/urls.py").write_text(urls)
+    scan = _run_cli(["scan", str(crud_project)], crud_project)
+    assert scan.returncode == 0, scan.stderr
+    plan = _run_cli(["plan", str(crud_project), "--to", "fastapi", "--json"], crud_project)
+    assert plan.returncode == 0, plan.stderr
+    routes = [
+        route
+        for route in json.loads(plan.stdout)["routes"]
+        if route["path"] in {"/api/gadgets/", "/api/gadgets/{pk}/"}
+    ]
+    assert len(routes) == 6
+    for route in routes:
+        assert route["strategy"] == "needs-manual-adaptation", route
+        assert code in {reason["code"] for reason in route["adaptation_reasons"]}, route
+    captured = json.loads((crud_project / ".sanka/scan.json").read_text())
+    assert "inventory.views.GadgetViewSet" not in {
+        view["name"] for view in captured["view_details"]
+    }
+
+
+def test_url_policy_is_checked_even_after_capturing_the_same_viewset(crud_project: Path) -> None:
+    urls = crud_project / "crud_config/urls.py"
+    urls.write_text(
+        urls.read_text() + "\nfrom rest_framework.permissions import IsAdminUser\n"
+        "urlpatterns += [path('admin/gadgets/', "
+        "GadgetViewSet.as_view({'get': 'list'}, permission_classes=[IsAdminUser]))]\n"
+    )
+    scan = _run_cli(["scan", str(crud_project)], crud_project)
+    assert scan.returncode == 0, scan.stderr
+    plan = _run_cli(["plan", str(crud_project), "--to", "fastapi", "--json"], crud_project)
+    assert plan.returncode == 0, plan.stderr
+    routes = json.loads(plan.stdout)["routes"]
+    guarded = next(route for route in routes if route["path"] == "/admin/gadgets/")
+    assert guarded["strategy"] == "needs-manual-adaptation", guarded
+    assert all(
+        route["strategy"] == "native-fastapi-crud"
+        for route in routes
+        if route["path"] == "/api/gadgets/"
+    )
+
+
 @pytest.mark.parametrize("app", sorted(EXPECTED_UNSUPPORTED_MIDDLEWARE_COUNTS))
 def test_real_world_middleware_stacks_only_reject_classes_outside_allowlist(app: str) -> None:
     stack = tuple(REAL_WORLD_MIDDLEWARE_STACKS[app])
