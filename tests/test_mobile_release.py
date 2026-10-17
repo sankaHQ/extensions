@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fail closed on release closure, immutable identity and publication scope drift."""
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -39,7 +40,8 @@ def test_shared_wheels_keep_their_published_bytes() -> None:
 
 
 @pytest.mark.parametrize("mutation", ["closure", "url", "sdk", "capture", "contract"])
-def test_reject_manifest_drift(snapshot: Path, mutation: str) -> None:
+@pytest.mark.parametrize("candidate", [False, True])
+def test_reject_manifest_drift(snapshot: Path, mutation: str, candidate: bool) -> None:
     path = snapshot / "packages" / PACKAGE / "extension.json"
     data = json.loads(path.read_text())
     if mutation == "closure":
@@ -54,7 +56,23 @@ def test_reject_manifest_drift(snapshot: Path, mutation: str) -> None:
         data["targets"].append("unsupported")
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError):
-        manifest(PACKAGE, snapshot)
+        manifest(PACKAGE, snapshot, candidate=snapshot if candidate else None)
+
+
+def test_candidate_digest_preserves_reviewed_contract_and_shared_wheels(snapshot: Path) -> None:
+    bundle = snapshot / "bundle"
+    bundle.mkdir()
+    data = b"unreleased mobile converter wheel"
+    own_name = CLOSURE[0]
+    (bundle / own_name).write_bytes(data)
+    reviewed = manifest(PACKAGE, snapshot)
+    candidate = manifest(PACKAGE, snapshot, candidate=bundle)
+    assert candidate | {"wheels": []} == reviewed | {"wheels": []}
+    assert candidate["wheels"][0] == reviewed["wheels"][0] | {
+        "sha256": hashlib.sha256(data).hexdigest()
+    }
+    assert candidate["wheels"][1:] == reviewed["wheels"][1:]
+    assert manifest(PACKAGE, snapshot) == reviewed
 
 
 def test_reject_unrelated_release_assets(tmp_path: Path) -> None:

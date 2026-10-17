@@ -57,7 +57,7 @@ def published_digests() -> dict[str, str]:
     return shared
 
 
-def manifest(package: str, root: Path = ROOT) -> dict[str, Any]:
+def manifest(package: str, root: Path = ROOT, *, candidate: Path | None = None) -> dict[str, Any]:
     directory = root / "packages" / package
     result: dict[str, Any] = json.loads((directory / "extension.json").read_text())
     template = json.loads((directory / "extension.template.json").read_text())
@@ -78,16 +78,18 @@ def manifest(package: str, root: Path = ROOT) -> dict[str, Any]:
             raise ValueError(f"{package}: invalid URL or digest")
         if wheel["name"] in published and sha != published[wheel["name"]]:
             raise ValueError(f"{package}: {wheel['name']} differs from its published bytes")
+    if candidate is not None:
+        entries[0]["sha256"] = digest(candidate / wheel_name(package))
     return result
 
 
-def validate(output: Path, root: Path = ROOT) -> None:
-    data = manifest(PACKAGES[0], root)
+def validate(output: Path, root: Path = ROOT, *, candidate: bool = False) -> None:
     assets = set(CLOSURE) | {f"{PACKAGES[0]}.json", "marketplace.json"}
     if {p.name for p in output.iterdir()} != assets:
         raise ValueError("Missing or unexpected release assets")
     if any((output / n).is_symlink() or not (output / n).is_file() for n in assets):
         raise ValueError("Release assets must be regular files")
+    data = manifest(PACKAGES[0], root, candidate=output if candidate else None)
     if json.loads((output / "marketplace.json").read_text()) != CATALOG:
         raise ValueError("Scoped release catalog changed")
     if json.loads((output / f"{PACKAGES[0]}.json").read_text()) != data:
@@ -122,7 +124,7 @@ def validate(output: Path, root: Path = ROOT) -> None:
                     raise ValueError("TypeScript license absent")
 
 
-def build(output: Path, *, write_manifests: bool = False) -> None:
+def build(output: Path, *, write_manifests: bool = False, candidate: bool = False) -> None:
     absolute = output.absolute()
     if any(p.is_symlink() for p in (absolute, *absolute.parents)):
         raise ValueError("Release output must not traverse symlinks")
@@ -168,22 +170,27 @@ def build(output: Path, *, write_manifests: bool = False) -> None:
                 {"name": n, "url": PREFIX + n, "sha256": digest(output / n)} for n in CLOSURE
             ]
             (directory / "extension.json").write_text(json.dumps(data, indent=2) + "\n")
-        (output / f"{package}.json").write_text(json.dumps(manifest(package), indent=2) + "\n")
+        (output / f"{package}.json").write_text(
+            json.dumps(manifest(package, candidate=output if candidate else None), indent=2) + "\n"
+        )
     (output / "marketplace.json").write_text(json.dumps(CATALOG, indent=2) + "\n")
-    validate(output)
+    validate(output, candidate=candidate)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "release/mobile-converters")
     parser.add_argument("--check-only", action="store_true")
-    parser.add_argument("--write-manifests", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--write-manifests", action="store_true")
+    mode.add_argument("--candidate", action="store_true", help="Validate unreleased source for CI")
     args = parser.parse_args()
     if args.check_only:
-        validate(args.output_dir)
+        validate(args.output_dir, candidate=args.candidate)
     else:
-        build(args.output_dir, write_manifests=args.write_manifests)
-    print(f"Validated {TAG}: four wheels, one manifest and scoped catalog")
+        build(args.output_dir, write_manifests=args.write_manifests, candidate=args.candidate)
+    label = "candidate for " if args.candidate else ""
+    print(f"Validated {label}{TAG}: four wheels, one manifest and scoped catalog")
 
 
 if __name__ == "__main__":
