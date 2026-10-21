@@ -1,0 +1,1 @@
+{"name":"sanka/php-source-runtime","require":{"php":"8.4.27","laravel/framework":"12.70.1"},"config":{"allow-plugins":false,"sort-packages":true}}

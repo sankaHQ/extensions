@@ -1,0 +1,399 @@
+// SPDX-License-Identifier: Apache-2.0
+package migrated
+
+import (
+    "bytes"
+    "context"
+    "crypto/subtle"
+    "database/sql"
+    "encoding/json"
+    "fmt"
+    "io"
+    "math"
+    "net/http"
+    "os"
+    "reflect"
+    "strconv"
+    "strings"
+    "time"
+    "unicode/utf8"
+
+    "github.com/go-chi/chi/v5"
+@DRIVERS@
+)
+
+type entry struct { key any; value any }
+type phpArray struct { entries []entry }
+type phpObject struct { fields map[string]any }
+func (o *phpObject) MarshalJSON() ([]byte, error) { return json.Marshal(o.fields) }
+
+func arrayKey(value any) any {
+    switch key := value.(type) {
+    case nil: return ""
+    case bool: if key { return int64(1) }; return int64(0)
+    case float64: return int64(key)
+    case int64: return key
+    case string:
+        number, err := strconv.ParseInt(key, 10, 64)
+        if err == nil && strconv.FormatInt(number, 10) == key { return number }
+        return key
+    default: panic("unsupported PHP array key")
+    }
+}
+
+func array(items ...entry) *phpArray {
+    result := &phpArray{}
+    for _, item := range items { result.set(item.key, item.value) }
+    return result
+}
+
+func (a *phpArray) set(key, value any) {
+    key = arrayKey(key)
+    for i := range a.entries {
+        if a.entries[i].key == key { a.entries[i].value = value; return }
+    }
+    a.entries = append(a.entries, entry{key, value})
+}
+
+func (a *phpArray) lookup(key any) (any, bool) {
+    key = arrayKey(key)
+    for _, item := range a.entries { if item.key == key { return item.value, true } }
+    return nil, false
+}
+
+func (a *phpArray) values() []any {
+    result := make([]any, 0, len(a.entries))
+    for _, item := range a.entries { result = append(result, item.value) }
+    return result
+}
+
+func (a *phpArray) MarshalJSON() ([]byte, error) {
+    sequential := true
+    for i, item := range a.entries { if item.key != int64(i) { sequential = false } }
+    if sequential { return json.Marshal(a.values()) }
+    var result bytes.Buffer
+    result.WriteByte('{')
+    for i, item := range a.entries {
+        if i > 0 { result.WriteByte(',') }
+        key, _ := json.Marshal(fmt.Sprint(item.key))
+        value, err := json.Marshal(item.value)
+        if err != nil { return nil, err }
+        result.Write(key); result.WriteByte(':'); result.Write(value)
+    }
+    result.WriteByte('}')
+    return result.Bytes(), nil
+}
+
+func decodeValue(decoder *json.Decoder, depth int) (any, error) {
+    if depth > 512 { return nil, fmt.Errorf("JSON nesting limit") }
+    token, err := decoder.Token()
+    if err != nil { return nil, err }
+    switch value := token.(type) {
+    case json.Number:
+        number, err := value.Int64()
+        if err == nil { return number, nil }
+        real, err := value.Float64()
+        if err != nil || math.IsInf(real, 0) || math.IsNaN(real) { return nil, fmt.Errorf("invalid number") }
+        return real, nil
+    case json.Delim:
+        result := array()
+        if value != '[' && value != '{' { return nil, fmt.Errorf("unexpected JSON delimiter") }
+        for decoder.More() {
+            var key any = int64(len(result.entries))
+            if value == '{' {
+                key, err = decoder.Token()
+                if err != nil { return nil, err }
+            }
+            child, err := decodeValue(decoder, depth + 1)
+            if err != nil { return nil, err }
+            result.set(key, child)
+        }
+        closing, err := decoder.Token()
+        if err != nil || (value == '[' && closing != json.Delim(']')) || (value == '{' && closing != json.Delim('}')) {
+            return nil, fmt.Errorf("unclosed JSON container")
+        }
+        return result, nil
+    default: return value, nil
+    }
+}
+
+func index(value, key any) any {
+    if value == nil { return nil }
+    if word, ok := value.(string); ok {
+        var offset int64
+        switch key := key.(type) {
+        case int64: offset = key
+        case string:
+            number, err := strconv.ParseInt(key, 10, 64)
+            if err != nil { panic("unsupported PHP string offset") }; offset = number
+        default: panic("unsupported PHP string offset")
+        }
+        if offset < 0 { offset += int64(len(word)) }
+        if offset < 0 || offset >= int64(len(word)) { return "" }
+        letter := string(word[offset]); if !utf8.ValidString(letter) { panic("invalid UTF-8") }
+        return letter
+    }
+    object, ok := value.(*phpArray)
+    if !ok {
+        switch value.(type) { case bool, int64, float64: return nil }
+        panic("unsupported PHP array offset")
+    }
+    result, _ := object.lookup(key)
+    return result
+}
+
+func truth(value any) bool {
+    switch v := value.(type) {
+    case nil: return false
+    case bool: return v
+    case int64: return v != 0
+    case float64: return v != 0
+    case string: return v != "" && v != "0"
+    case *phpArray: return len(v.entries) > 0
+    default: return true
+    }
+}
+
+func identical(left, right any) bool {
+    if reflect.TypeOf(left) != reflect.TypeOf(right) { return false }
+    if a, ok := left.(*phpArray); ok {
+        b := right.(*phpArray)
+        if len(a.entries) != len(b.entries) { return false }
+        for i, item := range a.entries {
+            if item.key != b.entries[i].key || !identical(item.value, b.entries[i].value) { return false }
+        }
+        return true
+    }
+    if object, ok := left.(*phpObject); ok { return object == right.(*phpObject) }
+    return reflect.DeepEqual(left, right)
+}
+
+func coalesce(left func() any, right func() any) any {
+    value := left()
+    if value == nil { return right() }
+    return value
+}
+
+func secureEqual(left, right any) bool {
+    a, okA := left.(string); b, okB := right.(string)
+    if !okA || !okB { panic("hash_equals requires strings") }
+    return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func environment(name string, laravel bool) any {
+    value, exists := os.LookupEnv(name)
+    if !exists { if laravel { return nil }; return false }
+    if laravel {
+        switch strings.ToLower(value) {
+        case "true", "(true)": return true
+        case "false", "(false)": return false
+        case "empty", "(empty)": return ""
+        case "null", "(null)": return nil
+        }
+        if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' { return value[1:len(value)-1] }
+    }
+    return value
+}
+
+func inputs(ctx *phpArray) *phpArray {
+    result := array()
+    for _, name := range []string{"query", "body"} {
+        for _, item := range index(ctx, name).(*phpArray).entries { result.set(item.key, item.value) }
+    }
+    return result
+}
+
+func requestValue(ctx *phpArray, kind, key string, fallback any) any {
+    var data *phpArray
+    if kind == "input" { data = inputs(ctx) } else {
+        names := map[string]string{"header": "headers", "route": "params", "query": "query"}
+        data = index(ctx, names[kind]).(*phpArray)
+    }
+    if kind == "header" { key = strings.ToLower(key) }
+    value, exists := data.lookup(key)
+    if exists { return value }
+    return fallback
+}
+
+func bearer(ctx *phpArray) any {
+    header, _ := index(index(ctx, "headers"), "authorization").(string)
+    offset := strings.LastIndex(strings.ToLower(header), "bearer ")
+    if offset < 0 { return nil }
+    return strings.SplitN(header[offset+7:], ",", 2)[0]
+}
+
+type apiError struct { status int; body any }
+
+func validate(ctx *phpArray, rules *phpArray) *phpArray {
+    data, output, errors := inputs(ctx), array(), array()
+    messages := []string{}
+    for _, item := range rules.entries {
+        key, declaration := item.key.(string), item.value.(string)
+        parts := strings.Split(declaration, "|")
+        has := func(rule string) bool { for _, part := range parts { if part == rule { return true } }; return false }
+        value, exists := data.lookup(key)
+        if has("sometimes") && !exists { continue }
+        label := strings.ReplaceAll(key, "_", " ")
+        empty := value == nil || identical(value, "")
+        if a, ok := value.(*phpArray); ok && len(a.entries) == 0 { empty = true }
+        failures := array()
+        add := func(message string) { failures.set(int64(len(failures.entries)), message); messages = append(messages, message) }
+        if has("required") && empty {
+            add("The " + label + " field is required.")
+        } else if exists && !(value == nil && has("nullable")) && !identical(value, "") {
+            word, isString := value.(string)
+            if !isString { add("The " + label + " field must be a string.") }
+            for _, rule := range parts {
+                if strings.HasPrefix(rule, "max:") {
+                    limit, _ := strconv.Atoi(rule[4:])
+                    size := utf8.RuneCountInString(word)
+                    switch item := value.(type) {
+                    case *phpArray: size = len(item.entries)
+                    case int64, float64: size = len(fmt.Sprint(item))
+                    case bool: if item { size = 1 }
+                    }
+                    if size > limit { add("The " + label + " field must not be greater than " + rule[4:] + " characters.") }
+                }
+            }
+        }
+        if len(failures.entries) > 0 { errors.set(key, failures) } else if exists { output.set(key, value) }
+    }
+    if len(messages) > 0 {
+        summary := messages[0]
+        if len(messages) > 1 {
+            suffix := "errors"; if len(messages) == 2 { suffix = "error" }
+            summary += fmt.Sprintf(" (and %d more %s)", len(messages)-1, suffix)
+        }
+        panic(apiError{422, map[string]any{"message": summary, "errors": errors}})
+    }
+    return output
+}
+
+type database struct { pool *sql.DB; tx *sql.Tx; ctx context.Context }
+
+func (db *database) transaction(callback func(*database) any) (result any) {
+    if db.tx != nil { panic("nested transactions require a separate profile") }
+    if db.pool == nil { panic("DATABASE_URL is required") }
+    tx, err := db.pool.BeginTx(db.ctx, nil)
+    if err != nil { panic("database transaction unavailable") }
+    defer tx.Rollback()
+    result = callback(&database{pool: db.pool, tx: tx, ctx: db.ctx})
+    if err = tx.Commit(); err != nil { panic("database commit failed") }
+    return result
+}
+
+type executor interface {
+    ExecContext(context.Context, string, ...any) (sql.Result, error)
+    QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func (db *database) query(operation, statement string, values *phpArray) any {
+    var connection executor = db.pool
+    if db.tx != nil { connection = db.tx }
+    if db.pool == nil { panic("DATABASE_URL is required") }
+    if operation != "select" {
+        result, err := connection.ExecContext(db.ctx, statement, values.values()...)
+        if err != nil { panic("database write failed") }
+        if operation == "insert" { return true }
+        count, err := result.RowsAffected(); if err != nil { panic("row count unavailable") }
+        return count
+    }
+    rows, err := connection.QueryContext(db.ctx, statement, values.values()...)
+    if err != nil { panic("database read failed") }
+    defer rows.Close()
+    columns, err := rows.Columns(); if err != nil { panic("column metadata unavailable") }
+    types, err := rows.ColumnTypes(); if err != nil { panic("column types unavailable") }
+    output := array()
+    for rows.Next() {
+        fields, pointers := make([]any, len(columns)), make([]any, len(columns))
+        for i := range fields { pointers[i] = &fields[i] }
+        if err := rows.Scan(pointers...); err != nil { panic("database row decoding failed") }
+        row := map[string]any{}
+        for i, name := range columns {
+            value := fields[i]
+            if raw, ok := value.([]byte); ok {
+                value = string(raw)
+                switch strings.ToUpper(types[i].DatabaseTypeName()) {
+                case "TINYINT", "SMALLINT", "MEDIUMINT", "INT", "INTEGER", "BIGINT":
+                    if number, err := strconv.ParseInt(string(raw), 10, 64); err == nil { value = number }
+                }
+            }
+            row[name] = value
+        }
+        output.set(int64(len(output.entries)), &phpObject{fields: row})
+    }
+    if rows.Err() != nil { panic("database iteration failed") }
+    return output
+}
+
+func openDatabase(dialect string) *sql.DB {
+    if dialect == "none" { return nil }
+    raw := os.Getenv("DATABASE_URL")
+    var driver, dsn string
+@DATABASE@
+    pool, err := sql.Open(driver, dsn)
+    if err != nil { panic("invalid DATABASE_URL") }
+    pool.SetMaxOpenConns(4); pool.SetMaxIdleConns(2); pool.SetConnMaxLifetime(5 * time.Minute)
+    return pool
+}
+
+func normalizeLaravel(value any, key string) any {
+    if entries, ok := value.(*phpArray); ok {
+        result := array()
+        for _, item := range entries.entries {
+            result.set(item.key, normalizeLaravel(item.value, fmt.Sprint(item.key)))
+        }
+        return result
+    }
+    if word, ok := value.(string); ok {
+        if key != "current_password" && key != "password" && key != "password_confirmation" {
+            word = strings.Trim(word, " \t\n\r\x00\x0b")
+        }
+        if word == "" { return nil }; return word
+    }
+    return value
+}
+
+func wrap(pool *sql.DB, handler func(*phpArray, *database) any, kind string) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        send := func(status int, body any) {
+            encoded, err := json.Marshal(body)
+            if err != nil { status = 500; encoded = []byte(`{"message":"Server Error"}`) }
+            w.Header().Set("Content-Type", "application/json")
+            w.WriteHeader(status); _, _ = w.Write(encoded)
+        }
+        defer func() { if failure := recover(); failure != nil {
+            if api, ok := failure.(apiError); ok { send(api.status, api.body) } else { send(500, map[string]any{"message":"Server Error"}) }
+        } }()
+        raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1_048_576))
+        if err != nil { send(413, map[string]any{"message":"Request body is too large."}); return }
+        var body any = array()
+        if len(raw) > 0 {
+            decoder := json.NewDecoder(bytes.NewReader(raw)); decoder.UseNumber()
+            value, err := decodeValue(decoder, 0)
+            if err != nil { send(400, map[string]any{"message":"Invalid JSON."}); return }
+            if _, err = decoder.Token(); err != io.EOF { send(400, map[string]any{"message":"Invalid JSON."}); return }
+            body = value
+            if body == nil { body = array() }
+        }
+        query, params, headers := array(), array(), array()
+        for key, values := range r.URL.Query() { query.set(key, values[len(values)-1]) }
+        for key, values := range r.Header { headers.set(strings.ToLower(key), values[0]) }
+        route := chi.RouteContext(r.Context())
+        for i, key := range route.URLParams.Keys { params.set(key, route.URLParams.Values[i]) }
+        if kind == "laravel" {
+            if _, ok := body.(*phpArray); !ok { body = array(entry{int64(0), body}) }
+            body = normalizeLaravel(body, "")
+            query = normalizeLaravel(query, "").(*phpArray)
+        }
+        ctx := array(entry{"body", body}, entry{"query", query}, entry{"params", params}, entry{"headers", headers})
+        value := handler(ctx, &database{pool: pool, ctx: r.Context()})
+        reply, ok := value.(*phpArray)
+        if !ok { panic("handler must return status and body") }
+        status, ok := index(reply, "status").(int64)
+        if !ok || status < 200 || status > 599 || status == 204 || status == 205 || status == 304 { panic("invalid response status") }
+        response, exists := reply.lookup("body")
+        if !exists || len(reply.entries) != 2 { panic("invalid response envelope") }
+        send(int(status), response)
+    }
+}

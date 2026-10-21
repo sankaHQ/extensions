@@ -17,6 +17,7 @@ EXTENSION_NAMES = ("sanka-extension-drf-to-fastapi", "sanka-extension-drf-to-fla
 GO_EXTENSION_NAME = "sanka-extension-python-to-golang"
 RUST_EXTENSION_NAME = "sanka-extension-typescript-to-rust"
 RN_EXTENSION_NAME = "sanka-extension-react-native-to-native"
+PHP_EXTENSION_NAMES = ("sanka-extension-php-to-fastapi", "sanka-extension-php-to-golang")
 TS_CAPTURE_NAME = "sanka-ts-capture"
 HTTP_REPLAY_NAME = "sanka-http-replay"
 JEV_EXTENSION_NAME = "sanka-extension-llm-to-jev"
@@ -114,10 +115,17 @@ def main() -> int:
         PACKAGES / GO_EXTENSION_NAME,
         PACKAGES / RUST_EXTENSION_NAME,
         PACKAGES / RN_EXTENSION_NAME,
+        *(PACKAGES / name for name in PHP_EXTENSION_NAMES),
     ):
         own_module = package.name.replace("-", "_")
         allowed_modules: tuple[str, ...] = (own_module,)
         project = _project(package)
+        if package.name in PHP_EXTENSION_NAMES:
+            allowed_modules += ("sanka_extensions", "sanka_php_migration")
+            if project.get("dependencies") != ["sanka-php-migration==0.1.0a1"]:
+                errors.append("PHP adapters depend only on the shared pinned PHP library")
+            if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
+                errors.append("PHP adapters require independently isolated executables")
         if package.name == JEV_EXTENSION_NAME:
             allowed_modules += ("sanka_extensions",)
             if project.get("dependencies") != ["sanka-extension-sdk==0.1.0a4"]:
@@ -231,6 +239,24 @@ def main() -> int:
                 errors.append(
                     f"shared code helper imports runtime or extension: {source}: {module}"
                 )
+
+    php_helper = PACKAGES / "sanka-php-migration"
+    php_allowed = (
+        "sanka_extensions",
+        "sanka_code_migration",
+        "sanka_http_replay",
+        "tree_sitter",
+        "tree_sitter_php",
+        "sanka_php_migration",
+    )
+    for source in (php_helper / "src").rglob("*.py"):
+        if not source.read_text().startswith("# SPDX-License-Identifier: Apache-2.0"):
+            errors.append(f"missing Apache-2.0 SPDX header: {source.relative_to(ROOT)}")
+        for module in _imports(source):
+            if module.split(".")[0] not in sys.stdlib_module_names and not _is_module_or_submodule(
+                module, php_allowed
+            ):
+                errors.append(f"PHP helper imports an unsupported runtime: {source}: {module}")
 
     for helper_name in (TS_CAPTURE_NAME, HTTP_REPLAY_NAME):
         _check_stdlib_helper(PACKAGES / helper_name, helper_name, errors)

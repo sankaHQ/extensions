@@ -204,6 +204,10 @@ def build(output: Path, *, write_manifests: bool = False, candidate: bool = Fals
         check=True,
     )
     for package in PACKAGES:
+        if package == "sanka-code-migration":
+            pinned = next(w for w in PINNED_LOCAL_WHEELS if w.distribution == package)
+            download_locked_wheel(output, pinned)
+            continue
         subprocess.run(
             [
                 "uv",

@@ -1,0 +1,128 @@
+name: PHP converters
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - packages/sanka-php-migration/**
+      - packages/sanka-extension-php-to-fastapi/**
+      - packages/sanka-extension-php-to-golang/**
+      - packages/sanka-code-migration/**
+      - packages/sanka-http-replay/**
+      - scripts/build_php_release.py
+      - scripts/build_release.py
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/php-converters.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8.4.11@sha256:0f51e63e537a1f176423fa03ef559aabe6fa4372a53160a44bc7e75da7d15364
+        env:
+          MYSQL_ROOT_PASSWORD: sanka-fixture-admin
+          MYSQL_ROOT_HOST: "%"
+          MYSQL_DATABASE: sanka_php_admin
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -psanka-fixture-admin"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: "0.11.21"
+          python-version: "3.12.13"
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
+        with:
+          php-version: "8.4.27"
+          extensions: pdo_mysql, pdo_sqlite, mbstring, xml, ctype, fileinfo, tokenizer
+          tools: composer:2.10.3
+          coverage: none
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: "1.27.0"
+          cache: true
+          cache-dependency-path: packages/sanka-php-migration/src/sanka_php_migration/locks/**/go.sum
+      - name: Prepare locked source and target dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --frozen --all-packages
+          locks="$GITHUB_WORKSPACE/packages/sanka-php-migration/src/sanka_php_migration/locks"
+          # Initial acquisition produces a reviewable lock artifact. The final
+          # step fails until those exact bytes are committed and CI is rerun.
+          if [ ! -f "$locks/laravel/composer.lock" ]; then
+            composer update --working-dir="$locks/laravel" --no-install --no-scripts --no-plugins --no-interaction
+          fi
+          mkdir -p "$RUNNER_TEMP/php-framework"
+          cp "$locks/laravel/composer.json" "$locks/laravel/composer.lock" "$RUNNER_TEMP/php-framework/"
+          composer install --working-dir="$RUNNER_TEMP/php-framework" --no-dev --no-scripts --no-plugins --no-interaction --prefer-dist
+          uv venv --python 3.12.13 "$RUNNER_TEMP/php-target"
+          uv pip sync --python "$RUNNER_TEMP/php-target/bin/python" --require-hashes "$locks/python-mysql/requirements.txt"
+          for dialect in none sqlite mysql; do
+            (cd "$locks/$dialect" && GOTOOLCHAIN=local go mod download)
+          done
+          echo "SANKA_PHP_FRAMEWORK=$RUNNER_TEMP/php-framework" >> "$GITHUB_ENV"
+          echo "SANKA_PHP_PYTHON=$RUNNER_TEMP/php-target/bin/python" >> "$GITHUB_ENV"
+          echo "SANKA_PHP_GOMODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
+          echo "SANKA_PHP_GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+      - name: Build and install the candidate wheel closure
+        run: |
+          uv run python scripts/build_php_release.py
+          uv --no-config pip install --reinstall --no-index --find-links release/php-converters sanka-extension-php-to-fastapi==0.1.0a1 sanka-extension-php-to-golang==0.1.0a1
+      - name: Compare original PHP and native candidates
+        env:
+          SANKA_PHP_REPLAY: "1"
+          SANKA_PHP_MYSQL_ADMIN_URL: mysql://root:sanka-fixture-admin@127.0.0.1:3306/sanka_php_admin
+        run: uv run --no-sync python -m pytest packages/sanka-php-migration/tests/test_php_linux_replay.py --basetemp=release/php-evidence -q
+      - name: Compare MySQL behavior without a network
+        env:
+          SANKA_PHP_REPLAY: "1"
+          SANKA_PHP_MYSQL_ADMIN_URL: mysql://root:sanka-fixture-admin@localhost/sanka_php_admin
+        shell: bash
+        run: |
+          set -euo pipefail
+          socket_dir="$RUNNER_TEMP/php-mysql-socket"
+          mkdir -p "$socket_dir"
+          chmod 777 "$socket_dir"
+          docker run -d --name php-socket-db --network none \
+            -v "$socket_dir:/socket" \
+            -e MYSQL_ROOT_PASSWORD=sanka-fixture-admin -e MYSQL_ROOT_HOST=% -e MYSQL_DATABASE=sanka_php_admin \
+            mysql:8.4.11@sha256:0f51e63e537a1f176423fa03ef559aabe6fa4372a53160a44bc7e75da7d15364 \
+            --socket=/socket/mysql.sock --skip-networking --mysqlx=OFF
+          trap 'docker rm -f php-socket-db' EXIT
+          for attempt in $(seq 1 60); do
+            if docker exec -e MYSQL_PWD=sanka-fixture-admin php-socket-db sh -c 'test "$(cat /proc/1/comm)" = mysqld && mysql --socket=/socket/mysql.sock -uroot sanka_php_admin -e "SELECT 1"'; then break; fi
+            sleep 1
+          done
+          export SANKA_PHP_MYSQL_SOCKET="$socket_dir/mysql.sock"
+          uv run --no-sync python -m pytest packages/sanka-php-migration/tests/test_php_linux_replay.py -k laravel-mysql --basetemp=release/php-socket-evidence -q
+      - name: Require a reviewed source dependency lock
+        run: git ls-files --error-unmatch packages/sanka-php-migration/src/sanka_php_migration/locks/laravel/composer.lock
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: php-qualification
+          path: |
+            packages/sanka-php-migration/src/sanka_php_migration/locks/laravel/composer.lock
+            release/php-converters/*.json
+            release/php-converters/*.whl
+            release/php-evidence/**/.sanka/php/*.json
+            release/php-socket-evidence/**/.sanka/php/*.json
+          include-hidden-files: true
+          retention-days: 3

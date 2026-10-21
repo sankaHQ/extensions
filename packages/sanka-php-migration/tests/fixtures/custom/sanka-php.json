@@ -1,0 +1,27 @@
+{
+  "schema": "sanka.php-project/v1",
+  "kind": "custom",
+  "database": {
+    "dialect": "none"
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "file": "api.php",
+      "handler": "health"
+    },
+    {
+      "method": "GET",
+      "path": "/hello/{id}",
+      "file": "api.php",
+      "handler": "greet"
+    },
+    {
+      "method": "POST",
+      "path": "/echo",
+      "file": "api.php",
+      "handler": "echo_payload"
+    }
+  ]
+}

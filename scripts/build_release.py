@@ -17,7 +17,6 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[1]
 MAX_DEPENDENCY_WHEEL_BYTES = 128 * 1024 * 1024
 MARKETPLACE_PACKAGES = (
-    "sanka-code-migration",
     "sanka-drf-replay",
     "sanka-extension-drf-to-fastapi",
     "sanka-extension-drf-to-flask",
@@ -48,10 +47,12 @@ class LockedWheel:
     size: int
 
 
-def locked_dependency_wheels(*, root: Path = ROOT) -> tuple[LockedWheel, ...]:
+def locked_dependency_wheels(
+    *, root: Path = ROOT, dependencies: tuple[str, ...] = DEPENDENCIES
+) -> tuple[LockedWheel, ...]:
     packages = tomllib.loads((root / "uv.lock").read_text(encoding="utf-8"))["package"]
     locked: list[LockedWheel] = []
-    for distribution in DEPENDENCIES:
+    for distribution in dependencies:
         matches = [package for package in packages if package["name"] == distribution]
         if len(matches) != 1 or not matches[0].get("wheels"):
             raise RuntimeError(f"uv.lock has no unique wheel set for {distribution}")
@@ -90,6 +91,15 @@ PINNED_EXTENSION_SDK = LockedWheel(
 )
 PINNED_LOCAL_WHEELS = (
     PINNED_EXTENSION_SDK,
+    # Old converters retain a4 while PHP qualifies the opt-in v2/a5 contract.
+    LockedWheel(
+        "sanka-code-migration",
+        "sanka_code_migration-0.1.0a4-py3-none-any.whl",
+        "https://github.com/sankaHQ/extensions/releases/download/api-converters-v0.1.0a32/"
+        "sanka_code_migration-0.1.0a4-py3-none-any.whl",
+        "a5f0bc3022ff3533db4ca8d9df813a6021f8c04a7ab9d03d3495cc0cd9bab12d",
+        78958,
+    ),
     # Reuse published dependencies without rebuilding their immutable filenames.
     LockedWheel(
         "sanka-connector-sdk",

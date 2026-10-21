@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Protected FastAPI request probe, copied outside the generated candidate."""
+
+import importlib
+import json
+import sys
+
+from fastapi.testclient import TestClient
+
+sys.path.insert(0, sys.argv[1])
+application = importlib.import_module("app").app
+with TestClient(application, raise_server_exceptions=False) as client:
+    for line in sys.stdin:
+        case = json.loads(line)
+        options = {"headers": {"Accept": "application/json", **case["headers"]}}
+        if "body" in case:
+            options["json"] = case["body"]
+        response = client.request(case["method"], case["path"], **options)
+        record = {"status": response.status_code,
+                  "media_type": response.headers.get("content-type", "").split(";")[0],
+                  "body": response.json() if response.content else None}
+        print(json.dumps(record, allow_nan=False), flush=True)

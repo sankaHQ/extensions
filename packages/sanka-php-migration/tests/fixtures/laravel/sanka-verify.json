@@ -1,0 +1,185 @@
+{
+  "schema": "sanka.http-scenarios/v1",
+  "scenarios": [
+    {
+      "id": "unauthorized",
+      "method": "GET",
+      "path": "/orders",
+      "expected_status": 401,
+      "headers": {
+        "authorization": "Bearer sanka-invalid-token"
+      }
+    },
+    {
+      "id": "empty",
+      "method": "GET",
+      "path": "/orders",
+      "expected_status": 200,
+      "headers": {
+        "authorization": "Bearer sanka-alice-token"
+      }
+    },
+    {
+      "id": "validation-required",
+      "method": "POST",
+      "path": "/orders",
+      "expected_status": 422,
+      "headers": {
+        "authorization": "Bearer sanka-alice-token"
+      },
+      "body": {}
+    },
+    {
+      "id": "validation-type",
+      "method": "POST",
+      "path": "/orders",
+      "expected_status": 422,
+      "headers": {
+        "authorization": "Bearer sanka-alice-token"
+      },
+      "body": {
+        "name": 1,
+        "amount": "12.30"
+      }
+    },
+    {
+      "id": "create-alice",
+      "method": "POST",
+      "path": "/orders",
+      "expected_status": 201,
+      "headers": {
+        "authorization": "Bearer sanka-alice-token"
+      },
+      "body": {
+        "name": "first",
+        "amount": "12.30",
+        "ignored": true
+      }
+    },
+    {
+      "id": "read-alice",
+      "method": "GET",
+      "path": "/orders/1",
+      "expected_status": 200,
+      "headers": {
+        "authorization": "Bearer sanka-alice-token"
+      }
+    },
+    {
+      "id": "forbidden-read",
+      "method": "GET",
+      "path": "/orders/1",
+      "expected_status": 404,
+      "headers": {
+        "authorization": "Bearer sanka-bob-token"
+      }
+    },
+    {
+      "id": "forbidden-update",
+      "method": "PATCH",
+      "path": "/orders/1",
+      "expected_status": 404,
+      "headers": {
+        "authorization": "Bearer sanka-bob-token"
+      },
+      "body": {
+        "name": "stolen"
+      }
+    },
+    {
+      "id": "forbidden-delete",
+      "method": "DELETE",
+      "path": "/orders/1",
+      "expected_status": 404,
+      "headers": {
+        "authorization": "Bearer sanka-bob-token"
+      }
+    },
+    {
+      "id": "update-alice",
+      "method": "PATCH",
+      "path": "/orders/1",
+      "expected_status": 200,
+      "headers": {
+        "authorization": "Bearer sanka-alice-token"
+      },
+      "body": {
+        "name": "updated"
+      }
+    },
+    {
+      "id": "unchanged-update",
+      "method": "PATCH",
+      "path": "/orders/1",
+      "expected_status": 404,
+      "headers": {
+        "authorization": "Bearer sanka-alice-token"
+      },
+      "body": {
+        "name": "updated"
+      }
+    },
+    {
+      "id": "transaction-rollback",
+      "method": "POST",
+      "path": "/orders?fail=yes",
+      "expected_status": 500,
+      "headers": {
+        "authorization": "Bearer sanka-alice-token"
+      },
+      "body": {
+        "name": "rollback",
+        "amount": "99.90"
+      }
+    },
+    {
+      "id": "after-rollback",
+      "method": "GET",
+      "path": "/orders",
+      "expected_status": 200,
+      "headers": {
+        "authorization": "Bearer sanka-alice-token"
+      }
+    },
+    {
+      "id": "create-bob",
+      "method": "POST",
+      "path": "/orders",
+      "expected_status": 201,
+      "headers": {
+        "authorization": "Bearer sanka-bob-token"
+      },
+      "body": {
+        "name": "bob",
+        "amount": "25.00"
+      }
+    },
+    {
+      "id": "list-bob",
+      "method": "GET",
+      "path": "/orders",
+      "expected_status": 200,
+      "headers": {
+        "authorization": "Bearer sanka-bob-token"
+      }
+    },
+    {
+      "id": "delete-alice",
+      "method": "DELETE",
+      "path": "/orders/1",
+      "expected_status": 200,
+      "headers": {
+        "authorization": "Bearer sanka-alice-token"
+      }
+    },
+    {
+      "id": "deleted",
+      "method": "GET",
+      "path": "/orders/1",
+      "expected_status": 404,
+      "headers": {
+        "authorization": "Bearer sanka-alice-token"
+      }
+    }
+  ]
+}

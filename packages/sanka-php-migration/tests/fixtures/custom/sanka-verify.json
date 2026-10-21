@@ -1,0 +1,85 @@
+{
+  "schema": "sanka.http-scenarios/v1",
+  "scenarios": [
+    {
+      "id": "health",
+      "method": "GET",
+      "path": "/health",
+      "expected_status": 200
+    },
+    {
+      "id": "default-query",
+      "method": "GET",
+      "path": "/hello/42",
+      "expected_status": 200
+    },
+    {
+      "id": "false-like-zero",
+      "method": "GET",
+      "path": "/hello/42?name=0",
+      "expected_status": 200
+    },
+    {
+      "id": "unauthorized",
+      "method": "POST",
+      "path": "/echo",
+      "body": {},
+      "expected_status": 401
+    },
+    {
+      "id": "empty-object",
+      "method": "POST",
+      "path": "/echo",
+      "body": {},
+      "headers": {
+        "authorization": "Bearer sanka-fixture-token"
+      },
+      "expected_status": 200
+    },
+    {
+      "id": "indexed-object",
+      "method": "POST",
+      "path": "/echo",
+      "body": {
+        "0": "a",
+        "1": "b"
+      },
+      "headers": {
+        "authorization": "Bearer sanka-fixture-token"
+      },
+      "expected_status": 200
+    },
+    {
+      "id": "reordered-object",
+      "method": "POST",
+      "path": "/echo",
+      "body": {
+        "1": "a",
+        "0": "b"
+      },
+      "headers": {
+        "authorization": "Bearer sanka-fixture-token"
+      },
+      "expected_status": 200
+    },
+    {
+      "id": "nested",
+      "method": "POST",
+      "path": "/echo",
+      "body": {
+        "nested": {},
+        "unicode": "日本語",
+        "null": null,
+        "items": [
+          1,
+          false,
+          "0"
+        ]
+      },
+      "headers": {
+        "authorization": "Bearer sanka-fixture-token"
+      },
+      "expected_status": 200
+    }
+  ]
+}

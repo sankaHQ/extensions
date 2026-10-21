@@ -67,11 +67,10 @@ jobs:
       - run: uv sync --frozen --all-packages
       - run: uv build --wheel --package sanka-drf-replay --out-dir release/python-to-golang
       - run: uv build --wheel --package sanka-http-replay --out-dir release/python-to-golang
-      - run: uv build --wheel --package sanka-code-migration --out-dir release/python-to-golang
       - run: uv build --wheel --package sanka-extension-python-to-golang --out-dir release/python-to-golang
       - name: Install the actual candidate wheel
         run: |
-          uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/python-to-golang"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}]'
+          uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/python-to-golang"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk", "sanka-code-migration"}]'
           uv --no-config pip install --reinstall --no-index --find-links release/python-to-golang release/python-to-golang/sanka_extension_python_to_golang-*.whl
           uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_python_to_golang as m; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; assert pathlib.Path(m.__file__).resolve().is_relative_to(pathlib.Path(sys.prefix).resolve())"
       - name: Qualify shared input presence with native Go

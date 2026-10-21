@@ -1,0 +1,35 @@
+{
+  "schema_version": "sanka-extension-manifest/v2",
+  "kind": "migration",
+  "id": "sanka/php-to-golang",
+  "version": "0.1.0a1",
+  "protocol_version": "sanka-extension/v1",
+  "distribution": {
+    "name": "sanka-extension-php-to-golang",
+    "version": "0.1.0a1",
+    "executable": "sanka-extension-php-to-golang"
+  },
+  "commands": [
+    "scan",
+    "plan",
+    "apply",
+    "test",
+    "verify"
+  ],
+  "targets": [
+    "chi"
+  ],
+  "runtime": {
+    "sanka_cli": ">=0.2.12,<0.4"
+  },
+  "match": {
+    "all": [],
+    "any": [
+      {
+        "kind": "file_suffix",
+        "value": ".php"
+      }
+    ]
+  },
+  "wheels": []
+}

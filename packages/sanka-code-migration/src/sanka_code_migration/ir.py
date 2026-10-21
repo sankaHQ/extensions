@@ -182,6 +182,7 @@ class DecisionReason:
 @dataclass(frozen=True, slots=True)
 class BackendIR:
     SCHEMA: ClassVar[str] = "sanka.backend-ir/v1"
+    DIALECTS: ClassVar[frozenset[str]] = frozenset({"sqlite", "postgresql", "none"})
 
     source_content_digest: str
     source_dependency_lock_digest: str
@@ -201,7 +202,7 @@ class BackendIR:
                 raise ValueError(f"{label} must be a canonical sha256 digest")
         if type(self.persistence) is not bool:
             raise TypeError("persistence must be a boolean")
-        if self.database_dialect not in {"sqlite", "postgresql", "none"}:
+        if self.database_dialect not in self.DIALECTS:
             raise ValueError("database_dialect is unsupported")
         if self.persistence != (self.database_dialect != "none"):
             raise ValueError("database_dialect must be none exactly when persistence is false")
@@ -262,6 +263,9 @@ class BackendIR:
 @dataclass(frozen=True, slots=True)
 class TargetProfile:
     SCHEMA: ClassVar[str] = "sanka.target-profile/v1"
+    TARGETS: ClassVar[frozenset[str]] = frozenset({"flask"})
+    ORMS: ClassVar[frozenset[str]] = frozenset({"sqlalchemy", "django", "none"})
+    DIALECTS: ClassVar[frozenset[str]] = BackendIR.DIALECTS
 
     profile_version: str
     target: str
@@ -278,11 +282,11 @@ class TargetProfile:
 
     def __post_init__(self) -> None:
         _text(self.profile_version, "profile_version")
-        if self.target != "flask":
+        if self.target not in self.TARGETS:
             raise ValueError("unsupported target")
-        if self.orm not in {"sqlalchemy", "django", "none"}:
+        if self.orm not in self.ORMS:
             raise ValueError("unsupported orm")
-        if self.dialect not in {"sqlite", "postgresql", "none"}:
+        if self.dialect not in self.DIALECTS:
             raise ValueError("unsupported dialect")
         if self.schema_mode not in {"empty", "adopt-existing", "source-owned", "none"}:
             raise ValueError("unsupported schema_mode")
@@ -368,6 +372,8 @@ class EffectiveInputs:
     """Every portable input whose change must invalidate deterministic output."""
 
     SCHEMA: ClassVar[str] = "sanka.migration-inputs/v1"
+    IR_TYPE: ClassVar[type[BackendIR]] = BackendIR
+    PROFILE_TYPE: ClassVar[type[TargetProfile]] = TargetProfile
 
     backend_ir: BackendIR
     profile: TargetProfile
@@ -375,7 +381,7 @@ class EffectiveInputs:
     formatter_locks: tuple[VersionPin, ...] = ()
 
     def __post_init__(self) -> None:
-        if type(self.backend_ir) is not BackendIR or type(self.profile) is not TargetProfile:
+        if type(self.backend_ir) is not self.IR_TYPE or type(self.profile) is not self.PROFILE_TYPE:
             raise TypeError("effective inputs require BackendIR and TargetProfile")
         _text(self.generator_version, "generator_version")
         if type(self.formatter_locks) is not tuple or any(
