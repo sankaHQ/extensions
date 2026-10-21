@@ -196,3 +196,14 @@ def test_missing_scenario_coverage_blocks_plan(project: Path, payload: list) -> 
     plan = call(project, "plan")
     assert plan["data"]["blockers"]
     assert not plan["data"]["files"]
+
+
+@pytest.mark.parametrize("name", ["bool", "str"])
+def test_record_names_cannot_shadow_generated_types(project: Path, name: str) -> None:
+    source = project / "src/main/java/example/greetings" / f"{name}.java"
+    source.write_text(f"package example.greetings; public record {name}(String value) {{}}")
+    scanned = call(project, "scan")
+    assert scanned["data"]["ready"] is False
+    plan = call(project, "plan")
+    assert plan["data"]["blockers"]
+    assert not plan["data"]["files"]

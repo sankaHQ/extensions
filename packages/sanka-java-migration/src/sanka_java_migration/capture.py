@@ -340,6 +340,8 @@ def capture(root: Path) -> dict[str, Any]:
                     "Request",
                     "FastAPI",
                     "BaseModel",
+                    "bool",
+                    "str",
                     "app",
                 }
             ):
