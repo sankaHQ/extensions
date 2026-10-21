@@ -1,0 +1,14 @@
+{
+  "schema": "sanka.php-project/v1",
+  "kind": "laravel",
+  "route_files": [
+    "routes/api.php"
+  ],
+  "database": {
+    "dialect": "mysql",
+    "schema_file": "schema.sql",
+    "tables": [
+      "orders"
+    ]
+  }
+}

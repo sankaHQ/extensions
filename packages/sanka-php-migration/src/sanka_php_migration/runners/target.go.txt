@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: Apache-2.0
+package main
+
+import (
+    "bufio"
+    "bytes"
+    "encoding/json"
+    "io"
+    "net/http/httptest"
+    "os"
+    "strings"
+    migrated "migrated"
+)
+
+func main() {
+    app, closeDB := migrated.NewApp(); defer closeDB()
+    input := bufio.NewScanner(os.Stdin); input.Buffer(make([]byte, 4096), 4_194_304)
+    output := json.NewEncoder(os.Stdout)
+    for input.Scan() {
+        var scenario struct { Method string; Path string; Headers map[string]string; Body json.RawMessage }
+        if json.Unmarshal(input.Bytes(), &scenario) != nil { os.Exit(1) }
+        request := httptest.NewRequest(scenario.Method, scenario.Path, bytes.NewReader(scenario.Body))
+        request.Header.Set("Accept", "application/json")
+        if len(scenario.Body) > 0 { request.Header.Set("Content-Type", "application/json") }
+        for key, value := range scenario.Headers { request.Header.Set(key, value) }
+        recorder := httptest.NewRecorder(); app.ServeHTTP(recorder, request)
+        response := recorder.Result(); content, err := io.ReadAll(response.Body); response.Body.Close()
+        if err != nil { os.Exit(1) }
+        var body json.RawMessage
+        if len(content) > 0 {
+            if !json.Valid(content) { os.Exit(1) }; body = content
+        } else { body = json.RawMessage("null") }
+        if output.Encode(map[string]any{"status":response.StatusCode,
+            "media_type":strings.Split(response.Header.Get("Content-Type"), ";")[0], "body":body}) != nil { os.Exit(1) }
+    }
+    if input.Err() != nil { os.Exit(1) }
+}

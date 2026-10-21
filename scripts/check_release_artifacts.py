@@ -292,7 +292,7 @@ def validate_release(
         requirements = [
             item.replace(" ", "").lower() for item in metadata.get_all("Requires-Dist", [])
         ]
-        if name != "sanka-extension-sdk" and versions.get(name) != version:
+        if wheel.name not in PINNED_LOCAL_HASHES and versions.get(name) != version:
             errors.append(f"{name} wheel version {version} does not match package version")
         if name == "sanka-extension-sdk":
             if requirements != ["sanka-connector-sdk==0.1.0a12"] or entries:

@@ -1,0 +1,304 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Explicit compatibility for the bounded PHP profile; no PHP evaluation."""
+from __future__ import annotations
+
+import hmac
+import os
+from contextlib import contextmanager
+from decimal import Decimal
+import math
+import re
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import create_engine, text
+
+
+class Reply(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    status: int
+    body: object
+
+
+class ApiError(Exception):
+    def __init__(self, status, body):
+        self.status, self.body = status, body
+
+
+class PhpArray(dict):
+    pass
+
+
+class PhpObject(dict):
+    pass
+
+
+def array_key(key):
+    if key is None:
+        return ""
+    if isinstance(key, bool):
+        return int(key)
+    if isinstance(key, float):
+        return int(key)
+    if isinstance(key, str) and re.fullmatch(r"0|-?[1-9][0-9]*", key):
+        number = int(key)
+        if -(2**63) <= number < 2**63:
+            return number
+    if isinstance(key, (str, int)):
+        return key
+    raise TypeError("unsupported PHP array key")
+
+
+def php_array(items):
+    return PhpArray((array_key(key), value) for key, value in items)
+
+
+def from_json(value):
+    if type(value) is int and not -(2**63) <= value < 2**63:
+        return float(value)
+    if isinstance(value, dict):
+        return php_array((key, from_json(item)) for key, item in value.items())
+    if isinstance(value, list):
+        return php_array((key, from_json(item)) for key, item in enumerate(value))
+    return value
+
+
+def to_json(value):
+    if isinstance(value, PhpArray):
+        keys = list(value)
+        if all(type(key) is int and key == index for index, key in enumerate(keys)):
+            return [to_json(item) for item in value.values()]
+        return {str(key): to_json(item) for key, item in value.items()}
+    if isinstance(value, dict):
+        return {key: to_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [to_json(item) for item in value]
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer() and -(2**63) <= value < 2**63:
+        return int(value)
+    return value
+
+
+def truth(value):
+    if isinstance(value, PhpObject):
+        return True
+    return not (value is None or value is False or value == 0 or value == "" or value == "0" or value == [] or value == {})
+
+
+def identical(left, right):
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, PhpObject):
+        return left is right
+    if isinstance(left, dict):
+        return list(left) == list(right) and all(identical(left[k], right[k]) for k in left)
+    if isinstance(left, list):
+        return len(left) == len(right) and all(identical(a, b) for a, b in zip(left, right))
+    return left == right
+
+
+def index(value, key):
+    if isinstance(value, PhpArray):
+        return value.get(array_key(key))
+    if isinstance(value, list) and type(key) is int:
+        return value[key] if 0 <= key < len(value) else None
+    if isinstance(value, str):
+        try:
+            offset = int(key)
+        except (ValueError, TypeError) as error:
+            raise TypeError("unsupported PHP string offset") from error
+        raw = value.encode("utf-8")
+        if -len(raw) <= offset < len(raw):
+            return bytes([raw[offset]]).decode("utf-8")
+        return ""
+    if value is None or isinstance(value, (bool, int, float)):
+        return None
+    raise TypeError("unsupported PHP array offset")
+
+
+def coalesce(left, right):
+    value = left()
+    return right() if value is None else value
+
+
+def secure_equal(left, right):
+    if not isinstance(left, str) or not isinstance(right, str):
+        raise TypeError("hash_equals requires strings")
+    return hmac.compare_digest(left.encode(), right.encode())
+
+
+def environment(name, laravel):
+    value = os.environ.get(name)
+    if not laravel:
+        return False if value is None else value
+    if value is None:
+        return None
+    special = {"true": True, "(true)": True, "false": False, "(false)": False,
+               "empty": "", "(empty)": "", "null": None, "(null)": None}
+    if value.lower() in special:
+        return special[value.lower()]
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        return value[1:-1]
+    return value
+
+
+def request_value(ctx, kind, key, default):
+    if kind == "input":
+        data = ctx["query"] | ctx["body"]
+    else:
+        data = ctx[{"header": "headers", "route": "params", "query": "query"}[kind]]
+    return data.get(key.lower() if kind == "header" else key, default)
+
+
+def bearer(ctx):
+    header = ctx["headers"].get("authorization", "")
+    offset = header.lower().rfind("bearer ")
+    if offset < 0:
+        return None
+    token = header[offset + 7:]
+    return token.split(",", 1)[0] if "," in token else token
+
+
+def validate(ctx, rules):
+    data = ctx["query"] | ctx["body"]
+    errors, output = {}, PhpArray()
+    for key, declaration in rules.items():
+        parts = declaration.split("|")
+        exists, value = key in data, data.get(key)
+        if "sometimes" in parts and not exists:
+            continue
+        messages = []
+        label = key.replace("_", " ")
+        empty = value is None or value == "" or value == [] or value == {}
+        if "required" in parts and empty:
+            messages.append(f"The {label} field is required.")
+        elif exists and not (value is None and "nullable" in parts) and value != "":
+            if not isinstance(value, str):
+                messages.append(f"The {label} field must be a string.")
+            for rule in parts:
+                size = (len(value) if isinstance(value, (str, dict, list))
+                        else len("1" if value is True else "" if value is False or value is None else str(value)))
+                if rule.startswith("max:") and size > int(rule[4:]):
+                    messages.append(f"The {label} field must not be greater than {rule[4:]} characters.")
+        if messages:
+            errors[key] = messages
+        elif exists:
+            output[key] = value
+    if errors:
+        messages = [message for group in errors.values() for message in group]
+        summary = messages[0]
+        if len(messages) > 1:
+            count = len(messages) - 1
+            summary += f" (and {count} more {'error' if count == 1 else 'errors'})"
+        raise ApiError(422, {"message": summary, "errors": errors})
+    return output
+
+
+class Database:
+    def __init__(self, engine=None, connection=None):
+        self.engine, self.connection = engine, connection
+
+    def transaction(self, callback):
+        if self.connection is not None:
+            with self.connection.begin_nested():
+                return callback(self)
+        if self.engine is None:
+            raise RuntimeError("DATABASE_URL is required")
+        with self.engine.begin() as connection:
+            return callback(Database(self.engine, connection))
+
+    def query(self, operation, statement, values):
+        if self.connection is None:
+            return self.transaction(lambda active: active.query(operation, statement, values))
+        pieces = statement.split("?")
+        bound = pieces[0] + "".join(f":p{i}" + part for i, part in enumerate(pieces[1:]))
+        result = self.connection.execute(text(bound), {f"p{i}": value for i, value in enumerate(values)})
+        if operation == "select":
+            rows = [PhpObject({key: str(value) if isinstance(value, Decimal) else value
+                               for key, value in row.items()}) for row in result.mappings()]
+            return php_array(enumerate(rows))
+        return True if operation == "insert" else result.rowcount
+
+
+def normalize_laravel(value, key=""):
+    if isinstance(value, PhpArray):
+        return php_array((name, normalize_laravel(item, str(name))) for name, item in value.items())
+    if isinstance(value, str):
+        if key not in {"current_password", "password", "password_confirmation"}:
+            value = value.strip(" \t\n\r\x00\x0b")
+        return None if value == "" else value
+    return value
+
+
+def make_app(routes, kind, dialect):
+    @contextmanager
+    def database():
+        url = os.environ.get("DATABASE_URL", "")
+        if dialect == "none":
+            yield Database()
+            return
+        prefix = {"sqlite": "sqlite:", "mysql": "mysql:"}[dialect]
+        if not url.startswith(prefix):
+            raise RuntimeError("DATABASE_URL must preserve the captured database engine")
+        if dialect == "mysql":
+            from urllib.parse import urlsplit, unquote
+            import pymysql
+            parts = urlsplit(url)
+            if not parts.hostname or not parts.username or parts.query:
+                raise RuntimeError("invalid MySQL URL")
+            # Laravel PDO reports changed rows, while SQLAlchemy normally requests
+            # CLIENT_FOUND_ROWS. An explicit creator preserves PDO update counts.
+            def connect():
+                return pymysql.connect(host=parts.hostname, port=parts.port or 3306,
+                    user=unquote(parts.username), password=unquote(parts.password or ""),
+                    database=parts.path.lstrip("/"), charset="utf8mb4", client_flag=0,
+                    connect_timeout=5, read_timeout=15, write_timeout=15,
+                    sql_mode="ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION")
+            engine = create_engine("mysql+pymysql://", creator=connect, pool_pre_ping=True)
+        else:
+            engine = create_engine(url, pool_pre_ping=True)
+        try:
+            yield Database(engine)
+        finally:
+            engine.dispose()
+
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, redirect_slashes=False)
+
+    def endpoint(handler):
+        async def invoke(request: Request):
+            try:
+                raw = bytearray()
+                async for chunk in request.stream():
+                    raw.extend(chunk)
+                    if len(raw) > 1_048_576:
+                        raise ApiError(413, {"message": "Request body is too large."})
+                import json
+                body = json.loads(raw) if raw else {}
+                if body is None:
+                    body = {}
+                if kind == "laravel" and not isinstance(body, (dict, list)):
+                    body = [body]
+                ctx = from_json({"body": body, "query": dict(request.query_params),
+                       "params": dict(request.path_params), "headers": dict(request.headers)})
+                if kind == "laravel":
+                    ctx["body"] = normalize_laravel(ctx["body"])
+                    ctx["query"] = normalize_laravel(ctx["query"])
+                from starlette.concurrency import run_in_threadpool
+                def execute():
+                    with database() as db:
+                        return handler(ctx, db)
+                reply = Reply.model_validate(dict(await run_in_threadpool(execute)))
+                if not 200 <= reply.status <= 599 or reply.status in {204, 205, 304}:
+                    raise ValueError("response status outside the JSON profile")
+                return JSONResponse(to_json(reply.body), status_code=reply.status)
+            except ApiError as error:
+                return JSONResponse(error.body, status_code=error.status)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return JSONResponse({"message": "Invalid JSON."}, status_code=400)
+            except Exception:
+                return JSONResponse({"message": "Server Error"}, status_code=500)
+        return invoke
+
+    for method, path, handler in routes:
+        app.add_api_route(path, endpoint(handler), methods=[method])
+    return app
