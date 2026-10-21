@@ -1,4 +1,4 @@
-.PHONY: check typescript-bundle
+.PHONY: check typescript-bundle java-parser
 
 # Most tests start Django, Flask or generated servers in subprocesses, so run
 # them on a bounded number of pytest-xdist workers (never -n auto).
@@ -18,7 +18,10 @@ RELEASE_ARGS ?=
 typescript-bundle:
 	uv run python scripts/fetch_typescript_bundle.py
 
-check: typescript-bundle
+java-parser:
+	python3 scripts/fetch_java_parser.py
+
+check: typescript-bundle java-parser
 	uv run ruff check .
 	uv run ruff format --check .
 	uv run mypy packages scripts
