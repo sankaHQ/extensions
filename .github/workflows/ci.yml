@@ -172,7 +172,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22.23.2"
+          node-version: "22.23.4"
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master 2026-09-17
         with:
           toolchain: "1.93.1"
@@ -213,7 +213,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22.23.2"
+          node-version: "22.23.4"
       - run: uv sync --frozen --all-packages
       - name: Fetch the pinned TypeScript compiler bundle (digest-checked, not committed)
         run: uv run python scripts/fetch_typescript_bundle.py
