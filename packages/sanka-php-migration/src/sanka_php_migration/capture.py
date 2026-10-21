@@ -621,19 +621,14 @@ def capture(root: Path) -> dict[str, Any]:
             gaps.append(
                 "Composer autoloaders, scripts, custom repositories or plugins require adaptation"
             )
-        if kind == "laravel" and "laravel/framework" in requirements:
-            lock = (
-                json.loads(safe_file(root, "composer.lock").read_text())
-                if (root / "composer.lock").exists()
-                else {}
+    if kind == "laravel":
+        if "laravel/framework" not in composer.get("require", {}):
+            gaps.append("Laravel replay requires composer.json declaring laravel/framework")
+        qualified = Path(__file__).parent / "locks/laravel/composer.lock"
+        if inventory.get("composer.lock") != hashlib.sha256(qualified.read_bytes()).hexdigest():
+            gaps.append(
+                "source Composer lock must exactly match the complete qualified Laravel lock"
             )
-            framework = [
-                p.get("version", "").removeprefix("v")
-                for p in lock.get("packages", [])
-                if p.get("name") == "laravel/framework"
-            ]
-            if framework != ["12.70.1"]:
-                gaps.append("source Composer lock must match qualified Laravel 12.70.1")
     models = []
     if dialect != "none":
         schema_file = database.get("schema_file")

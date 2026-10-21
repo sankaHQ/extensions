@@ -3,6 +3,7 @@
 
 import dataclasses
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -108,3 +109,43 @@ def test_artifacts_cannot_follow_symlinks(tmp_path: Path) -> None:
     (tmp_path / ".sanka").symlink_to(tmp_path / "destination")
     assert handle(request(tmp_path, "fastapi"), "fastapi").outcome == "error"
     assert list((tmp_path / "destination").iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["missing-composer", "missing-framework", "missing-lock", "transitive", "platform", None],
+)
+def test_laravel_plan_requires_the_complete_qualified_source_lock(
+    tmp_path: Path, change: str | None
+) -> None:
+    shutil.copytree(Path(__file__).parent / "fixtures/laravel", tmp_path, dirs_exist_ok=True)
+    if change == "missing-composer":
+        (tmp_path / "composer.json").unlink()
+    elif change == "missing-framework":
+        (tmp_path / "composer.json").write_text('{"require":{"php":"8.4.27"}}')
+    elif change == "missing-lock":
+        (tmp_path / "composer.lock").unlink()
+    elif change in {"transitive", "platform"}:
+        lock = json.loads((tmp_path / "composer.lock").read_text())
+        if change == "transitive":
+            package = next(p for p in lock["packages"] if p["name"] != "laravel/framework")
+            package["version"] = "0.0.0"
+        else:
+            lock["platform"]["php"] = "8.3.0"
+        (tmp_path / "composer.lock").write_text(json.dumps(lock))
+    req = request(tmp_path, "fastapi")
+    planned = handle(req, "fastapi")
+    assert planned.outcome == "success", planned.error
+    if change is None:
+        assert not planned.data["blockers"]
+        assert planned.data["files"]
+    else:
+        assert planned.data["blockers"]
+        assert not planned.data["files"]
+        approved = dataclasses.replace(
+            req,
+            command="apply",
+            reviewed_plan_hash="runtime-hash",
+            configuration={"extension_plan_hash": planned.data["plan_hash"]},
+        )
+        assert handle(approved, "fastapi").outcome == "error"

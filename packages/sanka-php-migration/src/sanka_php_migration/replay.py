@@ -266,15 +266,16 @@ def source_kit(work: Path, captured: dict[str, Any]) -> tuple[str, dict[str, str
             raise ValueError("Laravel replay requires the prepared, locked framework runtime")
         if (root / "composer.lock").read_bytes() != expected.read_bytes():
             raise ValueError("Laravel runtime lock differs from the qualified source profile")
+        source_lock = captured["source_inventory"].get("composer.lock")
+        if source_lock != hashlib.sha256(expected.read_bytes()).hexdigest():
+            raise ValueError("Laravel source lock differs from the prepared runtime")
         installed = json.loads((root / "vendor/composer/installed.json").read_text())
         versions = {
             item["name"]: item["version"].removeprefix("v") for item in installed["packages"]
         }
         if versions.get("laravel/framework") != LARAVEL_VERSION:
             raise ValueError("Laravel runtime version differs from the qualified source profile")
-        identity.update(
-            laravel=LARAVEL_VERSION, composer_lock=hashlib.sha256(expected.read_bytes()).hexdigest()
-        )
+        identity.update(laravel=LARAVEL_VERSION, composer_lock=source_lock)
     return php, identity
 
 

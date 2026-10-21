@@ -32,11 +32,23 @@ PACKAGES = (
 PREFIX = "https://github.com/sankaHQ/extensions/releases/download/php-converters-v0.1.0a1/"
 
 
+def source_revision() -> str:
+    status = subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=all"], cwd=ROOT, text=True
+    )
+    if status.strip():
+        raise ValueError("PHP candidate bundles require a clean, committed source checkout")
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+
+
 def build() -> None:
     output = ROOT / "release/php-converters"
     if output.is_symlink():
         raise ValueError("release output must be a repository-owned directory")
     output.mkdir(parents=True, exist_ok=True)
+    provenance = output / "build-provenance.json"
+    provenance.unlink(missing_ok=True)
+    revision = source_revision()
     wheels = []
     for package in PACKAGES:
         project = tomllib.loads((ROOT / "packages" / package / "pyproject.toml").read_text())[
@@ -74,11 +86,14 @@ def build() -> None:
         }
         for wheel in wheels
     ]
+    artifacts = list(wheels)
     for package in PACKAGES[-2:]:
         manifest = json.loads((ROOT / "packages" / package / "extension.template.json").read_text())
         other = next(name for name in PACKAGES[-2:] if name != package).replace("-", "_")
         manifest["wheels"] = [item for item in entries if not item["name"].startswith(other)]
-        (output / (package + ".json")).write_text(json.dumps(manifest, indent=2) + "\n")
+        manifest_path = output / (package + ".json")
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+        artifacts.append(manifest_path)
     catalog = {
         "schema_version": "sanka-marketplace/v1",
         "extensions": [
@@ -90,6 +105,7 @@ def build() -> None:
         ],
     }
     (output / "marketplace.json").write_text(json.dumps(catalog, indent=2) + "\n")
+    artifacts.append(output / "marketplace.json")
     with zipfile.ZipFile(
         next(p for p in wheels if p.name.startswith("sanka_php_migration-"))
     ) as wheel:
@@ -97,6 +113,22 @@ def build() -> None:
             raise ValueError("PHP source replay runner missing from wheel")
         if not any(name.endswith("locks/laravel/composer.lock") for name in wheel.namelist()):
             raise ValueError("qualified Laravel dependency lock missing from wheel")
+    if source_revision() != revision:
+        raise ValueError("PHP candidate source changed during the build")
+    provenance.write_text(
+        json.dumps(
+            {
+                "schema": "sanka.php-candidate-build/v1",
+                "revision": revision,
+                "artifacts": {
+                    path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in sorted(artifacts)
+                },
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     print(f"Built {len(wheels)} candidate wheels and two manifests in {output}")
 
 

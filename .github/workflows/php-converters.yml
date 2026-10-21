@@ -11,6 +11,7 @@ on:
       - packages/sanka-code-migration/**
       - packages/sanka-http-replay/**
       - scripts/build_php_release.py
+      - scripts/build_release.py
       - pyproject.toml
       - uv.lock
       - .github/workflows/php-converters.yml

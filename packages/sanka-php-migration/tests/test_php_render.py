@@ -3,6 +3,7 @@
 
 import importlib.util
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -15,6 +16,10 @@ from sanka_php_migration.render import render
 def load_app(
     tmp_path: Path, source: str, *, kind: str = "custom", database: dict[str, object] | None = None
 ) -> TestClient:
+    if kind == "laravel":
+        fixture = Path(__file__).parent / "fixtures/laravel"
+        for name in ("composer.json", "composer.lock"):
+            shutil.copyfile(fixture / name, tmp_path / name)
     (tmp_path / "api.php").write_text("<?php\n" + source)
     settings = (
         {
