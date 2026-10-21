@@ -88,7 +88,7 @@ export SANKA_JAVA_MAVEN_REPO="$PWD/.java-tools/maven-repository"
 export SANKA_JAVA_PYTHON="$PWD/.java-tools/python/bin/python"
 uv run python scripts/prepare_java_fixture.py
 uv run python scripts/build_java_release.py
-uv pip install --reinstall --no-index --find-links release/java-converters \
+uv --no-config pip install --reinstall --no-index --find-links release/java-converters \
   release/java-converters/sanka_extension_java_to_python-*.whl
 uv run --no-sync python -m pytest packages/sanka-extension-java-to-python/tests -q
 ```

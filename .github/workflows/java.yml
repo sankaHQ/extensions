@@ -65,7 +65,7 @@ jobs:
       - name: Build and install the immutable wheel closure
         run: |
           uv run python scripts/build_java_release.py
-          uv pip install --reinstall --no-index --find-links release/java-converters release/java-converters/sanka_extension_java_to_python-*.whl
+          uv --no-config pip install --reinstall --no-index --find-links release/java-converters release/java-converters/sanka_extension_java_to_python-*.whl
           uv run --no-sync python -c "import pathlib, sys, importlib.metadata as m, sanka_java_migration as j, sanka_extension_java_to_python as e; assert m.version('sanka-extension-sdk') == '0.1.0a4'; assert all(pathlib.Path(x.__file__).is_relative_to(sys.prefix) for x in (j, e))"
       - name: Exercise all lifecycle stages and refusal paths against installed wheels
         run: uv run --no-sync python -m pytest packages/sanka-extension-java-to-python/tests -q
