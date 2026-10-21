@@ -58,7 +58,9 @@ def test_selected_closure_review_staleness_and_preserved_repairs(
     assert blocked.outcome == "success", blocked.error
     assert blocked.data["blockers"]
     assert blocked.data["files"] == {}
-    req = dataclasses.replace(req, configuration={"selected_endpoints": ["GET /health"]})
+    req = dataclasses.replace(
+        req, configuration={"selected_endpoints": ["GET /health"], "target": target}
+    )
     planned = handle(req, target)
     assert planned.outcome == "success", planned.error
     assert planned.data["plan_hash"].startswith("sha256:")

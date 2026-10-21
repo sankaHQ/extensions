@@ -102,13 +102,17 @@ def handle(request: ExtensionRequest, target: str) -> ExtensionResponse:
             safe(root, artifacts / f"{request.command}.json").unlink(missing_ok=True)
         allowed = {
             "target_framework",
+            "target",
             "database_dialect",
             "selected_endpoints",
             "extension_plan_hash",
         }
         if set(request.configuration) - allowed:
             raise ValueError("unsupported PHP recipe configuration")
-        if request.configuration.get("target_framework", target) != target:
+        if any(
+            request.configuration.get(key, target) != target
+            for key in ("target", "target_framework")
+        ):
             raise ValueError("extension target cannot be changed")
         captured = capture(root)
         dialect = captured["database"]["dialect"]

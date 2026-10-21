@@ -90,6 +90,12 @@ def environment(work: Path, database: str | None = None) -> dict[str, str]:
         "TZ": "UTC",
     }
     result.update(ALICE_API_TOKEN="sanka-alice-token", BOB_API_TOKEN="sanka-bob-token")
+    socket = os.environ.get("SANKA_PHP_MYSQL_SOCKET")
+    if socket:
+        path = Path(socket)
+        if not path.is_absolute() or path != path.resolve() or not path.is_socket():
+            raise ValueError("MySQL replay socket must be an absolute live Unix socket")
+        result["DATABASE_SOCKET"] = socket
     if database:
         result["DATABASE_URL"] = database
     return result
@@ -374,6 +380,7 @@ def replay(
         "complete_backend": False,
         "discovered_routes": captured["discovered_routes"],
         "selected_routes": len(coverage),
+        "route_inventory_complete": captured["route_inventory_complete"],
         "scope": (
             "Declared requests: status, JSON media type/body, "
             "complete declared tables and identity sequences."
@@ -431,12 +438,12 @@ def replay(
                 try:
                     observations = []
                     for scenario in scenarios:
-                        value = probe.exchange(scenario)
-                        value.update(
+                        observation = probe.exchange(scenario)
+                        observation.update(
                             id=scenario["id"], method=scenario["method"], path=scenario["path"]
                         )
                         if side in urls:
-                            value.update(
+                            observation.update(
                                 observer(
                                     php,
                                     work,
@@ -447,7 +454,7 @@ def replay(
                                     },
                                 )
                             )
-                        observations.append(value)
+                        observations.append(observation)
                     observed[side] = validate_observations(observations, scenarios)
                 finally:
                     probe.close()

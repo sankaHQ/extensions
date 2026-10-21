@@ -250,6 +250,7 @@ def make_app(routes, kind, dialect):
             # CLIENT_FOUND_ROWS. An explicit creator preserves PDO update counts.
             def connect():
                 return pymysql.connect(host=parts.hostname, port=parts.port or 3306,
+                    unix_socket=os.environ.get("DATABASE_SOCKET"),
                     user=unquote(parts.username), password=unquote(parts.password or ""),
                     database=parts.path.lstrip("/"), charset="utf8mb4", client_flag=0,
                     connect_timeout=5, read_timeout=15, write_timeout=15,

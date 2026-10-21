@@ -28,7 +28,7 @@ if ($manifest['kind'] === 'laravel') {
                            'prefix'=>'', 'foreign_key_constraints'=>true];
         } else {
             $parsed = parse_url($url);
-            $connection = ['driver'=>'mysql', 'host'=>$parsed['host'], 'port'=>$parsed['port'] ?? 3306,
+            $connection = ['driver'=>'mysql', 'unix_socket'=>getenv('DATABASE_SOCKET') ?: '', 'host'=>$parsed['host'], 'port'=>$parsed['port'] ?? 3306,
                 'database'=>ltrim($parsed['path'], '/'), 'username'=>rawurldecode($parsed['user']),
                 'password'=>rawurldecode($parsed['pass'] ?? ''), 'charset'=>'utf8mb4',
                 'collation'=>'utf8mb4_unicode_ci', 'prefix'=>'', 'strict'=>true,

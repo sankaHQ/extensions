@@ -8,7 +8,9 @@ function connectFixture(string $url): PDO {
         $pdo->exec('PRAGMA foreign_keys=ON');
     } else {
         $parts = parse_url($url);
-        $pdo = new PDO('mysql:host=' . $parts['host'] . ';port=' . ($parts['port'] ?? 3306)
+        $address = getenv('DATABASE_SOCKET') ? 'unix_socket=' . getenv('DATABASE_SOCKET')
+            : 'host=' . $parts['host'] . ';port=' . ($parts['port'] ?? 3306);
+        $pdo = new PDO('mysql:' . $address
             . ';dbname=' . ltrim($parts['path'], '/') . ';charset=utf8mb4',
             rawurldecode($parts['user']), rawurldecode($parts['pass'] ?? ''));
         $pdo->exec('SET SESSION information_schema_stats_expiry=0');

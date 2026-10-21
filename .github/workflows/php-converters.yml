@@ -89,6 +89,28 @@ jobs:
           SANKA_PHP_REPLAY: "1"
           SANKA_PHP_MYSQL_ADMIN_URL: mysql://root:sanka-fixture-admin@127.0.0.1:3306/sanka_php_admin
         run: uv run --no-sync python -m pytest packages/sanka-php-migration/tests/test_php_linux_replay.py --basetemp=release/php-evidence -q
+      - name: Compare MySQL behavior without a network
+        env:
+          SANKA_PHP_REPLAY: "1"
+          SANKA_PHP_MYSQL_ADMIN_URL: mysql://root:sanka-fixture-admin@localhost/sanka_php_admin
+        shell: bash
+        run: |
+          set -euo pipefail
+          socket_dir="$RUNNER_TEMP/php-mysql-socket"
+          mkdir -p "$socket_dir"
+          chmod 777 "$socket_dir"
+          docker run -d --name php-socket-db --network none \
+            -v "$socket_dir:/socket" \
+            -e MYSQL_ROOT_PASSWORD=sanka-fixture-admin -e MYSQL_ROOT_HOST=% -e MYSQL_DATABASE=sanka_php_admin \
+            mysql:8.4.11@sha256:0f51e63e537a1f176423fa03ef559aabe6fa4372a53160a44bc7e75da7d15364 \
+            --socket=/socket/mysql.sock --skip-networking --mysqlx=OFF
+          trap 'docker rm -f php-socket-db' EXIT
+          for attempt in $(seq 1 60); do
+            if docker exec php-socket-db mysqladmin --socket=/socket/mysql.sock -psanka-fixture-admin ping; then break; fi
+            sleep 1
+          done
+          export SANKA_PHP_MYSQL_SOCKET="$socket_dir/mysql.sock"
+          uv run --no-sync python -m pytest packages/sanka-php-migration/tests/test_php_linux_replay.py -k laravel-mysql --basetemp=release/php-socket-evidence -q
       - name: Require a reviewed source dependency lock
         run: git ls-files --error-unmatch packages/sanka-php-migration/src/sanka_php_migration/locks/laravel/composer.lock
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -100,5 +122,6 @@ jobs:
             release/php-converters/*.json
             release/php-converters/*.whl
             release/php-evidence/**/.sanka/php/*.json
+            release/php-socket-evidence/**/.sanka/php/*.json
           include-hidden-files: true
           retention-days: 3

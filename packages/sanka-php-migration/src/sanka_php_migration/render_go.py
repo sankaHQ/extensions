@@ -179,6 +179,9 @@ def render_go(captured: dict[str, Any]) -> dict[str, str]:
         panic("DATABASE_URL must be mysql://user:password@host/database")
     }
     config := mysql.NewConfig(); config.Net = "tcp"; config.Addr = parsed.Host
+    if socket := os.Getenv("DATABASE_SOCKET"); socket != "" {
+        config.Net = "unix"; config.Addr = socket
+    }
     config.User = parsed.User.Username(); config.Passwd, _ = parsed.User.Password()
     config.DBName = strings.TrimPrefix(parsed.Path, "/"); config.ParseTime = false
     config.Timeout = 5*time.Second
