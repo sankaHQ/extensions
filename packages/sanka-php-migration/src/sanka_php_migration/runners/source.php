@@ -73,10 +73,14 @@ while (($line = fgets(STDIN)) !== false) {
             foreach ($settings['routes'] as $route) {
                 if ($route['method'] !== $case['method']) { continue; }
                 $keys = [];
-                $pattern = preg_replace_callback('/\{([A-Za-z_][A-Za-z0-9_]*)\}/', function ($item) use (&$keys) {
-                    $keys[] = $item[1]; return '([^/]+)';
-                }, str_replace('/', '\/', $route['path']));
-                if (!preg_match('/^' . $pattern . '$/D', $path, $matches)) { continue; }
+                $segments = array_map(function ($segment) use (&$keys) {
+                    if (preg_match('~^\{([A-Za-z_][A-Za-z0-9_]*)\}$~D', $segment, $item)) {
+                        $keys[] = $item[1]; return '([^/]+)';
+                    }
+                    return preg_quote($segment, '~');
+                }, explode('/', $route['path']));
+                $pattern = implode('/', $segments);
+                if (!preg_match('~^' . $pattern . '$~D', $path, $matches)) { continue; }
                 array_shift($matches);
                 $params = array_combine($keys, array_map('rawurldecode', $matches));
                 $request = ['body'=>$case['body'] ?? [], 'query'=>$query, 'params'=>$params,

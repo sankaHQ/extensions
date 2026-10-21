@@ -182,11 +182,10 @@ jobs:
         run: uv run python scripts/fetch_typescript_bundle.py
       - run: uv build --wheel --package sanka-ts-capture --out-dir release/typescript-to-rust
       - run: uv build --wheel --package sanka-http-replay --out-dir release/typescript-to-rust
-      - run: uv build --wheel --package sanka-code-migration --out-dir release/typescript-to-rust
       - run: uv build --wheel --package sanka-extension-typescript-to-rust --out-dir release/typescript-to-rust
       - name: Install the actual candidate wheels
         run: |
-          uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/typescript-to-rust"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk"}]'
+          uv run python -c 'from pathlib import Path; from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel; [download_locked_wheel(Path("release/typescript-to-rust"), wheel) for wheel in PINNED_LOCAL_WHEELS if wheel.distribution in {"sanka-extension-sdk", "sanka-connector-sdk", "sanka-code-migration"}]'
           uv --no-config pip install --reinstall --no-index --find-links release/typescript-to-rust release/typescript-to-rust/sanka_extension_typescript_to_rust-*.whl
           uv run --no-sync python -c "import pathlib, sys, importlib.metadata, sanka_extension_typescript_to_rust as m, sanka_ts_capture as c; assert importlib.metadata.version('sanka-extension-sdk') == '0.1.0a4'; root = pathlib.Path(sys.prefix).resolve(); assert all(pathlib.Path(x.__file__).resolve().is_relative_to(root) for x in (m, c))"
       - name: Install the pinned Express and pg source toolset
