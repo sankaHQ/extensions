@@ -106,7 +106,7 @@ jobs:
             --socket=/socket/mysql.sock --skip-networking --mysqlx=OFF
           trap 'docker rm -f php-socket-db' EXIT
           for attempt in $(seq 1 60); do
-            if docker exec php-socket-db mysqladmin --socket=/socket/mysql.sock -psanka-fixture-admin ping; then break; fi
+            if docker exec -e MYSQL_PWD=sanka-fixture-admin php-socket-db sh -c 'test "$(cat /proc/1/comm)" = mysqld && mysql --socket=/socket/mysql.sock -uroot sanka_php_admin -e "SELECT 1"'; then break; fi
             sleep 1
           done
           export SANKA_PHP_MYSQL_SOCKET="$socket_dir/mysql.sock"
