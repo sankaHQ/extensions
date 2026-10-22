@@ -25,6 +25,7 @@ ROOT_G3 = (FIXTURES / "emsign-ecc-root-ca-g3.pem").read_text()
 ISRG = (FIXTURES / "isrg-root-x1.pem").read_text()
 INTERMEDIATE = (FIXTURES / "em-dv-tls-ca-g3c.pem").read_text()
 CROSS = (FIXTURES / "em-dv-tls-ca-g3c-sectigo-cross.pem").read_text()
+C1 = (FIXTURES / "emsign-root-ca-c1.pem").read_text()
 
 PROJECT = {
     "requirements.txt": "requests==2.32.3\ncertifi==2024.2.2  # pinned\n",
@@ -258,13 +259,30 @@ def test_nested_repositories_are_separate_projects(tmp_path: Path) -> None:
     ("files", "expected"),
     [
         # Upper bounds that make the fixed certifi release unreachable.
-        ({"requirements.txt": "certifi~=2025.8.3\n"}, [("requirements.txt", 1)]),
-        ({"requirements.txt": "certifi[extra] ==2025.*\n"}, [("requirements.txt", 1)]),
-        ({"requirements.txt": "certifi>=2024,<2026.10\n"}, [("requirements.txt", 1)]),
+        # certifi's advisory names 2026.10.19 as the first fixed release.
+        (
+            {"requirements.txt": "certifi==2026.10.18\n"},
+            [("certifi-version", "requirements.txt", 1)],
+        ),
+        ({"requirements.txt": "certifi~=2025.8.3\n"}, [("certifi-version", "requirements.txt", 1)]),
+        (
+            {"requirements.txt": "certifi[extra] ==2025.*\n"},
+            [("certifi-version", "requirements.txt", 1)],
+        ),
+        (
+            {"requirements.txt": "certifi>=2024,<2026.10\n"},
+            [("certifi-version", "requirements.txt", 1)],
+        ),
         ({"requirements.txt": "certifi~=2026.10\ncertifi>=2024\n"}, []),
-        ({"pyproject.toml": 'certifi = "^2025.8"\n'}, [("pyproject.toml", 1)]),
-        ({"pyproject.toml": 'certifi = { version = "~2025.8" }\n'}, [("pyproject.toml", 1)]),
-        ({"pyproject.toml": 'dependencies = ["certifi~=2025.8"]\n'}, [("pyproject.toml", 1)]),
+        ({"pyproject.toml": 'certifi = "^2025.8"\n'}, [("certifi-version", "pyproject.toml", 1)]),
+        (
+            {"pyproject.toml": 'certifi = { version = "~2025.8" }\n'},
+            [("certifi-version", "pyproject.toml", 1)],
+        ),
+        (
+            {"pyproject.toml": 'dependencies = ["certifi~=2025.8"]\n'},
+            [("certifi-version", "pyproject.toml", 1)],
+        ),
         ({"pyproject.toml": 'dependencies = ["certifi>=2023"]\n'}, []),
         # An older webpki-roots resolved alongside the fixed one is still linked.
         (
@@ -272,7 +290,7 @@ def test_nested_repositories_are_separate_projects(tmp_path: Path) -> None:
                 "Cargo.lock": '[[package]]\nname = "webpki-roots"\nversion = "0.25.4"\n\n'
                 '[[package]]\nname = "webpki-roots"\nversion = "1.0.10"\n'
             },
-            [("Cargo.lock", 3)],
+            [("webpki-roots-version", "Cargo.lock", 3)],
         ),
         # A 0.26 compatibility release that re-exports the fixed 1.x crate is not.
         (
@@ -284,13 +302,29 @@ def test_nested_repositories_are_separate_projects(tmp_path: Path) -> None:
             },
             [],
         ),
+        # JDK images: OpenJDK blocks the certificates after 21.0.13 (CVE-2026-91403).
+        (
+            {"Dockerfile": "FROM eclipse-temurin:21.0.12_7-jre\n"},
+            [("java-cacerts", "Dockerfile", 1), ("base-image-rebuild", "Dockerfile", 1)],
+        ),
+        (
+            {"Dockerfile": "FROM eclipse-temurin:21.0.14_7-jre\n"},
+            [("base-image-rebuild", "Dockerfile", 1)],
+        ),
+        ({"Dockerfile": "FROM amazoncorretto:8u520\n"}, [("base-image-rebuild", "Dockerfile", 1)]),
+        # Roots NSS removed at eMudhra's request are reported, never cut out.
+        (
+            {"certs/bundle.pem": ISRG + "\n" + C1},
+            [("nss-removed-root-in-bundle", "certs/bundle.pem", 47)],
+        ),
     ],
 )
-def test_constraints_that_cannot_reach_the_fix(
-    tmp_path: Path, files: dict[str, str], expected: list[tuple[str, int]]
+def test_release_boundaries(
+    tmp_path: Path, files: dict[str, str], expected: list[tuple[str, str, int]]
 ) -> None:
     write(tmp_path, files)
-    assert [(f.path, f.line) for f in scan(tmp_path).findings] == expected
+    found = [(f.rule, f.path, f.line) for f in scan(tmp_path).findings]
+    assert sorted(found) == sorted(expected)
 
 
 def test_hashed_requirements_are_reported_not_patched(tmp_path: Path) -> None:

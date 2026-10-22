@@ -8,6 +8,8 @@ import re
 from . import advisory
 
 _EXACT = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+_JAVA_DOTTED = re.compile(r"^(\d+(?:\.\d+)+)")
+_JAVA_8 = re.compile(r"^8u(\d+)")
 _CLAUSE = re.compile(r"^(===|==|~=|<=|>=|!=|<|>|\^|~)?\s*v?(\d+(?:\.\d+)*)(\.\*)?$")
 _GO = re.compile(r"^(?:go)?(\d+)\.(\d+)(?:\.(\d+))?$")
 
@@ -52,6 +54,20 @@ def go_verdict(value: str) -> tuple[str, str | None] | None:
         return ("unsupported", None)
     fixed_patch = int(fixed.rsplit(".", 1)[1])
     return ("vulnerable", fixed) if patch < fixed_patch else ("fixed", None)
+
+
+def java_fixed(tag: str) -> bool | None:
+    """Whether a JDK image tag is past the OpenJDK fix; None for floating tags."""
+    if match := _JAVA_8.match(tag):
+        version: tuple[int, ...] = (8, 0, int(match.group(1)))
+    elif match := _JAVA_DOTTED.match(tag):
+        version = tuple(int(part) for part in match.group(1).split("."))
+    else:
+        return None
+    if version[0] > advisory.JAVA_LAST_AFFECTED_MAJOR:
+        return True
+    last = advisory.JAVA_LAST_AFFECTED.get(version[0])
+    return last is not None and version > last
 
 
 def composer_ca_bundle_safe(value: str) -> bool:

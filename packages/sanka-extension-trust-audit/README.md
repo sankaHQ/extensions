@@ -27,12 +27,13 @@ sanka apply --plan-hash sha256:...
 | Area | Finding | Patched |
 | --- | --- | --- |
 | Compromised CA certificates, keys and pins | The 8 intermediates, their Sectigo cross-certificates, certificates they issued, SPKI pins and fingerprints | Removed from multi-certificate bundles |
-| Bundles and keystores | `emSign ECC Root CA - G3`, its subordinate roots, `AAA Certificate Services`, eMudhra-issued certificates in PEM, JKS and PKCS#12 files | Removed root from bundles |
-| Python | `certifi` before 2026.10.18 in requirements, `pyproject.toml`, uv, Poetry, PDM and Pipfile locks | Requirement and `pyproject.toml` pins |
+| Bundles and keystores | `emSign ECC Root CA - G3`, its subordinate roots, `AAA Certificate Services`, eMudhra-issued certificates in PEM, JKS and PKCS#12 files; `emSign Root CA - C1` / `ECC Root CA - C3` (removed from NSS at eMudhra's request) as info | Removed root from bundles |
+| Python | `certifi` before 2026.10.19 (pins and constraints that cannot reach it) in requirements, `pyproject.toml`, uv, Poetry, PDM and Pipfile locks | Requirement and `pyproject.toml` pins |
 | Go | Toolchains before 1.26.10 / 1.27.3 in `go.mod`, Dockerfiles, CI and `.tool-versions`; every module needs a rebuild | Toolchain lines and image tags |
 | Node.js | Releases before 22.23.4 / 24.22.1 / 26.12.1 in `.nvmrc`, `package.json`, Dockerfiles and CI | Version files and image tags |
 | Rust, PHP | `webpki-roots` / `webpki-root-certs` before 1.0.10, `composer/ca-bundle` before 1.6.0 / 1.4.16 | Commands to run |
-| Java, Bun, Erlang | No fixed release yet: JDK `cacerts` still carries the root | Commands to run |
+| Java | JDKs up to 27.0.1 / 25.0.5 / 21.0.13 / 17.0.21 / 11.0.33 / 8u512 ([CVE-2026-91403](https://openjdk.org/groups/vulnerability/advisories/2026-10-21)) in images and builds | Interim steps from the OpenJDK advisory |
+| Bun, Erlang | No fixed release yet | Instructions |
 | Containers | Base images built before the fix, images pinned by digest | Instructions |
 | Verification switched off | `verify=False`, `InsecureSkipVerify`, `rejectUnauthorized: false`, `curl -k`, `NODE_TLS_REJECT_UNAUTHORIZED=0` and similar | Never: needs a person |
 

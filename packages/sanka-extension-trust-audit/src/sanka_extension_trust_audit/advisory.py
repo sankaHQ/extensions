@@ -132,9 +132,12 @@ COMPROMISED_SPKI_HEX: dict[str, str] = {
 }
 
 # Mozilla and Chrome withdrew trust in this root (Bugzilla 2083449 comments 18
-# and 20). emSign Root CA - G1, - C1 and ECC Root CA - C3 stay trusted; certifi
-# 2026.10.19 still ships them.
+# and 20). emSign Root CA - G1 stays trusted.
 REMOVED_ROOTS: frozenset[str] = frozenset({"emSign ECC Root CA - G3"})
+# NSS also removed these on 2026-10-20 at eMudhra's request (Bugzilla 2083709),
+# a planned transition unrelated to the compromised keys. certifi 2026.10.19
+# still ships them.
+NSS_REMOVED_ROOTS: frozenset[str] = frozenset({"emSign Root CA - C1", "emSign ECC Root CA - C3"})
 # Issuers of the affected intermediates. Never in public root stores on their
 # own, but a bundle that carries them extends trust to the compromised keys.
 AFFECTED_PARENTS: frozenset[str] = frozenset({"emSign Root TLS CA - G3", "emSign Root CS CA - G3"})
@@ -143,10 +146,8 @@ AFFECTED_PARENTS: frozenset[str] = frozenset({"emSign Root TLS CA - G3", "emSign
 CROSS_SIGN_ROOT = "AAA Certificate Services"
 
 
-# Earliest safe release per maintained line. certifi 2026.10.18 already lacks
-# the root; 2026.10.19 is the current release, so patches target it.
-CERTIFI_SAFE = "2026.10.18"
-CERTIFI_TARGET = "2026.10.19"
+# Earliest safe release per maintained line. certifi: GHSA-6q48-6c7w-9gw2.
+CERTIFI_SAFE = "2026.10.19"
 WEBPKI_SAFE = "1.0.10"
 COMPOSER_CA_BUNDLE_SAFE = {(1, 4): "1.4.16"}
 COMPOSER_CA_BUNDLE_TARGET = "1.6.0"
@@ -159,11 +160,16 @@ GO_LAST_AFFECTED_MINOR = (1, 27)
 PENDING = {
     "bun": "Bun has not shipped a fix yet.",
     "erlang-certifi": "The Erlang/Elixir certifi package has not shipped a fix yet.",
-    "java": "No JDK release removes the root yet. Temurin 21.0.12.1 still trusts "
-    "emSign ECC Root CA - G3.",
 }
-# keytool alias used by Temurin and other OpenJDK builds that generate cacerts
-# from Mozilla's store.
-JAVA_ROOT_ALIAS = (
-    "cn_emsign_ecc_root_ca__g3,o_emudhra_technologies_limited,ou_emsign_pki,c_in [jdk]"
-)
+# OpenJDK blocks the 16 certificates in releases after these (CVE-2026-91403);
+# cacerts keeps the root, so the check is the runtime version, not cacerts.
+JAVA_ADVISORY_URL = "https://openjdk.org/groups/vulnerability/advisories/2026-10-21"
+JAVA_LAST_AFFECTED = {
+    27: (27, 0, 1),
+    25: (25, 0, 5),
+    21: (21, 0, 13),
+    17: (17, 0, 21),
+    11: (11, 0, 33),
+    8: (8, 0, 512),
+}
+JAVA_LAST_AFFECTED_MAJOR = 27

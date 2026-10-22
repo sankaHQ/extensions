@@ -140,10 +140,12 @@ JAVA_IMAGES = frozenset(
     }
 )
 JAVA_ACTION = (
-    "Remove the root from every JDK this code runs on until your JDK vendor ships a fix, "
-    "for example in the image build: keytool -delete -cacerts -storepass changeit "
-    f'-alias "{advisory.JAVA_ROOT_ALIAS}". Aliases differ between vendors; list them with '
-    "keytool -list -cacerts | grep -i emsign."
+    "OpenJDK blocks the 16 certificates in releases after 27.0.1, 25.0.5, 21.0.13, 17.0.21, "
+    "11.0.33 and 8u512 (CVE-2026-91403); upgrade when your vendor ships one. Until then, "
+    "replace $JDK_HOME/lib/security/blocked.certs with the file from "
+    f"{advisory.JAVA_ADVISORY_URL} (blacklisted.certs on JDK 8) or enable revocation checking "
+    "with -Dcom.sun.net.ssl.checkRevocation=true -Dcom.sun.security.enableCRLDP=true. "
+    "JDKs packaged by Debian, Ubuntu, Fedora or RHEL use the OS store: update ca-certificates."
 )
 
 # Patterns that switch TLS certificate verification off. The incident lets
@@ -382,8 +384,8 @@ class _Scan:
                     "medium",
                     rel,
                     line,
-                    "Java runtimes still trust emSign ECC Root CA - G3",
-                    f"{advisory.PENDING['java']} {JAVA_ACTION}",
+                    "Java runtimes before the OpenJDK fix accept the compromised CAs",
+                    JAVA_ACTION,
                     evidence,
                 )
             )
@@ -552,6 +554,19 @@ class _Scan:
                     self._removal(rel, cert, lines) if removable else None,
                 )
             )
+        elif cert.subject_cn in advisory.NSS_REMOVED_ROOTS and cert.self_issued:
+            self.add(
+                Finding(
+                    "nss-removed-root-in-bundle",
+                    "info",
+                    rel,
+                    line,
+                    f"Bundle carries {cert.subject_cn}, which NSS removed on 2026-10-20",
+                    "eMudhra asked for this removal as a planned transition (Bugzilla 2083709); "
+                    "it is not part of the key compromise. Drop it when you regenerate the bundle.",
+                    evidence,
+                )
+            )
         elif cert.subject_cn == advisory.CROSS_SIGN_ROOT and cert.self_issued:
             self.add(
                 Finding(
@@ -600,7 +615,7 @@ class _Scan:
                 rel,
                 number,
                 f"certifi {version} still trusts emSign ECC Root CA - G3",
-                f"Upgrade certifi to {advisory.CERTIFI_TARGET} or later.",
+                f"Upgrade certifi to {advisory.CERTIFI_SAFE} or later.",
                 _evidence(line),
                 edit,
             )
@@ -616,7 +631,7 @@ class _Scan:
                 edit = None
                 if patchable:
                     begin, end = start + pin.start(1), start + pin.end(1)
-                    new = line[:begin] + advisory.CERTIFI_TARGET + line[end:]
+                    new = line[:begin] + advisory.CERTIFI_SAFE + line[end:]
                     edit = Edit(rel, number, number, (new,))
                 self._certifi(rel, number, line, pin.group(1), edit)
         elif versions.excludes(spec, advisory.CERTIFI_SAFE):
@@ -683,7 +698,7 @@ class _Scan:
                         rel,
                         _line_of(text, offset) + 2,
                         f"certifi {version} still trusts emSign ECC Root CA - G3",
-                        f"Run {command} to reach {advisory.CERTIFI_TARGET} or later.",
+                        f"Run {command} to reach {advisory.CERTIFI_SAFE} or later.",
                         f'name = "certifi" version = "{version}"',
                     )
                 )
@@ -703,7 +718,7 @@ class _Scan:
                         rel,
                         _line_of(text, max(text.find('"certifi"'), 0)),
                         f"certifi {version.lstrip('=')} still trusts emSign ECC Root CA - G3",
-                        f"Run pipenv update certifi to reach {advisory.CERTIFI_TARGET} or later.",
+                        f"Run pipenv update certifi to reach {advisory.CERTIFI_SAFE} or later.",
                         f'"certifi": "{version}"',
                     )
                 )
@@ -892,14 +907,16 @@ class _Scan:
                 self.bun_evidence = (rel, number, _evidence(line))
             return
         if name in JAVA_IMAGES:
+            if versions.java_fixed(tag):
+                return
             self.add(
                 Finding(
                     "java-cacerts",
                     "medium",
                     rel,
                     number,
-                    f"{name} image trusts emSign ECC Root CA - G3",
-                    f"{advisory.PENDING['java']} {JAVA_ACTION}",
+                    f"{name} image predates the OpenJDK fix for the compromised CAs",
+                    JAVA_ACTION,
                     _evidence(line),
                 )
             )
