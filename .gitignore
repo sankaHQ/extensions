@@ -15,3 +15,6 @@ docs/superpowers/plans/
 # Fetched by scripts/fetch_typescript_bundle.py (pinned npm tarball); shipped inside the wheel.
 packages/sanka-ts-capture/src/sanka_ts_capture/node/typescript.js
 packages/sanka-ts-capture/src/sanka_ts_capture/node/typescript.js.part
+
+.java-tools/
+packages/sanka-java-migration/src/sanka_java_migration/java/*.jar

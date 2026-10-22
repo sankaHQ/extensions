@@ -1,0 +1,59 @@
+{
+  "schema": "sanka.http-scenarios/v1",
+  "scenarios": [
+    {
+      "id": "status",
+      "method": "GET",
+      "path": "/api/status",
+      "expected_status": 200
+    },
+    {
+      "id": "default",
+      "method": "GET",
+      "path": "/api/greetings",
+      "expected_status": 200
+    },
+    {
+      "id": "empty",
+      "method": "GET",
+      "path": "/api/greetings?name=",
+      "expected_status": 200
+    },
+    {
+      "id": "unicode",
+      "method": "GET",
+      "path": "/api/greetings?name=%E4%B8%96%E7%95%8C",
+      "expected_status": 200
+    },
+    {
+      "id": "repeated",
+      "method": "GET",
+      "path": "/api/greetings?name=Alice&name=Bob",
+      "expected_status": 200
+    },
+    {
+      "id": "repeated-empty",
+      "method": "GET",
+      "path": "/api/greetings?name=&name=",
+      "expected_status": 200
+    },
+    {
+      "id": "path",
+      "method": "GET",
+      "path": "/api/greetings/Alice",
+      "expected_status": 200
+    },
+    {
+      "id": "path-unicode",
+      "method": "GET",
+      "path": "/api/greetings/%E4%B8%96%E7%95%8C",
+      "expected_status": 200
+    },
+    {
+      "id": "unknown",
+      "method": "GET",
+      "path": "/api/greetings?unused=yes",
+      "expected_status": 200
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: Apache-2.0
+package sanka.probe;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.net.URI;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.web.servlet.MockMvc;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+@SpringBootTest(classes = APPLICATION_CLASS.class)
+@AutoConfigureMockMvc
+public class ReplayTest {
+    @Autowired MockMvc mvc;
+    @Autowired ObjectMapper mapper;
+
+    @Test void replay() throws Exception {
+        var cases = mapper.readTree(Path.of(System.getenv("SANKA_PROBE_CASES")).toFile());
+        var observations = new ArrayList<Object>();
+        for (var item : cases) {
+            var response = mvc.perform(get(URI.create(item.get("path").asText())))
+                .andReturn().getResponse();
+            assertEquals(item.get("expected_status").asInt(), response.getStatus());
+            var observed = new LinkedHashMap<String,Object>();
+            observed.put("id", item.get("id").asText());
+            observed.put("method", "GET");
+            observed.put("path", item.get("path").asText());
+            observed.put("status", response.getStatus());
+            observed.put("media_type", response.getContentType());
+            observed.put("body", mapper.readTree(response.getContentAsByteArray()));
+            observations.add(observed);
+        }
+        mapper.writeValue(Path.of(System.getenv("SANKA_PROBE_OUTPUT")).toFile(), observations);
+    }
+}

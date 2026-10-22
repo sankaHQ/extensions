@@ -1,0 +1,35 @@
+{
+  "schema_version": "sanka-extension-manifest/v2",
+  "kind": "migration",
+  "id": "sanka/java-to-python",
+  "version": "0.1.0a1",
+  "protocol_version": "sanka-extension/v1",
+  "distribution": {
+    "name": "sanka-extension-java-to-python",
+    "version": "0.1.0a1",
+    "executable": "sanka-extension-java-to-python"
+  },
+  "commands": [
+    "scan",
+    "plan",
+    "apply",
+    "test",
+    "verify"
+  ],
+  "targets": [
+    "python-fastapi"
+  ],
+  "runtime": {
+    "sanka_cli": ">=0.2.12,<0.4"
+  },
+  "match": {
+    "all": [],
+    "any": [
+      {
+        "kind": "file",
+        "value": "pom.xml"
+      }
+    ]
+  },
+  "wheels": []
+}

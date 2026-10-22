@@ -114,6 +114,7 @@ def main() -> int:
         PACKAGES / FLOW_EXTENSION_NAME,
         PACKAGES / JEV_EXTENSION_NAME,
         PACKAGES / TRUST_AUDIT_EXTENSION_NAME,
+        PACKAGES / "sanka-extension-java-to-python",
         PACKAGES / GO_EXTENSION_NAME,
         PACKAGES / RUST_EXTENSION_NAME,
         PACKAGES / RN_EXTENSION_NAME,
@@ -122,6 +123,14 @@ def main() -> int:
         own_module = package.name.replace("-", "_")
         allowed_modules: tuple[str, ...] = (own_module,)
         project = _project(package)
+        if package.name == "sanka-extension-java-to-python":
+            allowed_modules += ("sanka_extensions", "sanka_java_migration", "sanka_http_replay")
+            if project.get("dependencies") != [
+                "sanka-java-migration==0.1.0a1",
+                "sanka-extension-sdk==0.1.0a4",
+                "sanka-http-replay==0.1.0a2",
+            ]:
+                errors.append("Java converter requires pinned capture, SDK and replay helpers")
         if package.name in PHP_EXTENSION_NAMES:
             allowed_modules += ("sanka_extensions", "sanka_php_migration")
             if project.get("dependencies") != ["sanka-php-migration==0.1.0a1"]:
@@ -272,7 +281,7 @@ def main() -> int:
             ):
                 errors.append(f"PHP helper imports an unsupported runtime: {source}: {module}")
 
-    for helper_name in (TS_CAPTURE_NAME, HTTP_REPLAY_NAME):
+    for helper_name in (TS_CAPTURE_NAME, HTTP_REPLAY_NAME, "sanka-java-migration"):
         _check_stdlib_helper(PACKAGES / helper_name, helper_name, errors)
 
     replay = PACKAGES / "sanka-drf-replay"

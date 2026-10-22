@@ -1,0 +1,71 @@
+name: Java Spring MVC to FastAPI
+
+on:
+  pull_request:
+    paths:
+      - 'packages/sanka-java-migration/**'
+      - 'packages/sanka-extension-java-to-python/**'
+      - 'packages/sanka-http-replay/**'
+      - 'packages/sanka-extension-sdk/**'
+      - 'scripts/*java*'
+      - 'scripts/build_release.py'
+      - '.github/workflows/java.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/sanka-java-migration/**'
+      - 'packages/sanka-extension-java-to-python/**'
+      - 'packages/sanka-http-replay/**'
+      - 'packages/sanka-extension-sdk/**'
+      - 'scripts/*java*'
+      - 'scripts/build_release.py'
+      - '.github/workflows/java.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: java-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  qualification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: '0.11.21'
+          python-version: '3.12.13'
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '21.0.12'
+      - run: python3 scripts/fetch_java_parser.py
+      - run: python3 scripts/fetch_java_maven.py
+      - run: uv sync --frozen --all-packages
+      - name: Prepare the target and the trusted source fixture
+        run: |
+          uv venv --python 3.12.13 .java-tools/python
+          uv pip sync --python .java-tools/python/bin/python --require-hashes packages/sanka-extension-java-to-python/src/sanka_extension_java_to_python/requirements.lock
+          echo "SANKA_JAVA_TESTS=1" >> "$GITHUB_ENV"
+          echo "SANKA_JAVA_REPLAY=1" >> "$GITHUB_ENV"
+          echo "SANKA_JAVA_MAVEN=$PWD/.java-tools/apache-maven-3.9.16/bin/mvn" >> "$GITHUB_ENV"
+          echo "SANKA_JAVA_MAVEN_REPO=$PWD/.java-tools/maven-repository" >> "$GITHUB_ENV"
+          echo "SANKA_JAVA_PYTHON=$PWD/.java-tools/python/bin/python" >> "$GITHUB_ENV"
+      - run: uv run python scripts/prepare_java_fixture.py
+      - name: Build and install the immutable wheel closure
+        run: |
+          uv run python scripts/build_java_release.py
+          uv --no-config pip install --reinstall --no-index --find-links release/java-converters release/java-converters/sanka_extension_java_to_python-*.whl
+          uv run --no-sync python -c "import pathlib, sys, importlib.metadata as m, sanka_java_migration as j, sanka_extension_java_to_python as e; assert m.version('sanka-extension-sdk') == '0.1.0a4'; assert all(pathlib.Path(x.__file__).is_relative_to(sys.prefix) for x in (j, e))"
+      - name: Exercise all lifecycle stages and refusal paths against installed wheels
+        run: uv run --no-sync python -m pytest packages/sanka-extension-java-to-python/tests -q

@@ -1,0 +1,19 @@
+[project]
+name = "sanka-java-migration"
+version = "0.1.0a1"
+description = "Static JavaParser capture for bounded Spring MVC migrations"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "src/sanka_java_migration/java/JAVAPARSER.LICENSE", "src/sanka_java_migration/java/JAVAPARSER.LICENSE.APACHE"]
+dependencies = []
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sanka_java_migration"]
+
+[tool.hatch.build]
+artifacts = ["src/sanka_java_migration/java/javaparser-core.jar"]
