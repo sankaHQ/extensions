@@ -21,6 +21,7 @@ members = [
     "sanka-extension-python-to-golang",
     "sanka-extension-react-native-to-native",
     "sanka-extension-sdk",
+    "sanka-extension-trust-audit",
     "sanka-extension-typescript-to-rust",
     "sanka-extensions-workspace",
     "sanka-http-replay",
@@ -1163,6 +1164,17 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "sanka-connector-sdk", editable = "packages/sanka-connector-sdk" }]
+
+[[package]]
+name = "sanka-extension-trust-audit"
+version = "0.1.0a1"
+source = { editable = "packages/sanka-extension-trust-audit" }
+dependencies = [
+    { name = "sanka-extension-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" }]
 
 [[package]]
 name = "sanka-extension-typescript-to-rust"

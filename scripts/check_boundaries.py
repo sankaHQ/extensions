@@ -21,6 +21,7 @@ PHP_EXTENSION_NAMES = ("sanka-extension-php-to-fastapi", "sanka-extension-php-to
 TS_CAPTURE_NAME = "sanka-ts-capture"
 HTTP_REPLAY_NAME = "sanka-http-replay"
 JEV_EXTENSION_NAME = "sanka-extension-llm-to-jev"
+TRUST_AUDIT_EXTENSION_NAME = "sanka-extension-trust-audit"
 FLOW_EXTENSION_NAME = "sanka-extension-business-flows"
 HOSTED_SYSTEM_PROVIDERS = frozenset({"hubspot", "salesforce", "sendgrid"})
 
@@ -112,6 +113,7 @@ def main() -> int:
         *(PACKAGES / name for name in EXTENSION_NAMES),
         PACKAGES / FLOW_EXTENSION_NAME,
         PACKAGES / JEV_EXTENSION_NAME,
+        PACKAGES / TRUST_AUDIT_EXTENSION_NAME,
         PACKAGES / GO_EXTENSION_NAME,
         PACKAGES / RUST_EXTENSION_NAME,
         PACKAGES / RN_EXTENSION_NAME,
@@ -132,6 +134,12 @@ def main() -> int:
                 errors.append("Jev converter depends only on the published SDK a4")
             if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
                 errors.append("Jev converter requires its isolated executable")
+        if package.name == TRUST_AUDIT_EXTENSION_NAME:
+            allowed_modules += ("sanka_extensions",)
+            if project.get("dependencies") != ["sanka-extension-sdk==0.1.0a4"]:
+                errors.append("Trust audit depends only on the published SDK a4")
+            if project.get("scripts") != {package.name: f"{own_module}.__main__:main"}:
+                errors.append("Trust audit requires its isolated executable")
         if package.name == GO_EXTENSION_NAME:
             allowed_modules += (
                 "sanka_extension_sdk",
@@ -210,6 +218,12 @@ def main() -> int:
                     and not _is_module_or_submodule(module, (own_module, "sanka_extensions"))
                 ):
                     errors.append(f"Jev converter imports non-SDK execution code: {module}")
+                if (
+                    package.name == TRUST_AUDIT_EXTENSION_NAME
+                    and module.split(".")[0] not in sys.stdlib_module_names
+                    and not _is_module_or_submodule(module, (own_module, "sanka_extensions"))
+                ):
+                    errors.append(f"Trust audit imports non-SDK code: {module}")
                 if (
                     package.name == FLOW_EXTENSION_NAME
                     and module.split(".")[0] not in sys.stdlib_module_names
