@@ -60,3 +60,8 @@ converter-bench:
 
 build-jev-release:
 	uv run python scripts/build_jev_release.py
+
+.PHONY: build-trust-audit-release
+
+build-trust-audit-release:
+	uv run python scripts/build_trust_audit_release.py

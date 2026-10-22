@@ -1,0 +1,70 @@
+name: Trust audit release qualification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Superseded PR commits can stop; every main/tag run keeps its own group.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Require the landed immutable release tag for publication
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = trust-audit-v0.1.0a1
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen --all-packages
+      - run: make build-trust-audit-release
+      - name: Verify the lifecycle with the public CLI in an isolated environment
+        run: |
+          uv run --no-project --python 3.12 python scripts/accept_trust_audit_release.py \
+            --release-dir "$PWD/release/trust-audit" \
+            --cli-version 0.3.11 \
+            --report "$PWD/release/trust-audit-acceptance.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: trust-audit-release-${{ github.sha }}
+          path: |
+            release/trust-audit/*
+            release/trust-audit-acceptance.json
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
+    needs: qualify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: trust-audit-release-${{ github.sha }}
+          path: release
+      - name: Publish the verified immutable trust audit prerelease
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/trust-audit/* release/trust-audit-acceptance.json \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
+            --title "Trust audit 0.1.0a1" \
+            --notes "Sanka Code extension that finds where a repository still trusts the eMudhra CAs whose keys were compromised (Mozilla Bugzilla 2083449) and writes fixes into a new patch directory without modifying existing files. Static read of repository files only; rebuild and redeploy after applying the patches. Public CLI 0.3.11 lifecycle acceptance passed."
+        env:
+          GH_TOKEN: ${{ github.token }}

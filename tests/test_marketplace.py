@@ -46,6 +46,15 @@ EXPECTED = {
             "executable": "sanka-extension-llm-to-jev",
         },
     },
+    "sanka/trust-audit": {
+        "kind": "migration",
+        "protocol_version": "sanka-extension/v1",
+        "distribution": {
+            "name": "sanka-extension-trust-audit",
+            "version": "0.1.0a1",
+            "executable": "sanka-extension-trust-audit",
+        },
+    },
     "sanka/drf-to-flask": {
         "kind": "migration",
         "protocol_version": "sanka-extension/v1",
@@ -84,6 +93,8 @@ def test_official_marketplace_has_only_current_code_extensions() -> None:
             "sanka/typescript-to-rust",
         }:
             cli = ">=0.2.12,<0.4"
+        if item["id"] == "sanka/trust-audit":
+            cli = ">=0.3.11,<0.4"
         assert manifest["runtime"] == {"sanka_cli": cli}
         assert manifest["kind"] == expected["kind"]
         assert manifest["protocol_version"] == expected["protocol_version"]
@@ -96,6 +107,8 @@ def test_official_marketplace_has_only_current_code_extensions() -> None:
             expected_prefix = RELEASE_PREFIX + "extensions-v0.1.0a36/"
         if item["id"] == "sanka/llm-to-jev":
             expected_prefix = RELEASE_PREFIX + "llm-to-jev-v0.1.0a1/"
+        if item["id"] == "sanka/trust-audit":
+            expected_prefix = RELEASE_PREFIX + "trust-audit-v0.1.0a1/"
         if item["id"] == "sanka/python-to-golang":
             expected_prefix = RELEASE_PREFIX + "api-converters-v0.1.0a32/"
         if item["id"] == "sanka/typescript-to-rust":
