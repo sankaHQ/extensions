@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+import json
+import sys
+from pathlib import Path
+from fastapi.testclient import TestClient
+from app import app
+
+observations = []
+with TestClient(app) as client:
+    for case in json.loads(Path(sys.argv[1]).read_text()):
+        response = client.get(case["path"], follow_redirects=False)
+        observations.append({"id": case["id"], "method": "GET", "path": case["path"],
+                             "status": response.status_code,
+                             "media_type": response.headers.get("content-type", ""),
+                             "body": response.json()})
+Path(sys.argv[2]).write_text(json.dumps(observations, ensure_ascii=True))

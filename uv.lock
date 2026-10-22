@@ -15,6 +15,7 @@ members = [
     "sanka-extension-business-flows",
     "sanka-extension-drf-to-fastapi",
     "sanka-extension-drf-to-flask",
+    "sanka-extension-java-to-python",
     "sanka-extension-llm-to-jev",
     "sanka-extension-php-to-fastapi",
     "sanka-extension-php-to-golang",
@@ -24,6 +25,7 @@ members = [
     "sanka-extension-typescript-to-rust",
     "sanka-extensions-workspace",
     "sanka-http-replay",
+    "sanka-java-migration",
     "sanka-php-migration",
     "sanka-ts-capture",
 ]
@@ -1087,6 +1089,23 @@ requires-dist = [
 ]
 
 [[package]]
+name = "sanka-extension-java-to-python"
+version = "0.1.0a1"
+source = { editable = "packages/sanka-extension-java-to-python" }
+dependencies = [
+    { name = "sanka-extension-sdk" },
+    { name = "sanka-http-replay" },
+    { name = "sanka-java-migration" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "sanka-extension-sdk", editable = "packages/sanka-extension-sdk" },
+    { name = "sanka-http-replay", editable = "packages/sanka-http-replay" },
+    { name = "sanka-java-migration", editable = "packages/sanka-java-migration" },
+]
+
+[[package]]
 name = "sanka-extension-llm-to-jev"
 version = "0.1.0a1"
 source = { editable = "packages/sanka-extension-llm-to-jev" }
@@ -1242,6 +1261,11 @@ dev = [
 name = "sanka-http-replay"
 version = "0.1.0a2"
 source = { editable = "packages/sanka-http-replay" }
+
+[[package]]
+name = "sanka-java-migration"
+version = "0.1.0a1"
+source = { editable = "packages/sanka-java-migration" }
 
 [[package]]
 name = "sanka-php-migration"
