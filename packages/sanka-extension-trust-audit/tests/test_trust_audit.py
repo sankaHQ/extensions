@@ -214,15 +214,18 @@ def test_apply_refuses_stale_plan_and_foreign_output(project: Path) -> None:
             )
         )
     assert (project / "mine" / "notes.txt").read_text() == "keep"
-    with pytest.raises(ValueError):
-        handle(
-            request(
-                project,
-                "apply",
-                {"extension_plan_hash": plan_hash, "output": "../outside"},
-                reviewed="sha256:core",
+    # Outside the project, the project root itself, or names the printed shell
+    # commands could not use verbatim.
+    for output in ("../outside", ".", "./", "trust patches", "x;touch y"):
+        with pytest.raises(ValueError):
+            handle(
+                request(
+                    project,
+                    "apply",
+                    {"extension_plan_hash": plan_hash, "output": output},
+                    reviewed="sha256:core",
+                )
             )
-        )
 
 
 def test_edits_keep_line_endings(tmp_path: Path) -> None:
@@ -249,6 +252,45 @@ def test_fingerprint_forms(tmp_path: Path) -> None:
 def test_nested_repositories_are_separate_projects(tmp_path: Path) -> None:
     write(tmp_path, {"worktree/.git": "gitdir: elsewhere\n", "worktree/.nvmrc": "22.1.0\n"})
     assert scan(tmp_path).findings == []
+
+
+@pytest.mark.parametrize(
+    ("files", "expected"),
+    [
+        # Upper bounds that make the fixed certifi release unreachable.
+        ({"requirements.txt": "certifi~=2025.8.3\n"}, [("requirements.txt", 1)]),
+        ({"requirements.txt": "certifi[extra] ==2025.*\n"}, [("requirements.txt", 1)]),
+        ({"requirements.txt": "certifi>=2024,<2026.10\n"}, [("requirements.txt", 1)]),
+        ({"requirements.txt": "certifi~=2026.10\ncertifi>=2024\n"}, []),
+        ({"pyproject.toml": 'certifi = "^2025.8"\n'}, [("pyproject.toml", 1)]),
+        ({"pyproject.toml": 'certifi = { version = "~2025.8" }\n'}, [("pyproject.toml", 1)]),
+        ({"pyproject.toml": 'dependencies = ["certifi~=2025.8"]\n'}, [("pyproject.toml", 1)]),
+        ({"pyproject.toml": 'dependencies = ["certifi>=2023"]\n'}, []),
+        # An older webpki-roots resolved alongside the fixed one is still linked.
+        (
+            {
+                "Cargo.lock": '[[package]]\nname = "webpki-roots"\nversion = "0.25.4"\n\n'
+                '[[package]]\nname = "webpki-roots"\nversion = "1.0.10"\n'
+            },
+            [("Cargo.lock", 3)],
+        ),
+        # A 0.26 compatibility release that re-exports the fixed 1.x crate is not.
+        (
+            {
+                "Cargo.lock": '[[package]]\nname = "webpki-roots"\nversion = "0.26.11"\n'
+                'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+                'dependencies = [\n "webpki-roots 1.0.10",\n]\n\n'
+                '[[package]]\nname = "webpki-roots"\nversion = "1.0.10"\n'
+            },
+            [],
+        ),
+    ],
+)
+def test_constraints_that_cannot_reach_the_fix(
+    tmp_path: Path, files: dict[str, str], expected: list[tuple[str, int]]
+) -> None:
+    write(tmp_path, files)
+    assert [(f.path, f.line) for f in scan(tmp_path).findings] == expected
 
 
 def test_hashed_requirements_are_reported_not_patched(tmp_path: Path) -> None:

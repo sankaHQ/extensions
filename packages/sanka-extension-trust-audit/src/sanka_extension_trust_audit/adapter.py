@@ -104,21 +104,20 @@ def handle(request: ExtensionRequest) -> ExtensionResponse:
             message="The project changed since the reviewed plan; run sanka plan again.",
         )
     target = safe_output(root, output)
-    write_patch_directory(
-        target, plan, patches, str(output).strip(), request.configuration.get("force") is True
-    )
+    name = target.relative_to(root).as_posix()
+    write_patch_directory(target, plan, patches, name, request.configuration.get("force") is True)
     return success_response(
         request,
         data={
             "plan_hash": cast(str, plan["plan_hash"]),
-            "output": str(output).strip(),
+            "output": name,
             "patch_files": [patch.path for patch in patches],
             "manual_findings": cast(int, plan["manual_findings"]),
         },
         artifacts=[str(target)],
         limitations=(*LIMITATIONS, "Project files were not modified; apply the patches yourself."),
         next_actions=[
-            f"Read {str(output).strip()}/README.md",
-            f"git apply {str(output).strip()}/trust-audit.patch",
+            f"Read {name}/README.md",
+            f"git apply {name}/trust-audit.patch",
         ],
     )

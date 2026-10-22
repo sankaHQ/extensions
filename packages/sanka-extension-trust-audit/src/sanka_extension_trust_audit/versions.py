@@ -8,6 +8,7 @@ import re
 from . import advisory
 
 _EXACT = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+_CLAUSE = re.compile(r"^(===|==|~=|<=|>=|!=|<|>|\^|~)?\s*v?(\d+(?:\.\d+)*)(\.\*)?$")
 _GO = re.compile(r"^(?:go)?(\d+)\.(\d+)(?:\.(\d+))?$")
 
 
@@ -61,3 +62,37 @@ def composer_ca_bundle_safe(value: str) -> bool:
     if safe is not None:
         return not below(value, safe)
     return not below(value, advisory.COMPOSER_CA_BUNDLE_TARGET)
+
+
+def excludes(spec: str, safe: str) -> bool:
+    """True when a PEP 440 or Poetry constraint admits no release at or after safe."""
+    minimum = parse(safe)
+    assert minimum is not None
+    for clause in spec.split(","):
+        match = _CLAUSE.match(clause.strip())
+        if not match:
+            continue
+        operator, raw, wildcard = match.group(1) or "==", match.group(2), match.group(3)
+        version = tuple(int(part) for part in raw.split("."))
+        if operator in {"==", "==="} and wildcard:
+            upper: tuple[int, ...] | None = (*version[:-1], version[-1] + 1)
+        elif operator in {"==", "==="}:
+            upper = None
+            if version < minimum:
+                return True
+        elif operator == "~=" and len(version) > 1:
+            upper = (*version[:-2], version[-2] + 1)
+        elif operator == "~":
+            upper = (version[0], version[1] + 1) if len(version) > 1 else (version[0] + 1,)
+        elif operator == "^":
+            index = next((i for i, part in enumerate(version) if part), len(version) - 1)
+            upper = (*version[:index], version[index] + 1)
+        elif operator == "<":
+            upper = version
+        elif operator == "<=" and version < minimum:
+            return True
+        else:
+            upper = None
+        if upper is not None and upper <= minimum:
+            return True
+    return False

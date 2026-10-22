@@ -136,12 +136,20 @@ def build_plan(root: Path, report: Report) -> tuple[dict[str, object], list[File
     return {**body, "plan_hash": plan_hash}, patches
 
 
+# Plain names keep the printed git apply / patch commands valid without quoting.
+_OUTPUT_NAME = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*")
+
+
 def safe_output(root: Path, value: object) -> Path:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError("configuration.output must be a relative directory name")
-    relative = PurePosixPath(value.strip())
-    if relative.is_absolute() or ".." in relative.parts or relative.parts[0] in {".git", ".sanka"}:
-        raise ValueError("configuration.output must stay inside the project")
+    name = value.strip().rstrip("/") if isinstance(value, str) else ""
+    if not _OUTPUT_NAME.fullmatch(name):
+        raise ValueError(
+            "configuration.output must be a relative directory of letters, digits, '.', '_', "
+            "'-' and '/'"
+        )
+    relative = PurePosixPath(name)
+    if not relative.parts or ".." in relative.parts or relative.parts[0] in {".git", ".sanka"}:
+        raise ValueError("configuration.output must be a new directory inside the project")
     target = root.joinpath(*relative.parts)
     for parent in [target, *target.parents]:
         if parent == root:

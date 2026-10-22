@@ -210,10 +210,14 @@ _FROM = re.compile(r"^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)", re.I)
 _CI_VERSION = re.compile(r"^(\s*-?\s*(node-version|go-version)\s*:\s*['\"]?)([^'\"\s#]+)")
 _CI_JAVA = re.compile(r"^\s*-?\s*java-version\s*:")
 _CI_IMAGE = re.compile(r"^(\s*-?\s*image\s*:\s*['\"]?)([^'\"\s#]+)")
-_REQ_CERTIFI = re.compile(r"^(\s*certifi\s*==\s*)([0-9][0-9.]*)(.*)$", re.I)
-_REQ_CERTIFI_CAP = re.compile(r"^\s*certifi\b[^#]*?(<=?)\s*([0-9][0-9.]*)", re.I)
-_PYPROJECT_CERTIFI = re.compile(r"""(["']certifi\s*==\s*)([0-9][0-9.]*)(["'])""", re.I)
-_POETRY_CERTIFI = re.compile(r"""^(\s*certifi\s*=\s*["'](?:==)?)([0-9][0-9.]*)(["'])""", re.I)
+_REQ_CERTIFI = re.compile(
+    r"^\s*certifi\s*(?:\[[^\]]*\])?\s*(?P<spec>[^;#\\\s][^;#\\]*?)\s*(?:[;#\\].*)?$", re.I
+)
+_PEP621_CERTIFI = re.compile(r"""["']certifi\s*(?:\[[^\]]*\])?\s*(?P<spec>[^"';]*)""", re.I)
+_POETRY_CERTIFI = re.compile(
+    r"""^\s*certifi\s*=\s*(?:\{[^}]*?\bversion\s*=\s*)?["'](?P<spec>[^"']+)["']""", re.I
+)
+_EXACT_PIN = re.compile(r"(?:==\s*)?v?(\d+(?:\.\d+)*)")
 _PACKAGE_NODE = re.compile(r'^(\s*"node"\s*:\s*"v?)(\d+\.\d+\.\d+)(")')
 _GO_DIRECTIVE = re.compile(r"^go\s+(\S+)\s*$")
 _GO_TOOLCHAIN = re.compile(r"^(toolchain\s+go)(\S+)\s*$")
@@ -602,63 +606,68 @@ class _Scan:
             )
         )
 
+    def _certifi_spec(
+        self, rel: str, number: int, line: str, spec: str, start: int, patchable: bool
+    ) -> None:
+        """Report a certifi constraint at line[start:]; patch it when it is an exact pin."""
+        pin = _EXACT_PIN.fullmatch(spec)
+        if pin is not None:
+            if versions.below(pin.group(1), advisory.CERTIFI_SAFE):
+                edit = None
+                if patchable:
+                    begin, end = start + pin.start(1), start + pin.end(1)
+                    new = line[:begin] + advisory.CERTIFI_TARGET + line[end:]
+                    edit = Edit(rel, number, number, (new,))
+                self._certifi(rel, number, line, pin.group(1), edit)
+        elif versions.excludes(spec, advisory.CERTIFI_SAFE):
+            self._certifi(rel, number, line, spec, None)
+
     def requirements(self, rel: str, text: str) -> None:
+        # Changing a hash-locked pin would break --require-hashes installs.
         hashed = "--hash" in text
         for number, line in enumerate(text.split("\n"), 1):
-            match = _REQ_CERTIFI.match(line)
-            if match and versions.below(match.group(2), advisory.CERTIFI_SAFE):
-                edit = None
-                if not hashed:
-                    new = f"{match.group(1)}{advisory.CERTIFI_TARGET}{match.group(3)}"
-                    edit = Edit(rel, number, number, (new,))
-                self._certifi(rel, number, line, match.group(2), edit)
-                continue
-            cap = _REQ_CERTIFI_CAP.match(line)
-            if cap:
-                operator, bound = cap.groups()
-                safe = advisory.CERTIFI_SAFE
-                if versions.below(bound, safe) or (
-                    operator == "<" and not versions.below(safe, bound)
-                ):
-                    self._certifi(rel, number, line, f"{operator}{bound}", None)
+            if match := _REQ_CERTIFI.match(line):
+                spec = match.group("spec")
+                self._certifi_spec(rel, number, line, spec, match.start("spec"), not hashed)
 
     def pyproject(self, rel: str, text: str) -> None:
         for number, line in enumerate(text.split("\n"), 1):
-            for pattern in (_PYPROJECT_CERTIFI, _POETRY_CERTIFI):
-                match = pattern.search(line)
-                if match and versions.below(match.group(2), advisory.CERTIFI_SAFE):
-                    new = (
-                        line[: match.start()]
-                        + match.group(1)
-                        + advisory.CERTIFI_TARGET
-                        + match.group(3)
-                        + line[match.end() :]
-                    )
-                    edit = Edit(rel, number, number, (new,))
-                    self._certifi(rel, number, line, match.group(2), edit)
-                    break
+            if match := _POETRY_CERTIFI.match(line):
+                self._certifi_spec(
+                    rel, number, line, match.group("spec"), match.start("spec"), True
+                )
+                continue
+            for match in _PEP621_CERTIFI.finditer(line):
+                spec = match.group("spec").strip()
+                if spec:
+                    offset = match.start("spec") + match.group("spec").index(spec)
+                    self._certifi_spec(rel, number, line, spec, offset, True)
 
     def package_lock(self, rel: str, name: str, text: str) -> None:
         packages = [(m.group(1), m.group(2), m.start()) for m in _LOCK_PACKAGE.finditer(text)]
         if name == "Cargo.lock":
-            for crate in ("webpki-roots", "webpki-root-certs"):
-                entries = [(v, o) for n, v, o in packages if n == crate]
-                if any(not versions.below(v, advisory.WEBPKI_SAFE) for v, _ in entries):
-                    continue  # 0.26.x releases are shims over the fixed 1.x crate.
-                for version, offset in entries:
-                    if versions.below(version, advisory.WEBPKI_SAFE):
-                        self.add(
-                            Finding(
-                                "webpki-roots-version",
-                                "high",
-                                rel,
-                                _line_of(text, offset) + 2,
-                                f"{crate} {version} still trusts emSign ECC Root CA - G3",
-                                f"Run cargo update -p {crate} to reach {advisory.WEBPKI_SAFE} "
-                                "or later, then rebuild and redeploy.",
-                                f'name = "{crate}" version = "{version}"',
-                            )
+            starts = [m.start() for m in _LOCK_PACKAGE.finditer(text)] + [len(text)]
+            for (crate, version, offset), end in zip(packages, starts[1:], strict=True):
+                if crate not in {"webpki-roots", "webpki-root-certs"}:
+                    continue
+                # Cargo can link several versions of one crate. A release that
+                # re-exports a fixed 1.x of itself is safe; any other is not.
+                reexports = re.findall(rf'"{re.escape(crate)} ([^"\s]+)', text[offset:end])
+                if any(not versions.below(v, advisory.WEBPKI_SAFE) for v in reexports):
+                    continue
+                if versions.below(version, advisory.WEBPKI_SAFE):
+                    self.add(
+                        Finding(
+                            "webpki-roots-version",
+                            "high",
+                            rel,
+                            _line_of(text, offset) + 2,
+                            f"{crate} {version} still trusts emSign ECC Root CA - G3",
+                            f"Run cargo update -p {crate} to reach {advisory.WEBPKI_SAFE} "
+                            "or later, then rebuild and redeploy.",
+                            f'name = "{crate}" version = "{version}"',
                         )
+                    )
             return
         command = {
             "poetry.lock": "poetry update certifi",
