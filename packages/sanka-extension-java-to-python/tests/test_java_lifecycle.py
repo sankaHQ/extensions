@@ -112,6 +112,28 @@ def crud_project(tmp_path: Path) -> Path:
     not os.getenv("SANKA_JAVA_POSTGRES_CONFIG"), reason="opt-in private PostgreSQL fixture"
 )
 def test_crud_database_state_and_rollback(crud_project: Path) -> None:
+    scenarios_file = crud_project / "sanka-verify.json"
+    scenarios = json.loads(scenarios_file.read_text())
+    created = next(i for i, row in enumerate(scenarios["scenarios"]) if row["id"] == "create-exact")
+    scenarios["scenarios"][created + 1 : created + 1] = [
+        {"id": name, "method": "GET", "path": "/orders/" + value, "expected_status": status}
+        for name, value, status in (
+            ("arabic-id", "\u0661", 200),
+            ("fullwidth-id", "\uff11", 200),
+            ("mixed-id", "\u0660\u06f1", 200),
+            ("signed-unicode-id", "+\u0661", 200),
+            ("unicode-hex-id", "0x\uff11", 200),
+            ("fullwidth-hex-id", "0x\uff26", 404),
+            ("astral-id", "\U0001d7d9", 400),
+            ("superscript-id", "\xb9", 400),
+            (
+                "unicode-overflow-id",
+                "\u06f9\u06f2\u06f2\u06f3\u06f3\u06f7\u06f2\u06f0\u06f3\u06f6\u06f8\u06f5\u06f4\u06f7\u06f7\u06f5\u06f8\u06f0\u06f8",
+                400,
+            ),
+        )
+    ]
+    scenarios_file.write_text(json.dumps(scenarios, ensure_ascii=False))
     source = {
         p.relative_to(crud_project): p.read_bytes() for p in crud_project.rglob("*") if p.is_file()
     }
@@ -125,6 +147,8 @@ def test_crud_database_state_and_rollback(crud_project: Path) -> None:
     assert verified["outcome"] == "success", verified
     report = verified["data"]
     observations = {row["id"]: row for row in report["candidate_observations"]}
+    for name in ("arabic-id", "fullwidth-id", "mixed-id", "signed-unicode-id", "unicode-hex-id"):
+        assert observations[name]["body"]["id"] == 1
     assert observations["create-exact"]["body"]["amount"] == "999999999999.99"
     assert observations["create-scale"]["body"]["amount"] == "1.2"
     assert observations["read-scale"]["body"]["amount"] == "1.20"

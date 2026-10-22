@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import unicodedata
 from decimal import Decimal, InvalidOperation
 
 from fastapi import FastAPI, Request
@@ -108,12 +109,18 @@ def _identifier(value):
     # Spring NumberUtils removes Java whitespace and accepts signed hex identifiers.
     whitespace = "\t\n\v\f\r\x1c\x1d\x1e\x1f \u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2008\u2009\u200a\u2028\u2029\u205f\u3000"
     value = "".join(c for c in value if c not in whitespace)
-    if not re.fullmatch(r"[+-]?(?:0[xX][0-9a-fA-F]+|#[0-9a-fA-F]+|[0-9]+)", value):
-        raise _Failure("invalid")
     negative = value.startswith("-")
-    unsigned = value.lstrip("+-")
-    result = int(unsigned[2:] if unsigned.startswith(("0x", "0X")) else unsigned[1:] if unsigned.startswith("#") else unsigned,
-                 16 if unsigned.startswith(("0x", "0X", "#")) else 10)
+    unsigned = value[1:] if value.startswith(("+", "-")) else value
+    hexadecimal = unsigned.startswith(("0x", "0X", "#"))
+    digits = unsigned[2:] if unsigned.startswith(("0x", "0X")) else unsigned[1:] if unsigned.startswith("#") else unsigned
+    # Long.parseLong uses Character.digit(char, radix): BMP decimal digits and
+    # fullwidth A-F are accepted; supplementary digits and superscripts are not.
+    digits = "".join(str(unicodedata.decimal(c)) if ord(c) <= 0xffff and c.isdecimal() else c for c in digits)
+    if hexadecimal:
+        digits = digits.translate(str.maketrans("ＡＢＣＤＥＦａｂｃｄｅｆ", "ABCDEFabcdef"))
+    if not re.fullmatch(r"[0-9a-fA-F]+" if hexadecimal else r"[0-9]+", digits):
+        raise _Failure("invalid")
+    result = int(digits, 16 if hexadecimal else 10)
     result = -result if negative else result
     if not -(2**63) <= result < 2**63:
         raise _Failure("invalid")
