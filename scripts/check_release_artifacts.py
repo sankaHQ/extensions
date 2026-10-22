@@ -53,6 +53,10 @@ CATALOG: dict[str, Any] = {
             "manifest": "packages/sanka-extension-llm-to-jev/extension.json",
         },
         {
+            "id": "sanka/trust-audit",
+            "manifest": "packages/sanka-extension-trust-audit/extension.json",
+        },
+        {
             "id": "sanka/drf-to-fastapi",
             "manifest": "packages/sanka-extension-drf-to-fastapi/extension.json",
         },

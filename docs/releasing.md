@@ -1,5 +1,12 @@
 # Releasing Sanka extension packages
 
+## Trust audit 0.1.0a1
+
+`trust-audit-v0.1.0a1` publishes `sanka/trust-audit` 0.1.0a1 as a standalone release
+(scan, plan and apply; apply writes a new patch directory and never edits project
+files). Follow [the trust audit release procedure](trust-audit-release.md). Other
+wheel versions and bytes are unchanged.
+
 ## Readiness fix release 0.1.0a18
 
 Prepare the absent immutable `api-converters-v0.1.0a18` tag after this change
