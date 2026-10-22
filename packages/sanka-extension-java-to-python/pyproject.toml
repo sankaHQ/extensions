@@ -1,12 +1,12 @@
 [project]
 name = "sanka-extension-java-to-python"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Review-bound Spring MVC migration to Python FastAPI"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-dependencies = ["sanka-java-migration==0.1.0a1", "sanka-extension-sdk==0.1.0a4", "sanka-http-replay==0.1.0a2"]
+dependencies = ["sanka-java-migration==0.1.0a2", "sanka-extension-sdk==0.1.0a4", "sanka-http-replay==0.1.0a2"]
 
 [build-system]
 requires = ["hatchling==1.32.0"]

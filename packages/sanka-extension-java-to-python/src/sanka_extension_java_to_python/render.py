@@ -38,6 +38,10 @@ def value(node: dict[str, Any], records: dict[str, Any]) -> str:
 
 
 def render(captured: dict[str, Any], scenarios: list[dict[str, Any]]) -> dict[str, str]:
+    if "persistence" in captured:
+        from .crud_render import render_crud
+
+        return render_crud(captured, scenarios)
     lines = [
         "# SPDX-License-Identifier: Apache-2.0",
         "from fastapi import FastAPI, Request",

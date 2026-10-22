@@ -1,0 +1,159 @@
+# SPDX-License-Identifier: Apache-2.0
+import json
+import os
+import re
+from decimal import Decimal, InvalidOperation
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, ConfigDict, Field, create_model
+from sqlalchemy import BigInteger, Column, Identity, Numeric, String, Table, create_engine, select
+from sqlalchemy.orm import Session, registry
+from starlette.concurrency import run_in_threadpool
+
+MODEL = json.loads(CAPTURED_MODEL)
+app = FastAPI(redirect_slashes=False)
+engine = create_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
+_registry = registry()
+_columns = []
+for _field in MODEL["fields"]:
+    _name = _field["name"]
+    if _name == "id":
+        _columns.append(Column(_field["column"], BigInteger, Identity(), key=_name, primary_key=True))
+    else:
+        _type = String(_field["length"]) if _field["type"] == "String" else Numeric(_field["precision"], _field["scale"])
+        _columns.append(Column(_field["column"], _type, key=_name, nullable=_field["nullable"]))
+_table = Table(MODEL["table"], _registry.metadata, *_columns)
+
+
+class _Entity:
+    pass
+
+
+_registry.map_imperatively(_Entity, _table)
+
+
+class _Input(BaseModel):
+    model_config = ConfigDict(strict=True)
+INPUT_FIELDS
+
+
+_Response = create_model("OrderResponse", **{
+    f["name"]: (int if f["name"] == "id" else str | None if f["nullable"] else str, ...)
+    for f in MODEL["fields"]
+})
+_body_schema = {"requestBody": {"required": True, "content": {
+    "application/json": {"schema": _Input.model_json_schema()}
+}}}
+
+
+class _Failure(Exception):
+    def __init__(self, kind):
+        self.error = MODEL["errors"][kind]
+
+
+@app.exception_handler(_Failure)
+async def _failure(request, error):
+    return JSONResponse({"code": error.error["code"]}, status_code=error.error["status"])
+
+
+class _Number(str):
+    """Retain Jackson's numeric token text when coercing a JSON number to String."""
+
+
+_trim = "".join(chr(n) for n in range(33))
+
+
+def _decode(raw):
+    try:
+        body = json.loads(raw, parse_int=_Number, parse_float=_Number,
+                          parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+        if not isinstance(body, dict):
+            raise ValueError()
+        data = {}
+        for field in MODEL["fields"]:
+            name = field["name"]
+            if name == "id":
+                continue
+            value = body.get(name)
+            if field["type"] == "String":
+                if isinstance(value, bool):
+                    value = "true" if value else "false"
+                elif isinstance(value, str):
+                    value = str(value)
+                elif value is not None:
+                    raise ValueError()
+                if not field["nullable"] and (value is None or not value.strip(_trim)):
+                    raise ValueError()
+                if value is not None and len(value.encode("utf-16-le", errors="surrogatepass")) // 2 > field["length"]:
+                    raise ValueError()
+            else:
+                if not isinstance(value, str) or "_" in value:
+                    raise ValueError()
+                value = Decimal(value.strip(_trim))
+                if not value.is_finite() or value < 0:
+                    raise ValueError()
+                if value.is_zero():
+                    value = value.copy_abs()
+                sign, digits, exponent = value.as_tuple()
+                if max(0, len(digits) + exponent) > field["precision"] - field["scale"] or max(0, -exponent) > field["scale"]:
+                    raise ValueError()
+            data[name] = value
+        return _Input.model_validate(data).model_dump()
+    except (ValueError, InvalidOperation, UnicodeError):
+        raise _Failure("invalid") from None
+
+
+def _identifier(value):
+    # Spring NumberUtils removes Java whitespace and accepts signed hex identifiers.
+    whitespace = "\t\n\v\f\r\x1c\x1d\x1e\x1f \u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2008\u2009\u200a\u2028\u2029\u205f\u3000"
+    value = "".join(c for c in value if c not in whitespace)
+    if not re.fullmatch(r"[+-]?(?:0[xX][0-9a-fA-F]+|#[0-9a-fA-F]+|[0-9]+)", value):
+        raise _Failure("invalid")
+    negative = value.startswith("-")
+    unsigned = value.lstrip("+-")
+    result = int(unsigned[2:] if unsigned.startswith(("0x", "0X")) else unsigned[1:] if unsigned.startswith("#") else unsigned,
+                 16 if unsigned.startswith(("0x", "0X", "#")) else 10)
+    result = -result if negative else result
+    if not -(2**63) <= result < 2**63:
+        raise _Failure("invalid")
+    return result
+
+
+def _dump(entity):
+    return _Response(**{
+        field["name"]: str(getattr(entity, field["name"])) if field["type"] == "BigDecimal" else getattr(entity, field["name"])
+        for field in MODEL["fields"]
+    }).model_dump()
+
+
+def _execute(operation, identity, data):
+    with Session(engine, expire_on_commit=False) as session, session.begin():
+        if operation == "list":
+            return JSONResponse([_dump(row) for row in session.scalars(select(_Entity).order_by(_Entity.id))])
+        entity = None
+        if operation in {"get", "update", "delete"}:
+            entity = session.get(_Entity, identity)
+            if entity is None:
+                raise _Failure("missing")
+        if operation == "get":
+            return JSONResponse(_dump(entity))
+        if operation == "delete":
+            session.delete(entity)
+            return Response(status_code=204)
+        if operation in {"create", "rollback"}:
+            entity = _Entity()
+            session.add(entity)
+        for name, value in data.items():
+            setattr(entity, name, value)
+        session.flush()
+        if operation == "rollback":
+            raise _Failure("rejected")
+        payload = _dump(entity)
+        return JSONResponse(payload, status_code=201 if operation == "create" else 200)
+
+
+async def _dispatch(request, operation):
+    identity = _identifier(request.path_params["id"]) if "id" in request.path_params else None
+    data = _decode(await request.body()) if operation in {"create", "update", "rollback"} else None
+    return await run_in_threadpool(_execute, operation, identity, data)

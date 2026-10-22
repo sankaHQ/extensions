@@ -1,0 +1,373 @@
+{
+  "schema": "sanka.http-scenarios/v1",
+  "scenarios": [
+    {
+      "id": "empty",
+      "method": "GET",
+      "path": "/orders/all",
+      "expected_status": 200
+    },
+    {
+      "id": "missing",
+      "method": "GET",
+      "path": "/orders/999",
+      "expected_status": 404
+    },
+    {
+      "id": "invalid-id",
+      "method": "GET",
+      "path": "/orders/not-a-number",
+      "expected_status": 400
+    },
+    {
+      "id": "overflow-id",
+      "method": "GET",
+      "path": "/orders/9223372036854775808",
+      "expected_status": 400
+    },
+    {
+      "id": "missing-body",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400
+    },
+    {
+      "id": "missing-fields",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400,
+      "body": {
+        "name": "Only name"
+      }
+    },
+    {
+      "id": "blank",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400,
+      "body": {
+        "name": "  ",
+        "amount": "1.00"
+      }
+    },
+    {
+      "id": "negative",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400,
+      "body": {
+        "name": "Bad",
+        "amount": "-0.01"
+      }
+    },
+    {
+      "id": "fraction",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400,
+      "body": {
+        "name": "Bad",
+        "amount": "1.001"
+      }
+    },
+    {
+      "id": "precision",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400,
+      "body": {
+        "name": "Bad",
+        "amount": "1000000000000.00"
+      }
+    },
+    {
+      "id": "null-amount",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400,
+      "body": {
+        "name": "Bad",
+        "amount": null
+      }
+    },
+    {
+      "id": "long-name",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400,
+      "body": {
+        "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "amount": "1.00"
+      }
+    },
+    {
+      "id": "unicode-length",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400,
+      "body": {
+        "name": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+        "amount": "1.00"
+      }
+    },
+    {
+      "id": "long-note",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400,
+      "body": {
+        "name": "Bad",
+        "amount": "1.00",
+        "note": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "id": "object-name",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400,
+      "body": {
+        "name": {},
+        "amount": "1.00"
+      }
+    },
+    {
+      "id": "bad-number",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 400,
+      "body": {
+        "name": "Bad",
+        "amount": "NaN"
+      }
+    },
+    {
+      "id": "create-exact",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 201,
+      "body": {
+        "name": "\u6ce8\u6587 \u4e16\u754c",
+        "amount": "999999999999.99",
+        "note": null,
+        "ignored": "extra"
+      }
+    },
+    {
+      "id": "get-exact",
+      "method": "GET",
+      "path": "/orders/1",
+      "expected_status": 200
+    },
+    {
+      "id": "create-scale",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 201,
+      "body": {
+        "name": "Second",
+        "amount": "1.2",
+        "note": ""
+      }
+    },
+    {
+      "id": "read-scale",
+      "method": "GET",
+      "path": "/orders/2",
+      "expected_status": 200
+    },
+    {
+      "id": "update",
+      "method": "PUT",
+      "path": "/orders/1",
+      "expected_status": 200,
+      "body": {
+        "name": "Updated",
+        "amount": "0.01",
+        "note": "changed"
+      }
+    },
+    {
+      "id": "read-update",
+      "method": "GET",
+      "path": "/orders/1",
+      "expected_status": 200
+    },
+    {
+      "id": "invalid-update",
+      "method": "PUT",
+      "path": "/orders/1",
+      "expected_status": 400,
+      "body": {
+        "name": "",
+        "amount": "2.00"
+      }
+    },
+    {
+      "id": "missing-update",
+      "method": "PUT",
+      "path": "/orders/999",
+      "expected_status": 404,
+      "body": {
+        "name": "Missing",
+        "amount": "2.00"
+      }
+    },
+    {
+      "id": "rollback",
+      "method": "POST",
+      "path": "/orders/rollback",
+      "expected_status": 409,
+      "body": {
+        "name": "Must roll back",
+        "amount": "7.25",
+        "note": "absent after rollback"
+      }
+    },
+    {
+      "id": "after-rollback",
+      "method": "GET",
+      "path": "/orders/all",
+      "expected_status": 200
+    },
+    {
+      "id": "create-after-rollback",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 201,
+      "body": {
+        "name": "After rollback",
+        "amount": "0.00"
+      }
+    },
+    {
+      "id": "coerce-string",
+      "method": "POST",
+      "path": "/orders/new",
+      "expected_status": 201,
+      "body": {
+        "name": 123,
+        "amount": 12.25,
+        "note": true
+      }
+    },
+    {
+      "id": "delete",
+      "method": "DELETE",
+      "path": "/orders/2",
+      "expected_status": 204
+    },
+    {
+      "id": "deleted",
+      "method": "GET",
+      "path": "/orders/2",
+      "expected_status": 404
+    },
+    {
+      "id": "missing-delete",
+      "method": "DELETE",
+      "path": "/orders/2",
+      "expected_status": 404
+    },
+    {
+      "id": "final",
+      "method": "GET",
+      "path": "/orders/all",
+      "expected_status": 200
+    },
+    {
+      "id": "negative-zero",
+      "method": "POST",
+      "path": "/orders/new",
+      "body": {
+        "name": "Zero",
+        "amount": "-0.00"
+      },
+      "expected_status": 201
+    },
+    {
+      "id": "decimal-exponent",
+      "method": "POST",
+      "path": "/orders/new",
+      "body": {
+        "name": "Exponent",
+        "amount": "1E+2"
+      },
+      "expected_status": 201
+    },
+    {
+      "id": "unicode-space",
+      "method": "POST",
+      "path": "/orders/new",
+      "body": {
+        "name": "\u2003",
+        "amount": "1.00"
+      },
+      "expected_status": 201
+    },
+    {
+      "id": "decimal-underscore",
+      "method": "POST",
+      "path": "/orders/new",
+      "body": {
+        "name": "Bad",
+        "amount": "1_0.00"
+      },
+      "expected_status": 400
+    },
+    {
+      "id": "too-many-zeroes",
+      "method": "POST",
+      "path": "/orders/new",
+      "body": {
+        "name": "Bad",
+        "amount": "1.000"
+      },
+      "expected_status": 400
+    },
+    {
+      "id": "null-name",
+      "method": "POST",
+      "path": "/orders/new",
+      "body": {
+        "name": null,
+        "amount": "1.00"
+      },
+      "expected_status": 400
+    },
+    {
+      "id": "array-name",
+      "method": "POST",
+      "path": "/orders/new",
+      "body": {
+        "name": [],
+        "amount": "1.00"
+      },
+      "expected_status": 400
+    },
+    {
+      "id": "hex-id",
+      "method": "GET",
+      "path": "/orders/0x1",
+      "expected_status": 200
+    },
+    {
+      "id": "padded-id",
+      "method": "GET",
+      "path": "/orders/%20+1%20",
+      "expected_status": 200
+    },
+    {
+      "id": "inner-space-id",
+      "method": "GET",
+      "path": "/orders/0%201",
+      "expected_status": 200
+    },
+    {
+      "id": "negative-id",
+      "method": "GET",
+      "path": "/orders/-1",
+      "expected_status": 404
+    }
+  ]
+}

@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import tempfile
 from pathlib import Path
 
 from sanka_java_migration.capture import capture
+from sanka_java_migration.postgres import fixture_databases
 from sanka_java_migration.replay import source_copy, source_run
 
 from sanka_http_replay import load_scenarios
@@ -17,14 +19,29 @@ FIXTURE = ROOT / "packages/sanka-extension-java-to-python/tests/fixtures/greetin
 
 
 def main() -> None:
-    captured = capture(FIXTURE)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fixture", type=Path, default=FIXTURE)
+    args = parser.parse_args()
+    fixture = args.fixture.resolve()
+    captured = capture(fixture)
     if not captured["ready"]:
         raise ValueError("synthetic fixture is outside the qualified source profile")
-    scenarios = load_scenarios(FIXTURE / "sanka-verify.json")
+    scenarios = load_scenarios(fixture / "sanka-verify.json")
     with tempfile.TemporaryDirectory(prefix="sanka-java-prepare-") as directory:
-        work = source_copy(FIXTURE, Path(directory).resolve() / "source", captured, scenarios)
-        source_run(work, offline=False)
-        print(json.dumps(source_run(work), indent=2))
+        parent = Path(directory).resolve()
+        work = source_copy(fixture, parent / "source", captured, scenarios)
+        model = captured.get("persistence")
+        if model:
+            with fixture_databases(parent, model) as databases:
+                print(
+                    json.dumps(
+                        source_run(work, offline=False, database=databases["source"], model=model),
+                        indent=2,
+                    )
+                )
+        else:
+            source_run(work, offline=False)
+            print(json.dumps(source_run(work), indent=2))
 
 
 if __name__ == "__main__":

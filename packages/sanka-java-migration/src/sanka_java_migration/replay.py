@@ -51,7 +51,7 @@ def source_copy(
     work.mkdir()
     shutil.copyfile(root / "pom.xml", work / "pom.xml")
     for name in captured["source_inventory"]:
-        if name.startswith("src/main/java/"):
+        if name.startswith("src/main/"):
             destination = work / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(root / name, destination)
@@ -69,7 +69,13 @@ def source_copy(
     return work
 
 
-def source_run(work: Path, *, offline: bool = True) -> dict[str, Any]:
+def source_run(
+    work: Path,
+    *,
+    offline: bool = True,
+    database: dict[str, Any] | None = None,
+    model: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if os.environ.get("SANKA_JAVA_REPLAY") != "1":
         raise ValueError("set SANKA_JAVA_REPLAY=1 only for source and candidate code you trust")
     maven = Path(os.environ.get("SANKA_JAVA_MAVEN", ""))
@@ -91,6 +97,12 @@ def source_run(work: Path, *, offline: bool = True) -> dict[str, Any]:
         SANKA_PROBE_CASES=str(work / "scenarios.json"),
         SANKA_PROBE_OUTPUT=str(work / "observations.json"),
     )
+    if database is not None and model is not None:
+        from .crud import snapshot_sql
+        from .postgres import java_environment
+
+        env.update(java_environment(database))
+        env.update(SANKA_PROBE_TABLE=model["table"], SANKA_PROBE_SELECT=snapshot_sql(model))
     command = [
         str(maven),
         "-B",

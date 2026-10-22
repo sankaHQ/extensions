@@ -1090,7 +1090,7 @@ requires-dist = [
 
 [[package]]
 name = "sanka-extension-java-to-python"
-version = "0.1.0a1"
+version = "0.1.0a2"
 source = { editable = "packages/sanka-extension-java-to-python" }
 dependencies = [
     { name = "sanka-extension-sdk" },
@@ -1264,7 +1264,7 @@ source = { editable = "packages/sanka-http-replay" }
 
 [[package]]
 name = "sanka-java-migration"
-version = "0.1.0a1"
+version = "0.1.0a2"
 source = { editable = "packages/sanka-java-migration" }
 
 [[package]]

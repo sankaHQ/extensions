@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.1.0a1"
+VERSION = "0.1.0a2"
 PARSER_VERSION = "3.28.2"
 PARSER_SHA256 = "b5499a3b1c40b16c0671fabe478c9aafeab38160c6fde74a6c13f42d86716ecd"
 BOOT_VERSION = "3.5.16"
@@ -142,20 +142,32 @@ def pom_profile(root: Path) -> dict[str, str]:
     for dep in deps:
         fields(dep, {"groupId", "artifactId", "scope"})
         name = leaf(dep, "artifactId")
+        allowed = {
+            "spring-boot-starter-web",
+            "spring-boot-starter-test",
+            "spring-boot-starter-data-jpa",
+            "spring-boot-starter-validation",
+            "postgresql",
+        }
         if (
             dep.tag != "dependency"
-            or leaf(dep, "groupId") != "org.springframework.boot"
-            or name not in {"spring-boot-starter-web", "spring-boot-starter-test"}
+            or name not in allowed
+            or leaf(dep, "groupId")
+            != ("org.postgresql" if name == "postgresql" else "org.springframework.boot")
         ):
             raise ValueError(
                 "unsupported dependency; security, persistence and other starters need adaptation"
             )
         scope = dep.findtext("scope", "compile").strip()
-        if scope != ("test" if name.endswith("-test") else "compile"):
+        if scope != (
+            "test" if name.endswith("-test") else "runtime" if name == "postgresql" else "compile"
+        ):
             raise ValueError("unsupported dependency scope")
         names.append(name)
-    if sorted(names) != ["spring-boot-starter-test", "spring-boot-starter-web"]:
-        raise ValueError("requires exactly the Web and test starters")
+    basic = {"spring-boot-starter-test", "spring-boot-starter-web"}
+    crud = basic | {"spring-boot-starter-data-jpa", "spring-boot-starter-validation", "postgresql"}
+    if len(names) != len(set(names)) or set(names) not in (basic, crud):
+        raise ValueError("requires the exact stateless or PostgreSQL JPA dependency profile")
     build = node.find("build")
     if build is not None:
         fields(build, {"plugins"})
@@ -172,7 +184,10 @@ def pom_profile(root: Path) -> dict[str, str]:
     for name in ("groupId", "artifactId", "version", "name", "description"):
         if node.find(name) is not None and ("${" in leaf(node, name) or not leaf(node, name)):
             raise ValueError("project coordinates must be literal")
-    return {"java": version, "spring_boot": BOOT_VERSION, "build": "maven"}
+    result = {"java": version, "spring_boot": BOOT_VERSION, "build": "maven"}
+    if set(names) == crud:
+        result["persistence"] = "postgresql-jpa"
+    return result
 
 
 def parse(root: Path, paths: list[str]) -> list[dict[str, Any]]:
@@ -293,6 +308,10 @@ def capture(root: Path) -> dict[str, Any]:
         profile = pom_profile(root)
     except (ValueError, OSError, ET.ParseError) as error:
         gaps.append(f"pom.xml: {error}")
+    if profile.get("persistence") == "postgresql-jpa":
+        from .crud import capture_crud
+
+        return capture_crud(root, files, profile)
     for name in files:
         if name.startswith("src/main/") and not (
             name.startswith("src/main/java/") and name.endswith(".java")

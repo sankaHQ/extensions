@@ -124,7 +124,7 @@ def main() -> int:
         if package.name == "sanka-extension-java-to-python":
             allowed_modules += ("sanka_extensions", "sanka_java_migration", "sanka_http_replay")
             if project.get("dependencies") != [
-                "sanka-java-migration==0.1.0a1",
+                "sanka-java-migration==0.1.0a2",
                 "sanka-extension-sdk==0.1.0a4",
                 "sanka-http-replay==0.1.0a2",
             ]:
