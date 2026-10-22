@@ -46,7 +46,7 @@ def call(
         project_root=str(root),
         artifact_root=str(artifact or root / ".sanka/java"),
         extension_id="sanka/java-to-python",
-        extension_version="0.1.0a1",
+        extension_version="0.1.0a2",
         manifest_digest="0" * 64,
         fingerprint={},
         configuration=config,
@@ -99,6 +99,110 @@ def test_full_lifecycle_and_real_mismatch(project: Path) -> None:
     for source in FIXTURE.rglob("*"):
         if source.is_file():
             assert (project / source.relative_to(FIXTURE)).read_bytes() == source.read_bytes()
+
+
+@pytest.fixture
+def crud_project(tmp_path: Path) -> Path:
+    root = tmp_path / "orders"
+    shutil.copytree(FIXTURE.parent / "orders", root)
+    return root.resolve()
+
+
+@pytest.mark.skipif(
+    not os.getenv("SANKA_JAVA_POSTGRES_CONFIG"), reason="opt-in private PostgreSQL fixture"
+)
+def test_crud_database_state_and_rollback(crud_project: Path) -> None:
+    scenarios_file = crud_project / "sanka-verify.json"
+    scenarios = json.loads(scenarios_file.read_text())
+    created = next(i for i, row in enumerate(scenarios["scenarios"]) if row["id"] == "create-exact")
+    scenarios["scenarios"][created + 1 : created + 1] = [
+        {"id": name, "method": "GET", "path": "/orders/" + value, "expected_status": status}
+        for name, value, status in (
+            ("arabic-id", "\u0661", 200),
+            ("fullwidth-id", "\uff11", 200),
+            ("mixed-id", "\u0660\u06f1", 200),
+            ("signed-unicode-id", "+\u0661", 200),
+            ("unicode-hex-id", "0x\uff11", 200),
+            ("fullwidth-hex-id", "0x\uff26", 404),
+            ("astral-id", "\U0001d7d9", 400),
+            ("superscript-id", "\xb9", 400),
+            (
+                "unicode-overflow-id",
+                "\u06f9\u06f2\u06f2\u06f3\u06f3\u06f7\u06f2\u06f0\u06f3\u06f6\u06f8\u06f5\u06f4\u06f7\u06f7\u06f5\u06f8\u06f0\u06f8",
+                400,
+            ),
+        )
+    ]
+    scenarios_file.write_text(json.dumps(scenarios, ensure_ascii=False))
+    source = {
+        p.relative_to(crud_project): p.read_bytes() for p in crud_project.rglob("*") if p.is_file()
+    }
+    scanned = call(crud_project, "scan")
+    assert scanned["data"]["ready"], scanned
+    plan = planned(crud_project)
+    assert call(crud_project, "apply", plan=plan)["outcome"] == "success"
+    native = call(crud_project, "test")
+    assert native["outcome"] == "success", native
+    verified = call(crud_project, "verify")
+    assert verified["outcome"] == "success", verified
+    report = verified["data"]
+    observations = {row["id"]: row for row in report["candidate_observations"]}
+    for name in ("arabic-id", "fullwidth-id", "mixed-id", "signed-unicode-id", "unicode-hex-id"):
+        assert observations[name]["body"]["id"] == 1
+    assert observations["create-exact"]["body"]["amount"] == "999999999999.99"
+    assert observations["create-scale"]["body"]["amount"] == "1.2"
+    assert observations["read-scale"]["body"]["amount"] == "1.20"
+    assert observations["create-exact"]["body"]["note"] is None
+    assert observations["rollback"]["tables"] == observations["after-rollback"]["tables"]
+    assert [r["id"] for r in observations["rollback"]["tables"]["orders"]] == [1, 2]
+    assert observations["rollback"]["sequences"]["orders_id_seq"]["last_value"] == 3
+    assert observations["create-after-rollback"]["body"]["id"] == 4
+    assert observations["invalid-update"]["tables"] == observations["read-update"]["tables"]
+    assert observations["delete"]["body"] is None
+    assert observations["negative-zero"]["body"]["amount"] == "0.00"
+    for name, content in source.items():
+        assert (crud_project / name).read_bytes() == content
+    candidate = crud_project / ".sanka/java/python-fastapi/app.py"
+    candidate.write_text(
+        candidate.read_text().replace(
+            "payload = _dump(entity)", 'payload = _dump(entity)\n        entity.name += " changed"'
+        )
+    )
+    rejected = call(crud_project, "verify")
+    assert rejected["outcome"] == "error"
+    mismatch = json.loads((crud_project / ".sanka/java/verify.json").read_text())
+    failed_create = next(s for s in mismatch["steps"] if s["id"] == "create-exact")
+    assert any("tables" in p for p in failed_create["problems"])
+    assert mismatch["candidate_digest"] != report["candidate_digest"]
+
+
+@pytest.mark.parametrize(
+    "filename,old,new",
+    [
+        ("OrderController.java", "@Transactional", "@Transactional(readOnly=true)"),
+        (
+            "OrderController.java",
+            "return repository.findAllByOrderByIdAsc();",
+            "repository.deleteAll(); return repository.findAllByOrderByIdAsc();",
+        ),
+        ("Order.java", "JsonFormat.Shape.STRING", "JsonFormat.Shape.NUMBER"),
+        ("Order.java", "public Long id;", "public Long id; static { System.exit(1); }"),
+        ("OrderInput.java", "@Size(max=80)", "@Size(max=79)"),
+        ("OrderRepository.java", "findAllByOrderByIdAsc", "findAllByOrderByNameAsc"),
+        ("Errors.java", "HttpStatus.NOT_FOUND", "HttpStatus.OK"),
+    ],
+)
+def test_crud_unknown_behavior_blocks_whole_dependency_closure(
+    crud_project: Path, filename: str, old: str, new: str
+) -> None:
+    path = crud_project / "src/main/java/example/orders" / filename
+    path.write_text(path.read_text().replace(old, new))
+    scanned = call(crud_project, "scan")
+    assert scanned["outcome"] == "success"
+    assert not scanned["data"]["ready"]
+    result = call(crud_project, "plan")
+    assert result["data"]["blockers"]
+    assert result["data"]["files"] == {}
 
 
 @pytest.mark.parametrize(

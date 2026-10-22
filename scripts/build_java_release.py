@@ -26,7 +26,7 @@ PACKAGES = (
     "sanka-java-migration",
     "sanka-extension-java-to-python",
 )
-PREFIX = "https://github.com/sankaHQ/extensions/releases/download/java-converters-v0.1.0a1/"
+PREFIX = "https://github.com/sankaHQ/extensions/releases/download/java-converters-v0.1.0a2/"
 
 
 def source_revision() -> str:

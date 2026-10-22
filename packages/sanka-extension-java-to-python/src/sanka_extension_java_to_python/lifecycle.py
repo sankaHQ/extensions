@@ -25,9 +25,9 @@ from sanka_http_replay import load_scenarios
 from .render import render
 
 LIMITATION = (
-    "First stateless Spring MVC GET profile; recorded JSON cases only. "
-    "No auth, CRUD, errors, HEAD/OPTIONS, arbitrary headers, "
-    "transport or production-cutover claim."
+    "Qualified stateless GET or flat PostgreSQL JPA CRUD profile; recorded cases only. "
+    "No auth, relationships, custom queries, concurrent writes, HEAD/OPTIONS, arbitrary headers, "
+    "live transport or production-cutover claim."
 )
 
 
@@ -63,30 +63,37 @@ def write(root: Path, path: Path, value: Any) -> None:
 def cases(root: Path, captured: dict[str, Any]) -> list[dict[str, Any]]:
     scenarios = load_scenarios(root / "sanka-verify.json")
     covered: set[str] = set()
+    crud = "persistence" in captured
     for case in scenarios:
         url = urlsplit(case["path"])
         if (
-            case["method"] != "GET"
-            or case.get("expected_status") != 200
+            (not crud and (case["method"] != "GET" or case.get("expected_status") != 200))
+            or (crud and case.get("expected_status") not in {200, 201, 204, 400, 404, 409})
             or case["headers"]
             or url.netloc
             or url.scheme
         ):
-            raise ValueError(
-                "first profile scenarios require GET, expected_status 200 and no custom headers"
-            )
+            raise ValueError("scenarios require a qualified method/status and no custom headers")
         matches = [
-            e["path"]
+            e["method"] + " " + e["path"]
             for e in captured["endpoints"]
-            if re.fullmatch(
+            if e["method"] == case["method"]
+            and re.fullmatch(
                 re.sub(r"\\\{[^}]+\\\}", "[^/;]+", re.escape(e["path"])), unquote(url.path)
             )
         ]
         if not matches:
             raise ValueError(f"scenario {case['id']} does not exercise a captured route")
         covered.add(min(matches, key=lambda path: path.count("{")))
-    if {e["path"] for e in captured["endpoints"]} - covered:
+    if {e["method"] + " " + e["path"] for e in captured["endpoints"]} - covered:
         raise ValueError("every captured route needs at least one scenario")
+    if crud:
+        observed_statuses = {c["expected_status"] for c in scenarios}
+        if not {200, 201, 204, 400, 404, 409} <= observed_statuses:
+            raise ValueError(
+                "CRUD scenarios require create/read/update/delete, "
+                "invalid input, missing and rollback cases"
+            )
     return scenarios
 
 

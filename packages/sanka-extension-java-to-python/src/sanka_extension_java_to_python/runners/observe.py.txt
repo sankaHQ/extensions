@@ -8,9 +8,20 @@ from app import app
 observations = []
 with TestClient(app) as client:
     for case in json.loads(Path(sys.argv[1]).read_text()):
-        response = client.get(case["path"], follow_redirects=False)
-        observations.append({"id": case["id"], "method": "GET", "path": case["path"],
+        kwargs = {"json": case["body"]} if "body" in case else {}
+        response = client.request(case["method"], case["path"], follow_redirects=False, **kwargs)
+        observed = {"id": case["id"], "method": case["method"], "path": case["path"],
                              "status": response.status_code,
                              "media_type": response.headers.get("content-type", ""),
-                             "body": response.json()})
+                             "body": response.json() if response.content else None}
+        probe = Path("probe.json")
+        if probe.exists():
+            from app import engine
+            model = json.loads(probe.read_text())
+            with engine.connect() as connection:
+                rows = [dict(row) for row in connection.exec_driver_sql(model["query"]).mappings()]
+                sequence = dict(connection.exec_driver_sql('SELECT last_value, is_called FROM "' + model["table"] + '_id_seq"').mappings().one())
+            observed["tables"] = {model["table"]: rows}
+            observed["sequences"] = {model["table"] + "_id_seq": sequence}
+        observations.append(observed)
 Path(sys.argv[2]).write_text(json.dumps(observations, ensure_ascii=True))

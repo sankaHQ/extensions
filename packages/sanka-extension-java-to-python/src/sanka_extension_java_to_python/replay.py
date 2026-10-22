@@ -7,10 +7,13 @@ import re
 import shutil
 import tempfile
 import xml.etree.ElementTree as ET
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 from sanka_java_migration.capture import digest, inventory
+from sanka_java_migration.crud import schema_sql, snapshot_sql
+from sanka_java_migration.postgres import fixture_databases, python_url
 from sanka_java_migration.replay import environment, run, source_copy, source_run
 
 from sanka_http_replay import compare, validate_observations
@@ -35,12 +38,20 @@ def replay(
             "SANKA_JAVA_PYTHON must name the prepared target environment's absolute Python path"
         )
     before = inventory(output)
+    model = captured.get("persistence")
     expected_files = {"app.py", "requirements.lock", "scenarios.json", "test_app.py", "README.md"}
+    if model:
+        expected_files.add("schema.sql")
+        if (output / "schema.sql").read_text() != schema_sql(model):
+            raise ValueError("candidate schema differs from the qualified source schema")
     if set(before) != expected_files:
         raise ValueError("candidate files differ from the first-profile output layout")
     if (output / "requirements.lock").read_text() != LOCK.read_text():
         raise ValueError("candidate dependency lock differs from the reviewed target profile")
-    with tempfile.TemporaryDirectory(prefix="sanka-java-replay-") as directory:
+    with (
+        tempfile.TemporaryDirectory(prefix="sanka-java-replay-") as directory,
+        ExitStack() as stack,
+    ):
         work = Path(directory).resolve()
         candidate = work / "candidate"
         candidate.mkdir()
@@ -71,6 +82,12 @@ def replay(
             raise ValueError(
                 "target interpreter differs from requirements.lock; install using --require-hashes"
             )
+        databases = stack.enter_context(fixture_databases(work, model)) if model else {}
+        if model:
+            env["DATABASE_URL"] = python_url(databases["native"])
+            (candidate / "probe.json").write_text(
+                json.dumps({"table": model["table"], "query": snapshot_sql(model)})
+            )
         run([str(python), "-m", "compileall", "-q", "app.py"], candidate, env)
         native = run(
             [
@@ -91,6 +108,8 @@ def replay(
             raise ValueError(
                 "native test count differs from scenarios or includes non-passing cases"
             )
+        if model:
+            env["DATABASE_URL"] = python_url(databases["candidate"])
         run(
             [
                 str(python),
@@ -108,10 +127,18 @@ def replay(
         runtime: dict[str, Any] = {}
         if command == "verify":
             source_work = source_copy(root, work / "source", captured, scenarios)
-            runtime = source_run(source_work)
+            runtime = source_run(source_work, database=databases.get("source"), model=model)
             source = validate_observations(
                 json.loads((source_work / "observations.json").read_text()), scenarios
             )
+        if model:
+            for side in [observed] + ([source] if source else []):
+                if any(
+                    set(row.get("tables", {})) != {model["table"]}
+                    or set(row.get("sequences", {})) != {model["table"] + "_id_seq"}
+                    for row in side
+                ):
+                    raise ValueError("every CRUD observation must include table and sequence state")
         report = compare(scenarios, observed, source)
         report.update(
             schema="sanka.java-replay/v1",

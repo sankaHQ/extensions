@@ -37,6 +37,18 @@ jobs:
   qualification:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17.11
+        env:
+          POSTGRES_USER: sanka_java_fixture
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432/tcp']
+        options: >-
+          --health-cmd "pg_isready -U sanka_java_fixture -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+          --memory 512m --cpus 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -53,6 +65,8 @@ jobs:
       - run: python3 scripts/fetch_java_maven.py
       - run: uv sync --frozen --all-packages
       - name: Prepare the target and the trusted source fixture
+        env:
+          FIXTURE_POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
         run: |
           uv venv --python 3.12.13 .java-tools/python
           uv pip sync --python .java-tools/python/bin/python --require-hashes packages/sanka-extension-java-to-python/src/sanka_extension_java_to_python/requirements.lock
@@ -61,11 +75,27 @@ jobs:
           echo "SANKA_JAVA_MAVEN=$PWD/.java-tools/apache-maven-3.9.16/bin/mvn" >> "$GITHUB_ENV"
           echo "SANKA_JAVA_MAVEN_REPO=$PWD/.java-tools/maven-repository" >> "$GITHUB_ENV"
           echo "SANKA_JAVA_PYTHON=$PWD/.java-tools/python/bin/python" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          config = Path('.java-tools/postgres-ci.json').resolve()
+          config.write_text(json.dumps({'host': '127.0.0.1', 'port': int(os.environ['FIXTURE_POSTGRES_PORT']), 'user': 'sanka_java_fixture', 'password': '', 'database': 'postgres'}))
+          config.chmod(0o600)
+          with open(os.environ['GITHUB_ENV'], 'a') as target:
+              target.write('SANKA_JAVA_POSTGRES_CONFIG=' + str(config) + '\n')
+          PY
       - run: uv run python scripts/prepare_java_fixture.py
+      - run: uv run python scripts/prepare_java_fixture.py --fixture packages/sanka-extension-java-to-python/tests/fixtures/orders
       - name: Build and install the immutable wheel closure
         run: |
           uv run python scripts/build_java_release.py
           uv --no-config pip install --reinstall --no-index --find-links release/java-converters release/java-converters/sanka_extension_java_to_python-*.whl
           uv run --no-sync python -c "import pathlib, sys, importlib.metadata as m, sanka_java_migration as j, sanka_extension_java_to_python as e; assert m.version('sanka-extension-sdk') == '0.1.0a4'; assert all(pathlib.Path(x.__file__).is_relative_to(sys.prefix) for x in (j, e))"
       - name: Exercise all lifecycle stages and refusal paths against installed wheels
-        run: uv run --no-sync python -m pytest packages/sanka-extension-java-to-python/tests -q
+        run: |
+          uv run --no-sync python -m pytest packages/sanka-extension-java-to-python/tests -q --junitxml=.java-tools/qualification.xml
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          cases = ET.parse('.java-tools/qualification.xml').findall('.//testcase')
+          assert cases and all(not list(case) for case in cases), 'required Java qualification cannot skip cases'
+          PY

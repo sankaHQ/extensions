@@ -6,12 +6,15 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.servlet.MockMvc;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @SpringBootTest(classes = APPLICATION_CLASS.class)
@@ -19,21 +22,44 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class ReplayTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
+    @Autowired(required=false) DataSource dataSource;
 
     @Test void replay() throws Exception {
         var cases = mapper.readTree(Path.of(System.getenv("SANKA_PROBE_CASES")).toFile());
         var observations = new ArrayList<Object>();
         for (var item : cases) {
-            var response = mvc.perform(get(URI.create(item.get("path").asText())))
+            var request = request(HttpMethod.valueOf(item.get("method").asText()), URI.create(item.get("path").asText()));
+            if (item.has("body")) request.contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsBytes(item.get("body")));
+            var response = mvc.perform(request)
                 .andReturn().getResponse();
             assertEquals(item.get("expected_status").asInt(), response.getStatus());
             var observed = new LinkedHashMap<String,Object>();
             observed.put("id", item.get("id").asText());
-            observed.put("method", "GET");
+            observed.put("method", item.get("method").asText());
             observed.put("path", item.get("path").asText());
             observed.put("status", response.getStatus());
-            observed.put("media_type", response.getContentType());
-            observed.put("body", mapper.readTree(response.getContentAsByteArray()));
+            observed.put("media_type", response.getContentType() == null ? "" : response.getContentType());
+            observed.put("body", response.getContentAsByteArray().length == 0 ? null : mapper.readTree(response.getContentAsByteArray()));
+            if (System.getenv("SANKA_PROBE_TABLE") != null) {
+                var table = System.getenv("SANKA_PROBE_TABLE");
+                try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+                    var rows = new ArrayList<Object>();
+                    try (var result = statement.executeQuery(System.getenv("SANKA_PROBE_SELECT"))) {
+                        while (result.next()) {
+                            var row = new LinkedHashMap<String,Object>();
+                            for (int i=1; i<=result.getMetaData().getColumnCount(); i++)
+                                row.put(result.getMetaData().getColumnLabel(i), result.getObject(i));
+                            rows.add(row);
+                        }
+                    }
+                    observed.put("tables", java.util.Map.of(table, rows));
+                    try (var result = statement.executeQuery("SELECT last_value, is_called FROM \"" + table + "_id_seq\"")) {
+                        result.next();
+                        observed.put("sequences", java.util.Map.of(table + "_id_seq", java.util.Map.of(
+                            "last_value", result.getLong(1), "is_called", result.getBoolean(2))));
+                    }
+                }
+            }
             observations.add(observed);
         }
         mapper.writeValue(Path.of(System.getenv("SANKA_PROBE_OUTPUT")).toFile(), observations);

@@ -9,6 +9,16 @@ import java.nio.file.*;
 import java.util.*;
 
 class Analyzer {
+    static List<String> tokens(Node node) {
+        var result = new ArrayList<String>();
+        node.getTokenRange().ifPresent(range -> range.forEach(token -> {
+            if (!token.getCategory().isWhitespaceOrComment()) result.add(token.getText());
+        }));
+        return result;
+    }
+    static List<String> modifiers(NodeList<Modifier> values) {
+        return values.stream().map(m -> m.getKeyword().asString()).sorted().toList();
+    }
     static Map<String,Object> map(Object... pairs) {
         var result = new LinkedHashMap<String,Object>();
         for (int i=0; i<pairs.length; i+=2) result.put((String)pairs[i], pairs[i+1]);
@@ -36,7 +46,7 @@ class Analyzer {
         var values = new LinkedHashMap<String,Object>();
         if (a instanceof SingleMemberAnnotationExpr s) values.put("value",expr(s.getMemberValue()));
         if (a instanceof NormalAnnotationExpr n) n.getPairs().forEach(p -> values.put(p.getNameAsString(),expr(p.getValue())));
-        return map("name",a.getNameAsString(),"values",values);
+        return map("name",a.getNameAsString(),"values",values,"tokens",tokens(a));
     }
     static Object parameter(Parameter p) {
         return map("name",p.getNameAsString(),"type",p.getType().asString(),
@@ -54,6 +64,10 @@ class Analyzer {
             "plain",m.getModifiers().size()==1 && m.isPublic() && m.getTypeParameters().isEmpty()
                 && m.getThrownExceptions().isEmpty() && m.getType().getAnnotations().isEmpty(),
             "body",m.getBody().map(Node::toString).orElse(""),"expression",result,
+            "body_tokens",m.getBody().map(Analyzer::tokens).orElse(List.of()),
+            "modifiers",modifiers(m.getModifiers()),
+            "throws",m.getThrownExceptions().size(),"type_parameters",m.getTypeParameters().size(),
+            "type_annotations",m.getType().getAnnotations().size(),"receiver",m.getReceiverParameter().isPresent(),
             "main",m.isPublic() && m.isStatic() && m.getModifiers().size()==2
                 && m.getNameAsString().equals("main") && m.getType().asString().equals("void")
                 && m.getParameters().size()==1 && m.getParameter(0).getType().asString().equals("String[]")
@@ -69,10 +83,24 @@ class Analyzer {
             shape &= r.getImplementedTypes().isEmpty() && r.getTypeParameters().isEmpty();
         else shape=false;
         return map("name",t.getNameAsString(),"kind",t.getClass().getSimpleName(),"plain",shape,
+            "modifiers",modifiers(t.getModifiers()),
+            "interface",t instanceof ClassOrInterfaceDeclaration c && c.isInterface(),
+            "extends",t instanceof ClassOrInterfaceDeclaration c ? c.getExtendedTypes().stream().map(Node::toString).toList() : List.of(),
+            "implements",t instanceof ClassOrInterfaceDeclaration c ? c.getImplementedTypes().stream().map(Node::toString).toList() : List.of(),
+            "type_parameters",t instanceof ClassOrInterfaceDeclaration c ? c.getTypeParameters().size() : 0,
             "line",t.getBegin().get().line,
             "annotations",t.getAnnotations().stream().map(Analyzer::annotation).toList(),
             "components",t instanceof RecordDeclaration r ? r.getParameters().stream().map(Analyzer::parameter).toList() : List.of(),
             "methods",t.getMethods().stream().map(Analyzer::method).toList(),
+            "fields",t.getFields().stream().map(f -> map("modifiers",modifiers(f.getModifiers()),
+                "annotations",f.getAnnotations().stream().map(Analyzer::annotation).toList(),
+                "variables",f.getVariables().stream().map(v -> map("name",v.getNameAsString(),"type",v.getType().asString(),
+                    "type_annotations",v.getType().getAnnotations().size(),
+                    "initializer",v.getInitializer().map(Analyzer::tokens).orElse(List.of()))).toList())).toList(),
+            "constructors",t.getConstructors().stream().map(c -> map("modifiers",modifiers(c.getModifiers()),
+                "annotations",c.getAnnotations().size(),"throws",c.getThrownExceptions().size(),
+                "parameters",c.getParameters().stream().map(Analyzer::parameter).toList(),
+                "type_parameters",c.getTypeParameters().size(),"body_tokens",tokens(c.getBody()))).toList(),
             "other_members",t.getMembers().stream().filter(m -> !(m instanceof MethodDeclaration)).map(m -> m.getClass().getSimpleName()).toList());
     }
     static String json(Object value) {

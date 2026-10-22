@@ -10,7 +10,11 @@ from app import app
 @pytest.mark.parametrize("case", json.loads(Path("scenarios.json").read_text()))
 def test_json_route(case):
     with TestClient(app) as client:
-        response = client.get(case["path"], follow_redirects=False)
+        kwargs = {"json": case["body"]} if "body" in case else {}
+        response = client.request(case["method"], case["path"], follow_redirects=False, **kwargs)
         assert response.status_code == case["expected_status"]
-        assert response.headers["content-type"].split(";")[0] == "application/json"
-        assert isinstance(response.json(), (dict, list))
+        if response.status_code == 204:
+            assert response.content == b""
+        else:
+            assert response.headers["content-type"].split(";")[0] == "application/json"
+            assert isinstance(response.json(), (dict, list))
