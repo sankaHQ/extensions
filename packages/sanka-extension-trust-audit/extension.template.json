@@ -1,0 +1,50 @@
+{
+  "commands": [
+    "apply",
+    "plan",
+    "scan"
+  ],
+  "distribution": {
+    "executable": "sanka-extension-trust-audit",
+    "name": "sanka-extension-trust-audit",
+    "version": "0.1.0a1"
+  },
+  "id": "sanka/trust-audit",
+  "kind": "migration",
+  "match": {
+    "all": [],
+    "any": [
+      {"kind": "file", "value": "Dockerfile"},
+      {"kind": "file", "value": "go.mod"},
+      {"kind": "file", "value": "package.json"},
+      {"kind": "file", "value": "pyproject.toml"},
+      {"kind": "file", "value": "requirements.txt"},
+      {"kind": "file", "value": "Cargo.toml"},
+      {"kind": "file", "value": "composer.json"},
+      {"kind": "file", "value": "pom.xml"},
+      {"kind": "file", "value": "build.gradle"},
+      {"kind": "file", "value": "build.gradle.kts"},
+      {"kind": "file", "value": "mix.exs"},
+      {"kind": "file_suffix", "value": ".pem"},
+      {"kind": "file_suffix", "value": ".crt"},
+      {"kind": "file_suffix", "value": ".jks"},
+      {"kind": "language", "value": "go"},
+      {"kind": "language", "value": "java"},
+      {"kind": "language", "value": "javascript"},
+      {"kind": "language", "value": "php"},
+      {"kind": "language", "value": "python"},
+      {"kind": "language", "value": "ruby"},
+      {"kind": "language", "value": "typescript"}
+    ]
+  },
+  "protocol_version": "sanka-extension/v1",
+  "runtime": {
+    "sanka_cli": ">=0.2.0,<0.4"
+  },
+  "schema_version": "sanka-extension-manifest/v2",
+  "targets": [
+    "trust-patches"
+  ],
+  "version": "0.1.0a1",
+  "wheels": []
+}

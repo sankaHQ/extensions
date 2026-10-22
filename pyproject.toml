@@ -72,6 +72,7 @@ known-first-party = [
   "sanka_extension_drf_to_fastapi",
   "sanka_extension_drf_to_flask",
   "sanka_extension_react_native_to_native",
+  "sanka_extension_trust_audit",
   "sanka_extension_typescript_to_rust",
   "sanka_ts_capture",
   "sanka_http_replay",

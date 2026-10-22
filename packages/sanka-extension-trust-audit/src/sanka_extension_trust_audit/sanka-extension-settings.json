@@ -1,0 +1,25 @@
+{
+  "schema_version": "sanka-extension-settings/v1",
+  "display": {
+    "name": {
+      "en": "Trust audit",
+      "ja": "トラスト監査"
+    },
+    "description": {
+      "en": "Find and patch trust in the compromised eMudhra CAs",
+      "ja": "侵害された eMudhra 認証局への信頼を検出し、パッチを作成"
+    }
+  },
+  "settings": [
+    {
+      "id": "output",
+      "stage": "plan",
+      "type": "path",
+      "default": "sanka-trust-patches",
+      "label": {
+        "en": "Patch directory (inside this project; existing files are never changed)",
+        "ja": "パッチの出力先（プロジェクト内。既存ファイルは変更しません）"
+      }
+    }
+  ]
+}
