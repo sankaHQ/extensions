@@ -1,5 +1,15 @@
 # Releasing Sanka extension packages
 
+## Trust audit 0.1.0a2
+
+`trust-audit-v0.1.0a2` publishes `sanka/trust-audit` 0.1.0a2. Advisory facts move from
+code into validated JSON files, one per incident, and a scan checks every packaged
+advisory: version checks take the highest fixed release, and findings name their
+advisories when more than one applies. eMudhra findings, patches and plans are
+unchanged apart from the version. New advisories follow
+[the advisory procedure](trust-audit-advisories.md); releases follow
+[the trust audit release procedure](trust-audit-release.md).
+
 ## Trust audit 0.1.0a1
 
 `trust-audit-v0.1.0a1` publishes `sanka/trust-audit` 0.1.0a1 as a standalone release

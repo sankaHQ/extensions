@@ -11,11 +11,13 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path, PurePosixPath
 
-from . import advisory, versions
+from . import versions
+from .advisory import DEFAULT, Advisory, AdvisorySet
 from .certs import Certificate, read_binary, read_pem
 
 SEVERITIES = ("critical", "high", "medium", "info")
@@ -139,14 +141,6 @@ JAVA_IMAGES = frozenset(
         "jetty",
     }
 )
-JAVA_ACTION = (
-    "OpenJDK blocks the 16 certificates in releases after 27.0.1, 25.0.5, 21.0.13, 17.0.21, "
-    "11.0.33 and 8u512 (CVE-2026-91403); upgrade when your vendor ships one. Until then, "
-    "replace $JDK_HOME/lib/security/blocked.certs with the file from "
-    f"{advisory.JAVA_ADVISORY_URL} (blacklisted.certs on JDK 8) or enable revocation checking "
-    "with -Dcom.sun.net.ssl.checkRevocation=true -Dcom.sun.security.enableCRLDP=true. "
-    "JDKs packaged by Debian, Ubuntu, Fedora or RHEL use the OS store: update ca-certificates."
-)
 
 # Patterns that switch TLS certificate verification off. The incident lets
 # anyone mint a certificate that chains to a compromised CA, and broken chains
@@ -246,9 +240,11 @@ class Finding:
     action: str
     evidence: str = ""
     edit: Edit | None = None
+    # The advisories that require the finding, named only when several are checked.
+    advisory: str | None = None
 
     def as_json(self) -> dict[str, object]:
-        return {
+        result: dict[str, object] = {
             "rule": self.rule,
             "severity": self.severity,
             "path": self.path,
@@ -258,6 +254,9 @@ class Finding:
             "evidence": self.evidence,
             "patched": self.edit is not None,
         }
+        if self.advisory is not None:
+            result["advisory"] = self.advisory
+        return result
 
 
 @dataclass
@@ -325,32 +324,30 @@ def _line_of(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
-def _compromised_needles() -> dict[str, str]:
-    """Normalized needle -> label. Hex is lowercase without separators."""
-    needles: dict[str, str] = {}
-    for b64, name in advisory.COMPROMISED_SPKI.items():
-        needles[b64] = f"SPKI pin for {name}"
-    for hex_digest, name in advisory.COMPROMISED_SPKI_HEX.items():
-        needles[hex_digest] = f"SPKI digest of {name}"
-    for cert in advisory.AFFECTED_CERTIFICATES:
-        needles[cert.sha256] = f"fingerprint of {cert.name} (issuer {cert.issuer})"
-    return needles
+def _labels(advisories: Iterable[Advisory]) -> str:
+    return " and ".join(dict.fromkeys(advisory.trust_label for advisory in advisories))
 
 
-_NEEDLES = _compromised_needles()
+def _webpki_flags(version: str, reexports: tuple[str, ...], safe: str) -> bool:
+    # Cargo can link several versions of one crate. A release that re-exports a
+    # fixed 1.x of itself is safe; any other is not.
+    if any(not versions.below(item, safe) for item in reexports):
+        return False
+    return versions.below(version, safe)
+
+
 # Candidate tokens: base64 SHA-256, bare hex SHA-256, colon-separated hex.
 _DIGEST_TOKEN = re.compile(
     r"[A-Za-z0-9+/]{43}="
     r"|(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:])"
     r"|(?<![0-9A-Fa-f])[0-9A-Fa-f]{64}(?![0-9A-Fa-f])"
 )
-_AFFECTED_SHA = {c.sha256: c for c in advisory.AFFECTED_CERTIFICATES}
-_AFFECTED_NAMES = frozenset(c.name for c in advisory.AFFECTED_CERTIFICATES)
 
 
 class _Scan:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, advisories: AdvisorySet) -> None:
         self.root = root
+        self.advisories = advisories
         self.report = Report()
         self.java_evidence: tuple[str, int | None, str] | None = None
         self.bun_evidence: tuple[str, int | None, str] | None = None
@@ -368,6 +365,14 @@ class _Scan:
         self._per_rule_file[key] = seen + 1
         self.report.findings.append(finding)
 
+    def named(self, advisories: Iterable[Advisory]) -> str | None:
+        return self.advisories.attribution(advisories)
+
+    def java_action(self, advisories: Iterable[Advisory]) -> str:
+        return " ".join(
+            dict.fromkeys(advisory.java.action for advisory in advisories if advisory.java)
+        )
+
     def run(self) -> Report:
         for rel, path in walk(self.root):
             self.report.files_scanned += 1
@@ -376,7 +381,8 @@ class _Scan:
             except (OSError, ValueError, IndexError, RecursionError):
                 # One unreadable or malformed file must not fail the whole scan.
                 continue
-        if self.java_evidence is not None:
+        java = versions.affects("java", self.advisories)
+        if self.java_evidence is not None and java:
             rel, line, evidence = self.java_evidence
             self.add(
                 Finding(
@@ -385,24 +391,30 @@ class _Scan:
                     rel,
                     line,
                     "Java runtimes before the OpenJDK fix accept the compromised CAs",
-                    JAVA_ACTION,
+                    self.java_action(java),
                     evidence,
+                    advisory=self.named(java),
                 )
             )
         if self.bun_evidence is not None:
             rel, line, evidence = self.bun_evidence
-            self.add(
-                Finding(
-                    "bun-pending",
-                    "medium",
-                    rel,
-                    line,
-                    "Bun has no fixed release yet",
-                    f"{advisory.PENDING['bun']} Watch for a Bun release that drops emSign ECC "
-                    "Root CA - G3; until then avoid Bun for clients on untrusted networks.",
-                    evidence,
+            for advisory in self.advisories.advisories:
+                if "bun" not in advisory.pending:
+                    continue
+                self.add(
+                    Finding(
+                        "bun-pending",
+                        "medium",
+                        rel,
+                        line,
+                        "Bun has no fixed release yet",
+                        f"{advisory.pending['bun']} Watch for a Bun release that drops "
+                        f"{advisory.trust_label}; until then avoid Bun for clients on untrusted "
+                        "networks.",
+                        evidence,
+                        advisory=self.named([advisory]),
+                    )
                 )
-            )
         self.report.findings.sort(
             key=lambda f: (SEVERITIES.index(f.severity), f.path, f.line or 0, f.rule)
         )
@@ -481,7 +493,7 @@ class _Scan:
                         None,
                         "Keystore could not be inspected",
                         "It may be encrypted. List it with keytool -list -v and look for "
-                        "emSign or eMudhra entries.",
+                        f"{self.advisories.keystore_hint()} entries.",
                     )
                 )
             return
@@ -489,7 +501,9 @@ class _Scan:
         # A chain for a certificate the compromised CA issued needs a new
         # certificate, not an edited chain file.
         issued = any(
-            c.issuer_cn in _AFFECTED_NAMES and c.sha256 not in _AFFECTED_SHA for c in certificates
+            c.issuer_cn in self.advisories.issuer_names
+            and c.sha256 not in self.advisories.certificates
+            for c in certificates
         )
         # PEM embedded in source code is reported, never cut out of the source.
         removable = editable and is_pem and len(certificates) > 1 and not issued
@@ -497,10 +511,19 @@ class _Scan:
             self.certificate(rel, certificate, lines, removable)
 
     def certificate(self, rel: str, cert: Certificate, lines: list[str], removable: bool) -> None:
+        known = self.advisories
         line = cert.lines[0] if cert.lines else None
         evidence = f"subject: {cert.subject_cn}; issuer: {cert.issuer_cn}"
-        if cert.sha256 in _AFFECTED_SHA or cert.spki_sha256 in advisory.COMPROMISED_SPKI_HEX:
-            name = advisory.COMPROMISED_SPKI_HEX.get(cert.spki_sha256, cert.subject_cn)
+        listed = known.certificates.get(cert.sha256)
+        key = known.spki.get(cert.spki_sha256)
+        issuer = known.issuer_names.get(cert.issuer_cn)
+        removed = known.removed_roots.get(cert.subject_cn) if cert.self_issued else None
+        parent = known.parents.get(cert.subject_cn)
+        planned = known.planned_removals.get(cert.subject_cn) if cert.self_issued else None
+        cross = known.cross_sign_roots.get(cert.subject_cn) if cert.self_issued else None
+        compromised = key or ((cert.subject_cn, listed[1]) if listed is not None else None)
+        if compromised is not None:
+            name, owner = compromised
             self.add(
                 Finding(
                     "compromised-ca-certificate",
@@ -512,9 +535,10 @@ class _Scan:
                     "replace its certificate with one from another CA now.",
                     evidence,
                     self._removal(rel, cert, lines) if removable else None,
+                    self.named([owner]),
                 )
             )
-        elif cert.issuer_cn in _AFFECTED_NAMES:
+        elif issuer is not None:
             self.add(
                 Finding(
                     "issued-by-compromised-ca",
@@ -525,9 +549,11 @@ class _Scan:
                     "Anyone can forge certificates from this CA. Replace this certificate "
                     "with one from another CA and revoke it.",
                     evidence,
+                    advisory=self.named([issuer]),
                 )
             )
-        elif cert.subject_cn in advisory.REMOVED_ROOTS and cert.self_issued:
+        elif removed is not None:
+            root, owner = removed
             self.add(
                 Finding(
                     "removed-root-in-bundle",
@@ -535,13 +561,14 @@ class _Scan:
                     rel,
                     line,
                     f"Bundle still trusts {cert.subject_cn}",
-                    "Mozilla and Chrome withdrew trust in this root. Remove it from the bundle "
+                    f"{root.withdrawn_by} withdrew trust in this root. Remove it from the bundle "
                     "or regenerate the bundle from a current certifi or ca-certificates release.",
                     evidence,
                     self._removal(rel, cert, lines) if removable else None,
+                    self.named([owner]),
                 )
             )
-        elif cert.subject_cn in advisory.AFFECTED_PARENTS:
+        elif parent is not None:
             self.add(
                 Finding(
                     "affected-parent-in-bundle",
@@ -552,48 +579,55 @@ class _Scan:
                     "Remove it from the bundle.",
                     evidence,
                     self._removal(rel, cert, lines) if removable else None,
+                    self.named([parent]),
                 )
             )
-        elif cert.subject_cn in advisory.NSS_REMOVED_ROOTS and cert.self_issued:
+        elif planned is not None:
+            removal, owner = planned
             self.add(
                 Finding(
                     "nss-removed-root-in-bundle",
                     "info",
                     rel,
                     line,
-                    f"Bundle carries {cert.subject_cn}, which NSS removed on 2026-10-20",
-                    "eMudhra asked for this removal as a planned transition (Bugzilla 2083709); "
-                    "it is not part of the key compromise. Drop it when you regenerate the bundle.",
+                    f"Bundle carries {cert.subject_cn}, which {removal.removed_by} removed on "
+                    f"{removal.removed_on}",
+                    f"{removal.note} Drop it when you regenerate the bundle.",
                     evidence,
+                    advisory=self.named([owner]),
                 )
             )
-        elif cert.subject_cn == advisory.CROSS_SIGN_ROOT and cert.self_issued:
+        elif cross is not None:
+            notice, owner = cross
             self.add(
                 Finding(
                     "cross-sign-root-in-bundle",
                     "medium",
                     rel,
                     line,
-                    "Bundle trusts AAA Certificate Services, root of Sectigo's cross-certificates",
-                    "Sectigo revoked the cross-certificates for the compromised keys on "
-                    "2026-10-19, but clients that skip revocation checks still accept them. "
-                    "Remove this root unless something you call still needs it.",
+                    notice.title,
+                    notice.action,
                     evidence,
+                    advisory=self.named([owner]),
                 )
             )
-        elif "eMudhra" in cert.issuer_o and not cert.self_issued:
-            self.add(
-                Finding(
-                    "emudhra-issued-certificate",
-                    "medium",
-                    rel,
-                    line,
-                    f"Certificate issued by eMudhra CA {cert.issuer_cn}",
-                    "Confirm it does not chain to emSign ECC Root CA - G3. If it does, "
-                    "browsers and updated clients will reject it: replace it.",
-                    evidence,
+        elif not cert.self_issued:
+            for rule, owner in known.issuer_rules:
+                if rule.organization not in cert.issuer_o:
+                    continue
+                self.add(
+                    Finding(
+                        rule.rule,
+                        "medium",
+                        rel,
+                        line,
+                        rule.title.replace("{issuer}", cert.issuer_cn),
+                        rule.action,
+                        evidence,
+                        advisory=self.named([owner]),
+                    )
                 )
-            )
+                break
 
     def _removal(self, rel: str, cert: Certificate, lines: list[str]) -> Edit | None:
         if cert.lines is None:
@@ -607,17 +641,27 @@ class _Scan:
 
     # -- Python ---------------------------------------------------------------
 
-    def _certifi(self, rel: str, number: int, line: str, version: str, edit: Edit | None) -> None:
+    def _certifi(
+        self,
+        rel: str,
+        number: int,
+        line: str,
+        version: str,
+        requirement: versions.Requirement,
+        edit: Edit | None,
+        action: str | None = None,
+    ) -> None:
         self.add(
             Finding(
                 "certifi-version",
                 "high",
                 rel,
                 number,
-                f"certifi {version} still trusts emSign ECC Root CA - G3",
-                f"Upgrade certifi to {advisory.CERTIFI_SAFE} or later.",
+                f"certifi {version} still trusts {_labels(requirement.advisories)}",
+                action or f"Upgrade certifi to {requirement.target} or later.",
                 _evidence(line),
                 edit,
+                self.named(requirement.advisories),
             )
         )
 
@@ -627,15 +671,23 @@ class _Scan:
         """Report a certifi constraint at line[start:]; patch it when it is an exact pin."""
         pin = _EXACT_PIN.fullmatch(spec)
         if pin is not None:
-            if versions.below(pin.group(1), advisory.CERTIFI_SAFE):
+            version = pin.group(1)
+            requirement = versions.library_requirement(
+                "certifi", partial(versions.below, version), self.advisories
+            )
+            if requirement.status == "vulnerable" and requirement.target:
                 edit = None
                 if patchable:
                     begin, end = start + pin.start(1), start + pin.end(1)
-                    new = line[:begin] + advisory.CERTIFI_SAFE + line[end:]
+                    new = line[:begin] + requirement.target + line[end:]
                     edit = Edit(rel, number, number, (new,))
-                self._certifi(rel, number, line, pin.group(1), edit)
-        elif versions.excludes(spec, advisory.CERTIFI_SAFE):
-            self._certifi(rel, number, line, spec, None)
+                self._certifi(rel, number, line, version, requirement, edit)
+            return
+        requirement = versions.library_requirement(
+            "certifi", partial(versions.excludes, spec), self.advisories
+        )
+        if requirement.status == "vulnerable":
+            self._certifi(rel, number, line, spec, requirement, None)
 
     def requirements(self, rel: str, text: str) -> None:
         # Changing a hash-locked pin would break --require-hashes installs.
@@ -665,22 +717,22 @@ class _Scan:
             for (crate, version, offset), end in zip(packages, starts[1:], strict=True):
                 if crate not in {"webpki-roots", "webpki-root-certs"}:
                     continue
-                # Cargo can link several versions of one crate. A release that
-                # re-exports a fixed 1.x of itself is safe; any other is not.
-                reexports = re.findall(rf'"{re.escape(crate)} ([^"\s]+)', text[offset:end])
-                if any(not versions.below(v, advisory.WEBPKI_SAFE) for v in reexports):
-                    continue
-                if versions.below(version, advisory.WEBPKI_SAFE):
+                reexports = tuple(re.findall(rf'"{re.escape(crate)} ([^"\s]+)', text[offset:end]))
+                requirement = versions.library_requirement(
+                    "webpki_roots", partial(_webpki_flags, version, reexports), self.advisories
+                )
+                if requirement.status == "vulnerable":
                     self.add(
                         Finding(
                             "webpki-roots-version",
                             "high",
                             rel,
                             _line_of(text, offset) + 2,
-                            f"{crate} {version} still trusts emSign ECC Root CA - G3",
-                            f"Run cargo update -p {crate} to reach {advisory.WEBPKI_SAFE} "
+                            f"{crate} {version} still trusts {_labels(requirement.advisories)}",
+                            f"Run cargo update -p {crate} to reach {requirement.target} "
                             "or later, then rebuild and redeploy.",
                             f'name = "{crate}" version = "{version}"',
+                            advisory=self.named(requirement.advisories),
                         )
                     )
             return
@@ -690,17 +742,20 @@ class _Scan:
             "pdm.lock": "pdm update certifi",
         }[name]
         for package, version, offset in packages:
-            if package == "certifi" and versions.below(version, advisory.CERTIFI_SAFE):
-                self.add(
-                    Finding(
-                        "certifi-version",
-                        "high",
-                        rel,
-                        _line_of(text, offset) + 2,
-                        f"certifi {version} still trusts emSign ECC Root CA - G3",
-                        f"Run {command} to reach {advisory.CERTIFI_SAFE} or later.",
-                        f'name = "certifi" version = "{version}"',
-                    )
+            if package != "certifi":
+                continue
+            requirement = versions.library_requirement(
+                "certifi", partial(versions.below, version), self.advisories
+            )
+            if requirement.status == "vulnerable":
+                self._certifi(
+                    rel,
+                    _line_of(text, offset) + 2,
+                    f'name = "certifi" version = "{version}"',
+                    version,
+                    requirement,
+                    None,
+                    f"Run {command} to reach {requirement.target} or later.",
                 )
 
     def pipfile_lock(self, rel: str, text: str) -> None:
@@ -708,19 +763,20 @@ class _Scan:
         for section in ("default", "develop"):
             entry = data.get(section, {}).get("certifi") if isinstance(data, dict) else None
             version = entry.get("version", "") if isinstance(entry, dict) else ""
-            if isinstance(version, str) and versions.below(
-                version.lstrip("="), advisory.CERTIFI_SAFE
-            ):
-                self.add(
-                    Finding(
-                        "certifi-version",
-                        "high",
-                        rel,
-                        _line_of(text, max(text.find('"certifi"'), 0)),
-                        f"certifi {version.lstrip('=')} still trusts emSign ECC Root CA - G3",
-                        f"Run pipenv update certifi to reach {advisory.CERTIFI_SAFE} or later.",
-                        f'"certifi": "{version}"',
-                    )
+            if not isinstance(version, str):
+                continue
+            requirement = versions.library_requirement(
+                "certifi", partial(versions.below, version.lstrip("=")), self.advisories
+            )
+            if requirement.status == "vulnerable":
+                self._certifi(
+                    rel,
+                    _line_of(text, max(text.find('"certifi"'), 0)),
+                    f'"certifi": "{version}"',
+                    version.lstrip("="),
+                    requirement,
+                    None,
+                    f"Run pipenv update certifi to reach {requirement.target} or later.",
                 )
 
     # -- PHP, Erlang ------------------------------------------------------------
@@ -734,23 +790,30 @@ class _Scan:
                 if not isinstance(package, dict) or package.get("name") != "composer/ca-bundle":
                     continue
                 version = str(package.get("version", ""))
-                if not versions.composer_ca_bundle_safe(version):
-                    self.add(
-                        Finding(
-                            "composer-ca-bundle-version",
-                            "high",
-                            rel,
-                            _line_of(text, max(text.find('"composer/ca-bundle"'), 0)),
-                            f"composer/ca-bundle {version} still trusts the compromised CAs",
-                            "Run composer update composer/ca-bundle to reach 1.6.0 "
-                            "(or 1.4.16 on the 1.4 line).",
-                            f'"composer/ca-bundle": "{version}"',
-                        )
+                requirement = versions.composer_requirement(version, self.advisories)
+                if requirement is None:
+                    continue
+                action, flagged = requirement
+                self.add(
+                    Finding(
+                        "composer-ca-bundle-version",
+                        "high",
+                        rel,
+                        _line_of(text, max(text.find('"composer/ca-bundle"'), 0)),
+                        f"composer/ca-bundle {version} still trusts the compromised CAs",
+                        action,
+                        f'"composer/ca-bundle": "{version}"',
+                        advisory=self.named(flagged),
                     )
+                )
 
     def erlang_lock(self, rel: str, text: str) -> None:
         match = re.search(r'"certifi":\s*\{:hex,\s*:certifi,\s*"([^"]+)"|<<"certifi">>', text)
-        if match:
+        if not match:
+            return
+        for advisory in self.advisories.advisories:
+            if "erlang-certifi" not in advisory.pending:
+                continue
             self.add(
                 Finding(
                     "erlang-certifi-pending",
@@ -758,9 +821,10 @@ class _Scan:
                     rel,
                     _line_of(text, match.start()),
                     "Erlang/Elixir certifi has no fixed release yet",
-                    f"{advisory.PENDING['erlang-certifi']} Point clients at the operating "
+                    f"{advisory.pending['erlang-certifi']} Point clients at the operating "
                     "system store or an updated bundle until it ships.",
                     _evidence(match.group(0)),
+                    advisory=self.named([advisory]),
                 )
             )
 
@@ -776,17 +840,17 @@ class _Scan:
         replace: tuple[int, int] | None,
     ) -> None:
         """Report a pinned Node.js or Go version; replace = span of version in line."""
-        verdict = versions.node_verdict(version) if kind == "node" else versions.go_verdict(version)
-        if verdict is None or verdict[0] == "fixed":
+        requirement = (
+            versions.node_requirement(version, self.advisories)
+            if kind == "node"
+            else versions.go_requirement(version, self.advisories)
+        )
+        if requirement is None or requirement.status == "fixed":
             return
         label = "Node.js" if kind == "node" else "Go"
-        status, target = verdict
-        if status == "unsupported":
-            supported = (
-                ", ".join(advisory.NODE_FIXED.values())
-                if kind == "node"
-                else ", ".join(advisory.GO_FIXED.values())
-            )
+        named = self.named(requirement.advisories)
+        if requirement.status == "unsupported":
+            supported = ", ".join(versions.fixed_releases(kind, self.advisories))
             self.add(
                 Finding(
                     f"{kind}-version",
@@ -796,9 +860,11 @@ class _Scan:
                     f"{label} {version} gets no fix",
                     f"Move to a maintained release with the fix ({supported} or later).",
                     _evidence(line),
+                    advisory=named,
                 )
             )
             return
+        target = requirement.target
         edit = None
         if replace is not None and target is not None:
             start, end = replace
@@ -814,6 +880,7 @@ class _Scan:
                 f"Upgrade to {label} {target} or later.{rebuild}",
                 _evidence(line),
                 edit,
+                named,
             )
         )
 
@@ -863,8 +930,9 @@ class _Scan:
             self._runtime("go", rel, number, lines[number - 1], match.group(2), match.span(2))
         elif directive is not None:
             number, version = directive
-            verdict = versions.go_verdict(version)
-            if verdict is not None and verdict[0] == "vulnerable" and verdict[1]:
+            requirement = versions.go_requirement(version, self.advisories)
+            if requirement is not None and requirement.status == "vulnerable":
+                target = requirement.target
                 self.add(
                     Finding(
                         "go-version",
@@ -872,14 +940,18 @@ class _Scan:
                         rel,
                         number,
                         f"go {version} lets GOTOOLCHAIN=auto select an affected toolchain",
-                        f"Require Go {verdict[1]} or later (adds a toolchain line), then "
+                        f"Require Go {target} or later (adds a toolchain line), then "
                         "rebuild and redeploy every binary.",
                         _evidence(lines[number - 1]),
-                        Edit(rel, number + 1, number, (f"toolchain go{verdict[1]}",)),
+                        Edit(rel, number + 1, number, (f"toolchain go{target}",)),
+                        self.named(requirement.advisories),
                     )
                 )
-            elif verdict is not None and verdict[0] == "unsupported":
+            elif requirement is not None and requirement.status == "unsupported":
                 self._runtime("go", rel, number, lines[number - 1], version, None)
+        go = versions.affects("go", self.advisories)
+        if not go:
+            return
         self.add(
             Finding(
                 "go-rebuild",
@@ -888,8 +960,11 @@ class _Scan:
                 directive[0] if directive else None,
                 "Go binaries built before the fix still trust the compromised CAs",
                 "Go copies crypto/x509 into every binary. Rebuild every service, CLI and "
-                "sidecar from this module with Go 1.26.10 / 1.27.3 or later and redeploy.",
+                "sidecar from this module with Go "
+                f"{' / '.join(versions.fixed_releases('go', self.advisories))} or later and "
+                "redeploy.",
                 _evidence(lines[directive[0] - 1]) if directive else "",
+                advisory=self.named(go),
             )
         )
 
@@ -907,7 +982,10 @@ class _Scan:
                 self.bun_evidence = (rel, number, _evidence(line))
             return
         if name in JAVA_IMAGES:
-            if versions.java_fixed(tag):
+            flagged = versions.java_requirement(tag, self.advisories)
+            if flagged is None:  # A floating tag: every Java advisory may apply.
+                flagged = versions.affects("java", self.advisories)
+            if not flagged:
                 return
             self.add(
                 Finding(
@@ -916,19 +994,23 @@ class _Scan:
                     rel,
                     number,
                     f"{name} image predates the OpenJDK fix for the compromised CAs",
-                    JAVA_ACTION,
+                    self.java_action(flagged),
                     _evidence(line),
+                    advisory=self.named(flagged),
                 )
             )
             return
         if name not in {"node", "golang"}:
             return
         kind = "node" if name == "node" else "go"
+        runtime = versions.affects(kind, self.advisories)
+        if not runtime:
+            return
         match = re.match(r"^(\d+\.\d+(?:\.\d+)?)", tag)
         if match is None or match.group(1).count(".") != 2:
             if match is not None and kind == "go":
-                verdict = versions.go_verdict(match.group(1))
-                if verdict is not None and verdict[0] == "unsupported":
+                requirement = versions.go_requirement(match.group(1), self.advisories)
+                if requirement is not None and requirement.status == "unsupported":
                     self._runtime(kind, rel, number, line, match.group(1), None)
                     return
             self.add(
@@ -940,6 +1022,7 @@ class _Scan:
                     f"Floating {name} tag: rebuild to pick up the fix",
                     f"Rebuild with --pull once fixed {name} images are published, then redeploy.",
                     _evidence(line),
+                    advisory=self.named(runtime),
                 )
             )
             return
@@ -950,6 +1033,7 @@ class _Scan:
         self._runtime(kind, rel, number, line, match.group(1), span)
 
     def dockerfile(self, rel: str, text: str) -> None:
+        images = versions.affects("images", self.advisories)
         pinned = False
         first: tuple[int, str] | None = None
         for number, line in enumerate(text.split("\n"), 1):
@@ -960,6 +1044,9 @@ class _Scan:
             self._image(rel, number, line, match.start(1), match.group(1))
             if "@sha256:" in match.group(1):
                 pinned = True
+                if not images:
+                    continue
+                newest = max(images, key=lambda advisory: advisory.images_fixed_after or "")
                 self.add(
                     Finding(
                         "base-image-digest",
@@ -967,12 +1054,14 @@ class _Scan:
                         rel,
                         number,
                         "Base image pinned by digest keeps its old ca-certificates",
-                        "Move the digest to an image published after 2026-10-20, or upgrade "
-                        "ca-certificates in a RUN step, then rebuild.",
+                        f"Move the digest to an image published after "
+                        f"{newest.images_fixed_after}, or upgrade ca-certificates in a RUN "
+                        "step, then rebuild.",
                         _evidence(line),
+                        advisory=self.named([newest]),
                     )
                 )
-        if first is not None and not pinned:
+        if first is not None and not pinned and images:
             self.add(
                 Finding(
                     "base-image-rebuild",
@@ -983,6 +1072,7 @@ class _Scan:
                     "Rebuild with --pull so the distribution's updated ca-certificates is "
                     "included (or upgrade it in a RUN step), then redeploy.",
                     _evidence(first[1]),
+                    advisory=self.named(images),
                 )
             )
 
@@ -1022,9 +1112,9 @@ class _Scan:
                         rel,
                         number,
                         "TLS certificate verification is switched off",
-                        "Remove the bypass. With these keys public, anyone on the network path "
-                        "can impersonate the server. Fix a failing chain by updating the trust "
-                        "store, not by disabling verification.",
+                        f"Remove the bypass. {self.advisories.verification_risk()} Fix a "
+                        "failing chain by updating the trust store, not by disabling "
+                        "verification.",
                         _evidence(line),
                     )
                 )
@@ -1039,8 +1129,8 @@ class _Scan:
                         number,
                         f"{', '.join(dict.fromkeys(names))} can point clients at a custom "
                         "trust store",
-                        "Make sure any bundle or keystore it names has dropped emSign ECC "
-                        "Root CA - G3 and the compromised intermediates.",
+                        "Make sure any bundle or keystore it names has dropped "
+                        f"{self.advisories.trust_labels()} and the compromised intermediates.",
                         _evidence(line),
                     )
                 )
@@ -1050,11 +1140,14 @@ class _Scan:
         seen: set[int] = set()
         for match in _DIGEST_TOKEN.finditer(text):
             token = match.group(0)
-            label = _NEEDLES.get(token) or _NEEDLES.get(token.replace(":", "").lower())
+            needle = self.advisories.needles.get(token) or self.advisories.needles.get(
+                token.replace(":", "").lower()
+            )
             number = _line_of(text, match.start())
-            if label is None or number in seen:
+            if needle is None or number in seen:
                 continue
             seen.add(number)
+            label, owner = needle
             self.add(
                 Finding(
                     "compromised-pin",
@@ -1064,9 +1157,10 @@ class _Scan:
                     f"Reference to the {label}",
                     "Remove the pin or fingerprint and pin to a certificate from another CA.",
                     _evidence(lines[number - 1]),
+                    advisory=self.named([owner]),
                 )
             )
 
 
-def scan(root: Path) -> Report:
-    return _Scan(root).run()
+def scan(root: Path, advisories: AdvisorySet = DEFAULT) -> Report:
+    return _Scan(root, advisories).run()
