@@ -112,7 +112,7 @@
   "wheels": [
     {
       "name": "sanka_extension_trust_audit-0.1.0a2-py3-none-any.whl",
-      "sha256": "74de8ce1e96734ebf568f968cb6ed3349b0de41c7bf4795715ae1df3bf91c614",
+      "sha256": "3da68b19d2ebfbb239f59cb4a596c81c53669423085f8625f3cd2d19bc6adbc6",
       "url": "https://github.com/sankaHQ/extensions/releases/download/trust-audit-v0.1.0a2/sanka_extension_trust_audit-0.1.0a2-py3-none-any.whl"
     },
     {

@@ -433,6 +433,7 @@ EXAMPLE = {
             "fixed": {"22": "22.30.0", "24": "24.30.1", "26": "26.20.0", "28": "28.5.0"},
         },
         "go": {"last_affected": "1.28", "fixed": {"1.27": "1.27.9", "1.28": "1.28.2"}},
+        "composer-ca-bundle": {"target": "1.6.0", "lines": {"1.4": "1.4.18"}},
     },
 }
 
@@ -481,6 +482,13 @@ def test_several_advisories_use_the_strictest_fix(tmp_path: Path) -> None:
         "plan_hash",
     }
     assert plan["advisory"]["id"] == "emudhra-2026-10+example-2027-01"  # type: ignore[index]
+    # Suggested upgrades must satisfy every advisory: eMudhra's Go 1.26.10 does not fix
+    # the 1.26 line the example leaves unsupported, and its Composer 1.4.16 is too old.
+    for release in versions.fixed_releases("go", both):
+        assert versions.go_verdict(release, both) == ("fixed", None)
+    composer = versions.composer_releases(both)
+    assert composer == ["1.6.0", "1.4.18"]
+    assert all(versions.composer_ca_bundle_safe(release, both) for release in composer)
     # With one advisory, findings keep the 0.1.0a1 shape.
     assert all("advisory" not in f.as_json() for f in scan(root).findings)
 

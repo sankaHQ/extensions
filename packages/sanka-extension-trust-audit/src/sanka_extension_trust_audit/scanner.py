@@ -850,7 +850,7 @@ class _Scan:
         label = "Node.js" if kind == "node" else "Go"
         named = self.named(requirement.advisories)
         if requirement.status == "unsupported":
-            supported = ", ".join(versions.fixed_releases(kind, self.advisories))
+            releases = versions.fixed_releases(kind, self.advisories)
             self.add(
                 Finding(
                     f"{kind}-version",
@@ -858,7 +858,9 @@ class _Scan:
                     rel,
                     number,
                     f"{label} {version} gets no fix",
-                    f"Move to a maintained release with the fix ({supported} or later).",
+                    f"Move to a maintained release with the fix ({', '.join(releases)} or later)."
+                    if releases
+                    else f"No {label} release fixes every advisory yet; move once one ships.",
                     _evidence(line),
                     advisory=named,
                 )
@@ -961,8 +963,8 @@ class _Scan:
                 "Go binaries built before the fix still trust the compromised CAs",
                 "Go copies crypto/x509 into every binary. Rebuild every service, CLI and "
                 "sidecar from this module with Go "
-                f"{' / '.join(versions.fixed_releases('go', self.advisories))} or later and "
-                "redeploy.",
+                f"{' / '.join(versions.fixed_releases('go', self.advisories)) or 'a fixed release'}"
+                " or later and redeploy.",
                 _evidence(lines[directive[0] - 1]) if directive else "",
                 advisory=self.named(go),
             )

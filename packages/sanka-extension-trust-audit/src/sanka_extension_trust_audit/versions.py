@@ -116,14 +116,24 @@ def go_verdict(value: str, advisories: AdvisorySet = DEFAULT) -> tuple[str, str 
 
 
 def fixed_releases(kind: str, advisories: AdvisorySet = DEFAULT) -> list[str]:
-    """The highest fixed release of each Node.js or Go line across the advisories."""
+    """Per Node.js or Go line, the lowest release every advisory accepts.
+
+    A line that one advisory fixes but a later one leaves unsupported has no such
+    release, so it is never suggested.
+    """
     best: dict[Any, str] = {}
     for advisory in advisories.advisories:
         fix = advisory.node if kind == "node" else advisory.go
         for line, version in (fix.fixed if fix is not None else {}).items():
             if line not in best or below(best[line], version):
                 best[line] = version
-    return [best[line] for line in sorted(best)]
+    check = node_requirement if kind == "node" else go_requirement
+    accepted = []
+    for line in sorted(best):
+        requirement = check(best[line], advisories)
+        if requirement is not None and requirement.status == "fixed":
+            accepted.append(best[line])
+    return accepted
 
 
 def affects(kind: str, advisories: AdvisorySet = DEFAULT) -> tuple[Advisory, ...]:
@@ -173,6 +183,32 @@ def library_requirement(
     return _combine(verdicts)
 
 
+def _composer_safe(fix: ComposerFix, line: tuple[int, int]) -> str:
+    return fix.lines.get(line, fix.target)
+
+
+def composer_releases(advisories: AdvisorySet = DEFAULT) -> list[str]:
+    """composer/ca-bundle releases every advisory accepts, newest line first.
+
+    The first is the upgrade target; the others are backports on older lines. A line
+    is offered only when every advisory has a fix on it.
+    """
+    fixes = [a.composer_ca_bundle for a in advisories.advisories if a.composer_ca_bundle]
+    lines = {line for fix in fixes for line in fix.lines}
+    lines |= {_line_of(fix.target) for fix in fixes}
+    releases = []
+    for line in sorted(lines, reverse=True):
+        needed = max((_composer_safe(fix, line) for fix in fixes), key=_order)
+        if _line_of(needed) == line:
+            releases.append(needed)
+    return releases
+
+
+def _line_of(version: str) -> tuple[int, int]:
+    major, minor = (parse(version) or (0, 0))[:2]
+    return major, minor
+
+
 def composer_requirement(
     value: str, advisories: AdvisorySet = DEFAULT
 ) -> tuple[str, tuple[Advisory, ...]] | None:
@@ -180,19 +216,20 @@ def composer_requirement(
     current = parse(value)
     if current is None or len(current) < 2:
         return None
-    flagged: list[tuple[ComposerFix, Advisory]] = []
-    for advisory in advisories.advisories:
-        fix = advisory.composer_ca_bundle
-        if fix is not None and below(value, fix.lines.get((current[0], current[1]), fix.target)):
-            flagged.append((fix, advisory))
+    flagged = tuple(
+        advisory
+        for advisory in advisories.advisories
+        if advisory.composer_ca_bundle is not None
+        and below(value, _composer_safe(advisory.composer_ca_bundle, (current[0], current[1])))
+    )
     if not flagged:
         return None
-    strictest, _ = max(flagged, key=lambda item: _order(item[0].target))
+    target, *backports = composer_releases(advisories)
     lines = ", ".join(
-        f"or {fixed} on the {line[0]}.{line[1]} line" for line, fixed in strictest.lines.items()
+        f"or {fixed} on the {_line_of(fixed)[0]}.{_line_of(fixed)[1]} line" for fixed in backports
     )
-    action = f"Run composer update composer/ca-bundle to reach {strictest.target}"
-    return action + (f" ({lines})" if lines else "") + ".", tuple(a for _, a in flagged)
+    action = f"Run composer update composer/ca-bundle to reach {target}"
+    return action + (f" ({lines})" if lines else "") + ".", flagged
 
 
 def composer_ca_bundle_safe(value: str, advisories: AdvisorySet = DEFAULT) -> bool:
