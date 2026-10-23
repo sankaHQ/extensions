@@ -85,6 +85,8 @@ def qualify_access(access: dict[str, Any], resource: dict[str, Any]) -> None:
         ):
             raise ValueError("unsupported access permission")
         _membership_relation(permission["relation"])
+        if permission["parent_param"] and permission["relation"].get("foreign_key"):
+            raise ValueError("unsupported URL-parent membership traversal")
     creator = access.get("creator_membership")
     if creator:
         _membership_relation(creator)
@@ -255,10 +257,12 @@ def permission_error(
         return None
     if permission.get("kind") != "membership" or permission.get("superuser") is not True:
         raise ValueError("unsupported access permission")
-    if user is not None and bool(_user_value(user, auth, "superuser")):
-        return None
     relation = permission["relation"]
     parent_param = permission.get("parent_param")
+    if parent_param and relation.get("foreign_key"):
+        raise ValueError("unsupported URL-parent membership traversal")
+    if user is not None and bool(_user_value(user, auth, "superuser")):
+        return None
     if parent_param:
         parent_table = _table(tables, relation["db_table"])
         column = parent_table.c[relation["pk"]]

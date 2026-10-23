@@ -596,6 +596,7 @@ func drfRequest(ctx context.Context,pool *pgxpool.Pool,method,path string,raw []
     selectedMethod:=false
     for _,allowed:=range strings.Split(methods,", ") { if allowed==method { selectedMethod=true } }
     AUTHORIZATION_CHECK
+    for _,claim:=range view.Scope { if view.Authentication=="" || principal[claim]=="" { return 403,map[string]string{"detail":"permission denied"} } }
     if !selectedMethod { return 405,map[string]string{"detail":fmt.Sprintf(`Method "%s" not allowed.`,method)} }
     actualMethod:=method;if method=="HEAD" { actualMethod="GET" }
     allowed:=method=="OPTIONS" || action!="" && actualMethod=="GET" || action=="" && (actualMethod=="GET" || !view.ReadOnly && (actualMethod=="POST" && !detail || detail && (actualMethod=="PUT" || actualMethod=="PATCH" || actualMethod=="DELETE")))

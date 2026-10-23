@@ -6,10 +6,11 @@ from __future__ import annotations
 import importlib
 import re
 from typing import Any
+from urllib.parse import quote
 
 from flask import Flask, Response, g, request
 from werkzeug.exceptions import RequestEntityTooLarge, SecurityError
-from werkzeug.wsgi import get_host
+from werkzeug.wsgi import get_host, get_path_info
 
 
 def install_middleware(app: Flask, contract: dict[str, Any], patterns: Any) -> None:
@@ -38,7 +39,10 @@ def install_middleware(app: Flask, contract: dict[str, Any], patterns: Any) -> N
         return Response("", 301, {"Location": location}, content_type="text/html; charset=utf-8")
 
     def full_path(slash: bool = False) -> str:
-        path = request.path + ("/" if slash else "")
+        path = quote(
+            (get_path_info(request.environ) or "/") + ("/" if slash else ""),
+            safe="/:@&+$,-_.!~*'()",
+        )
         path = path.replace("//", "/%2F", 1) if path.startswith("//") else path
         return path + ("?" + request.query_string.decode("latin1") if request.query_string else "")
 

@@ -942,6 +942,7 @@ def _field_payload(field: SerializerFieldIR) -> dict[str, Any]:
         "timezone": field.timezone,
         "required": field.required,
         "read_only": field.read_only,
+        "write_only": field.write_only,
         "allow_null": field.allow_null,
         "allow_blank": field.allow_blank,
         "trim_whitespace": field.trim_whitespace,

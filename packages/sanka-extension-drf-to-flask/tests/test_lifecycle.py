@@ -163,11 +163,20 @@ def test_non_equivalent_url_matchers_remain_manual_gaps(tmp_path: Path) -> None:
     with (tmp_path / "urls.py").open("a") as handle:
         handle.write("\nfrom django.urls import re_path\n")
         handle.write(
+            "from functools import wraps\n"
+            "original = Quote.as_view()\n"
+            "@wraps(original)\n"
+            "def guarded(*args, **kwargs): raise PermissionError('URL guard')\n"
+            "urlpatterns += [path('guarded/<int:quantity>/', guarded)]\n"
+        )
+        handle.write(
             'urlpatterns += [re_path(r"^regex/(?P<quantity>[0-9]+)/$", Quote.as_view()), '
             'path("uuid/<uuid:quantity>/", Quote.as_view()), '
             'path("path/<path:quantity>/", Quote.as_view())]\n'
         )
     scan = call(tmp_path, "scan")["data"]
+    guarded = [route for route in scan["routes"] if route["source_path"].startswith("guarded/")]
+    assert guarded and all(route["classification"] == "needs_adaptation" for route in guarded)
     routes = [
         route
         for route in scan["routes"]

@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from flask import Blueprint, Flask, Response, request
 from werkzeug.routing import BaseConverter
 
-from .native_runtime import _ValidationError
+from .native_runtime import _ValidationError, request_encoding
 
 
 class _AllPaths(BaseConverter):
@@ -559,7 +559,11 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
 
                             data = (
                                 json.loads(
-                                    raw.decode(request.mimetype_params.get("charset", "utf-8")),
+                                    raw.decode(
+                                        request_encoding(
+                                            request.mimetype_params.get("charset", "utf-8")
+                                        )
+                                    ),
                                     parse_constant=reject_constant,
                                 )
                                 if raw

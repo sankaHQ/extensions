@@ -575,6 +575,8 @@ def summary(self, request):
                     raise ValueError("summary action contains uncaptured behavior")
                 actions = [{"name": "summary", "kind": "count"}]
             scope = _view_scope(methods, model_map[contract["model"]], contract, read_only)
+            if scope and not (auth_module and protected):
+                raise ValueError("claim-scoped views require verified authentication")
             if scope and "queryset" in attrs:
                 raise ValueError("claim-scoped queryset must not have a static queryset")
             from .drf_nested import prefetch_queryset
