@@ -15,7 +15,8 @@ from sanka_extensions.code import (
     success_response,
 )
 
-from . import EXTENSION_ID, TARGET, VERSION, advisory
+from . import EXTENSION_ID, TARGET, VERSION
+from .advisory import DEFAULT
 from .patches import DEFAULT_OUTPUT, build_plan, safe_output, write_patch_directory
 from .scanner import Report, scan
 
@@ -39,7 +40,7 @@ def _write(artifacts: Path, name: str, value: object) -> str:
 
 def _summary(report: Report) -> dict[str, JsonValue]:
     return {
-        "advisory": advisory.ADVISORY_ID,
+        "advisory": DEFAULT.id,
         "files_scanned": report.files_scanned,
         "counts": _json(report.counts()),
         "findings": _json([f.as_json() for f in report.findings[:MAX_DATA_FINDINGS]]),

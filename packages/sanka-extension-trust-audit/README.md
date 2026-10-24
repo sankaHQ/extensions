@@ -40,3 +40,14 @@ sanka apply --plan-hash sha256:...
 The scan reads files only. It does not inspect deployed binaries, images that
 were already built, host trust stores, appliances, or dependencies resolved at
 install time. Rebuild and redeploy after applying the patches.
+
+## Advisories
+
+Each incident the audit checks is one JSON file under
+`src/sanka_extension_trust_audit/advisories/`: the certificates and keys to
+distrust, the roots that root programs withdrew, and the first fixed release of
+each runtime or library that ships its own root store. Every file is validated
+when the extension starts. A scan covers every packaged advisory at once; when
+several apply, version checks use the highest fixed release and each finding
+names the advisories that require it. To add one, follow
+[the advisory procedure](../../docs/trust-audit-advisories.md).

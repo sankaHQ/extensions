@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,10 @@ from scripts.build_release import PINNED_LOCAL_WHEELS, download_locked_wheel  # 
 from scripts.check_release_artifacts import _entry_points, _wheel_metadata  # noqa: E402
 
 PACKAGE = "sanka-extension-trust-audit"
-VERSION = "0.1.0a1"
+# A release uses the package version; manifest() rejects a template that disagrees.
+VERSION: str = tomllib.loads((ROOT / "packages" / PACKAGE / "pyproject.toml").read_text())[
+    "project"
+]["version"]
 TAG = f"trust-audit-v{VERSION}"
 PREFIX = f"https://github.com/sankaHQ/extensions/releases/download/{TAG}/"
 WHEEL = f"sanka_extension_trust_audit-{VERSION}-py3-none-any.whl"
@@ -50,6 +54,8 @@ def manifest(root: Path = ROOT) -> dict[str, Any]:
     template = json.loads((root / "packages" / PACKAGE / "extension.template.json").read_text())
     if result | {"wheels": []} != template:
         raise ValueError("Trust audit manifest differs from the reviewed extension contract")
+    if {result.get("version"), result.get("distribution", {}).get("version")} != {VERSION}:
+        raise ValueError(f"Trust audit manifest and template must declare version {VERSION}")
     expected = [WHEEL, *(wheel.name for wheel in SDK_WHEELS)]
     entries = result.get("wheels")
     if not isinstance(entries, list) or [item.get("name") for item in entries] != expected:

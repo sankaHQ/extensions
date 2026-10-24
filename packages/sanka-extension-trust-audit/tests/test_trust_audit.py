@@ -16,7 +16,9 @@ import pytest
 
 from sanka_extension_trust_audit import EXTENSION_ID, VERSION, advisory, versions
 from sanka_extension_trust_audit.adapter import handle
+from sanka_extension_trust_audit.advisory import AdvisoryError, AdvisorySet, load_advisories
 from sanka_extension_trust_audit.certs import read_binary, read_pem
+from sanka_extension_trust_audit.patches import build_plan
 from sanka_extension_trust_audit.scanner import scan
 from sanka_extensions.code import ExtensionRequest, decode_response, encode_request
 
@@ -382,3 +384,132 @@ def test_subprocess_protocol(project: Path) -> None:
         check=False,
     )
     assert malformed.returncode == 2 and malformed.stdout == ""
+
+
+PACKAGED = Path(advisory.__file__).parent / "advisories"
+
+
+@pytest.mark.parametrize("item", advisory.DEFAULT.advisories, ids=lambda item: item.id)
+def test_packaged_advisories_match_their_certificates(
+    tmp_path: Path, item: advisory.Advisory
+) -> None:
+    # Catches a mistyped fingerprint, key digest or name: the scan would then miss the
+    # real certificate. Fixtures are the certificates as crt.sh serves them.
+    pems = sorted((FIXTURES / "advisories" / item.id).glob("*.pem"))
+    fixtures = [cert for pem in pems for cert in read_pem(pem.read_bytes())]
+    listed = {cert.sha256 for cert in item.certificates}
+    assert {(c.name, c.issuer, c.sha256, c.spki_sha256) for c in item.certificates} == {
+        (f.subject_cn, f.issuer_cn, f.sha256, f.spki_sha256) for f in fixtures if f.sha256 in listed
+    }
+    roots = {f.subject_cn for f in fixtures if f.self_issued and f.sha256 not in listed}
+    assert {root.subject for root in item.removed_roots} <= roots
+    pins = {c.spki_sha256_b64 for c in item.certificates} | {
+        c.spki_sha256 for c in item.certificates
+    }
+    # One file each: the scan reports at most 20 findings per rule and file.
+    write(tmp_path, {f"certs/{pem.name}": pem.read_text() for pem in pems})
+    write(tmp_path, {f"pins/{index}.yaml": f"pin: {pin}\n" for index, pin in enumerate(pins)})
+    found = Counter(f.rule for f in scan(tmp_path).findings)
+    assert found["compromised-ca-certificate"] == len(item.certificates)
+    assert found["removed-root-in-bundle"] == len(item.removed_roots)
+    assert found["compromised-pin"] == len(pins)
+
+
+EXAMPLE = {
+    "schema_version": "sanka-trust-advisory/v1",
+    "id": "example-2027-01",
+    "title": "Example root distrust",
+    "url": "https://example.com/incident",
+    "published": "2027-01-15",
+    "sources": [{"title": "Incident report", "url": "https://example.com/incident"}],
+    "trust_label": "Example Root CA",
+    "ca_names": ["Example"],
+    "verification_risk": "Anyone holding the leaked keys can impersonate a server.",
+    "certificates": [],
+    "fixes": {
+        "certifi": "2027.1.5",
+        "node": {
+            "last_affected_major": 28,
+            "fixed": {"22": "22.30.0", "24": "24.30.1", "26": "26.20.0", "28": "28.5.0"},
+        },
+        "go": {"last_affected": "1.28", "fixed": {"1.27": "1.27.9", "1.28": "1.28.2"}},
+        "composer-ca-bundle": {"target": "1.6.0", "lines": {"1.4": "1.4.18"}},
+    },
+}
+
+
+def test_several_advisories_use_the_strictest_fix(tmp_path: Path) -> None:
+    # Catches a second advisory being ignored, a weaker fix winning, conflicting edits,
+    # findings that do not name their advisory, or a plan Sanka Cloud would reject.
+    folder = tmp_path / "advisories"
+    folder.mkdir()
+    shutil.copy(PACKAGED / "emudhra-2026-10.json", folder)
+    (folder / "example-2027-01.json").write_text(json.dumps(EXAMPLE))
+    both = AdvisorySet(load_advisories(folder))
+    root = tmp_path / "source"
+    write(
+        root,
+        {
+            "requirements.txt": "certifi==2024.2.2\n",
+            "uv.lock": '[[package]]\nname = "certifi"\nversion = "2026.10.19"\n',
+            ".nvmrc": "v22.20.0\n",
+            "go.mod": "module example.com/app\n\ngo 1.27.0\ntoolchain go1.27.3\n",
+            "Dockerfile": "FROM node:28.1.0-slim\n",
+        },
+    )
+    report = scan(root, both)
+    named = {(f.rule, f.path): f.advisory for f in report.findings}
+    assert named[("certifi-version", "requirements.txt")] == "emudhra-2026-10+example-2027-01"
+    assert named[("certifi-version", "uv.lock")] == "example-2027-01"
+    assert named[("node-version", ".nvmrc")] == "emudhra-2026-10+example-2027-01"
+    assert named[("node-version", "Dockerfile")] == "example-2027-01"
+    plan, patches = build_plan(root, report, both)
+    patched = {patch.path: patch.patched.decode() for patch in patches}
+    assert patched["requirements.txt"] == "certifi==2027.1.5\n"
+    assert patched[".nvmrc"] == "v22.30.0\n"
+    assert patched["Dockerfile"] == "FROM node:28.5.0-slim\n"
+    assert "toolchain go1.27.9\n" in patched["go.mod"]
+    # Sanka Cloud accepts exactly these plan keys and reads advisory.id.
+    assert set(plan) == {
+        "schema_version",
+        "extension",
+        "advisory",
+        "counts",
+        "findings",
+        "patches",
+        "manual_findings",
+        "truncated",
+        "plan_hash",
+    }
+    assert plan["advisory"]["id"] == "emudhra-2026-10+example-2027-01"  # type: ignore[index]
+    # Suggested upgrades must satisfy every advisory: eMudhra's Go 1.26.10 does not fix
+    # the 1.26 line the example leaves unsupported, and its Composer 1.4.16 is too old.
+    for release in versions.fixed_releases("go", both):
+        assert versions.go_verdict(release, both) == ("fixed", None)
+    composer = versions.composer_releases(both)
+    assert composer == ["1.6.0", "1.4.18"]
+    assert all(versions.composer_ca_bundle_safe(release, both) for release in composer)
+    # With one advisory, findings keep the 0.1.0a1 shape.
+    assert all("advisory" not in f.as_json() for f in scan(root).findings)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {
+            "certificates": [
+                {"name": "CA", "issuer": "Root", "sha256": "AB" * 32, "spki_sha256": "ab" * 32}
+            ]
+        },
+        {"fixes": {"node": {"last_affected_major": 26, "fixed": {"22": "24.1.0"}}}},
+        {"fixes": {"certifi": "latest"}},
+        {"sources": []},
+        {"unreviewed": True},
+        {"id": "another-2027-01"},
+    ],
+)
+def test_invalid_advisories_are_rejected(tmp_path: Path, change: dict[str, object]) -> None:
+    # Catches a malformed advisory loading anyway and silently weakening the scan.
+    (tmp_path / "example-2027-01.json").write_text(json.dumps(EXAMPLE | change))
+    with pytest.raises(AdvisoryError):
+        load_advisories(tmp_path)

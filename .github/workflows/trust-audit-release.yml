@@ -25,7 +25,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = trust-audit-v0.1.0a1
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("packages/sanka-extension-trust-audit/pyproject.toml", "rb"))["project"]["version"])')
+          test "$GITHUB_REF_NAME" = "trust-audit-v$version"
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
@@ -64,7 +65,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" release/trust-audit/* release/trust-audit-acceptance.json \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "Trust audit 0.1.0a1" \
-            --notes "Sanka Code extension that finds where a repository still trusts the eMudhra CAs whose keys were compromised (Mozilla Bugzilla 2083449) and writes fixes into a new patch directory without modifying existing files. Static read of repository files only; rebuild and redeploy after applying the patches. Public CLI 0.3.11 lifecycle acceptance passed."
+            --title "Trust audit ${GITHUB_REF_NAME#trust-audit-v}" \
+            --notes "Sanka Code extension that finds where a repository still trusts certificate authorities that its packaged advisories distrust (see docs/trust-audit-advisories.md) and writes fixes into a new patch directory without modifying existing files. Static read of repository files only; rebuild and redeploy after applying the patches. Public CLI 0.3.11 lifecycle acceptance passed."
         env:
           GH_TOKEN: ${{ github.token }}

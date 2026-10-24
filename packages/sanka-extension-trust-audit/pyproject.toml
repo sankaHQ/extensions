@@ -1,6 +1,6 @@
 [project]
 name = "sanka-extension-trust-audit"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Find and patch repository trust in the compromised eMudhra certificate authorities"
 readme = "README.md"
 requires-python = ">=3.12"
