@@ -6,8 +6,9 @@ migration path (for example Django REST Framework to FastAPI). Apache-2.0,
 Python 3.12+.
 
 Extensions add capabilities to Sanka (data migrations), Sanka Flow (workflow
-migrations) and Sanka Code (code migrations); data endpoints are the configured
-sources and destinations those capabilities read from and write to.
+migrations) and Sanka Cloud (cloud migration and operations, including code
+modernization); data endpoints are the configured sources and destinations
+those capabilities read from and write to.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Catalog](https://img.shields.io/badge/catalog-docs%2Fcatalog.md-ff5a1f)](docs/catalog.md)

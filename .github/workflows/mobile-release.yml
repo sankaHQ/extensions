@@ -108,6 +108,6 @@ jobs:
           gh release create "$GITHUB_REF_NAME" release-assets/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
             --title "React Native converter 0.1.0a1" \
-            --notes "Experimental Sanka Code converter. Published CLI 0.2.12 qualification covers the bounded React Navigation task-list example: SwiftUI scan, plan, reviewed apply, test, verify, source preservation, macOS package build and structural tree parity; Compose scan and plan only. Includes exact wheel manifests and acceptance receipts. No pixel, layout, simulator or device execution claim and no arbitrary-application or production-cutover claim. Go/Rust and Jev are not published by this release."
+            --notes "Experimental Sanka Cloud code converter. Published CLI 0.2.12 qualification covers the bounded React Navigation task-list example: SwiftUI scan, plan, reviewed apply, test, verify, source preservation, macOS package build and structural tree parity; Compose scan and plan only. Includes exact wheel manifests and acceptance receipts. No pixel, layout, simulator or device execution claim and no arbitrary-application or production-cutover claim. Go/Rust and Jev are not published by this release."
         env:
           GH_TOKEN: ${{ github.token }}

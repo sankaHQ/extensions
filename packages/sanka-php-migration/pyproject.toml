@@ -1,7 +1,7 @@
 [project]
 name = "sanka-php-migration"
 version = "0.1.0a1"
-description = "Static PHP API capture and native target generation for Sanka Code"
+description = "Static PHP API capture and native target generation for Sanka Cloud"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
