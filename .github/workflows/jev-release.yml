@@ -72,6 +72,6 @@ jobs:
           gh release create "$GITHUB_REF_NAME" release/jev/* release/jev-acceptance.json \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
             --title "Jev classifier converter 0.1.0a1" \
-            --notes "Offline Sanka Code converter for the bounded Python OpenAI enum-classifier pattern. Public CLI 0.2.12; full isolated lifecycle and source-preservation checks passed with mocked inference. No live quality, latency or savings claim. Application owners must review decisions and labels and evaluate their own workload."
+            --notes "Offline Sanka Cloud code converter for the bounded Python OpenAI enum-classifier pattern. Public CLI 0.2.12; full isolated lifecycle and source-preservation checks passed with mocked inference. No live quality, latency or savings claim. Application owners must review decisions and labels and evaluate their own workload."
         env:
           GH_TOKEN: ${{ github.token }}

@@ -2,7 +2,7 @@
 
 Products describe what moves: data, workflows or code. Extensions are capability packages; data sources and destinations are configured endpoints such as databases, files and SaaS accounts. Installation does not establish authentication or reachability. "System" is no longer the product category or a canonical SDK namespace.
 
-The shared `sanka` executable supports Sanka (data migrations), Sanka Flow (workflow migrations), and Sanka Code (code migrations). Technology names do not determine product ownership: moving PostgreSQL records is data migration; adapting application SQL/ORM is code migration.
+The shared `sanka` executable supports Sanka (data migrations), Sanka Flow (workflow migrations), and Sanka Cloud (cloud migration and operations, including code modernization). Technology names do not determine product ownership: moving PostgreSQL records is data migration; adapting application SQL/ORM is code migration.
 
 ## Canonical developer interface
 

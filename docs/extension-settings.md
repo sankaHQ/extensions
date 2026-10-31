@@ -2,7 +2,7 @@
 
 A code extension can ship `sanka-extension-settings.json` inside its Python package.
 It declares settings before a stage runs. The CLI uses their defaults and input
-hints; the optional TUI and Sanka Code render forms from the same declaration. The file lives in the
+hints; the optional TUI and Sanka Cloud render forms from the same declaration. The file lives in the
 wheel rather than in `extension.json` because installed CLIs accept only the exact
 manifest keys of `sanka-extension-manifest/v2`; package data reaches them without a
 manifest change. A consumer that finds no file keeps its built-in form.
@@ -33,7 +33,7 @@ An updated CLI also accepts a nonempty list of scalar alternatives, such as
 `"when": {"database_layer": ["pgx", "sqlite"]}`. Consumers must use membership
 for these lists; nested objects/arrays are invalid. CLI 0.3.9 supports these lists.
 
-The file declares what the extension accepts, not hosting policy. Sanka Code decides
+The file declares what the extension accepts, not hosting policy. Sanka Cloud decides
 separately which settings are editable, fixed or hidden in the cloud.
 `tests/test_extension_settings.py` validates every shipped file.
 
