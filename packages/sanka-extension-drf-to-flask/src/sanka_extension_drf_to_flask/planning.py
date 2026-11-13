@@ -34,8 +34,8 @@ DEPENDENCIES = {
     "itsdangerous": "2.2.0",
     "jinja2": "3.1.6",
     "markupsafe": "3.0.3",
-    "werkzeug": "3.1.8",
-    "mako": "1.4.1",
+    "werkzeug": "3.1.9",
+    "mako": "1.4.3",
     "typing-extensions": "4.16.0",
     "greenlet": "3.5.5",
 }
